@@ -6,7 +6,7 @@
 # No queue yet — that is Phase 4. This runs exactly one story, passed as an
 # argument, and exits.
 #
-#   ./fleet/launch.sh 002
+#   BASE_BRANCH=feat/pwa ./fleet/launch.sh 002
 #
 # Reads   .stories/<id>.md
 # Writes  .review/<id>.md          verdict + reviewer output
@@ -40,10 +40,29 @@ ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 # relying on it noticing is prevention by discipline. Do it deterministically.
 INSTALL_CMD="npm ci"
 
+# Untracked local config that a fresh worktree does not inherit.
+# Story 002 finding: without .env.local the app builds and every test passes,
+# but it connects to projects/undefined and cannot reach Firestore. Nothing in
+# the suite catches this — it was found by human visual check. Any untracked
+# file the app needs at RUNTIME belongs in this list.
+SEED_FILES=(.env.local)
+
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
 log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
 warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
 die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
+
+seed_env() {
+  local target="$1"
+  local f
+  for f in "${SEED_FILES[@]}"; do
+    if [[ -f "$REPO_ROOT/$f" ]]; then
+      cp "$REPO_ROOT/$f" "$target/$f"
+    else
+      warn "$f not found in repo root — worktree will run without it"
+    fi
+  done
+}
 
 # ── preflight ────────────────────────────────────────────────────────────────
 
@@ -71,6 +90,8 @@ git -C "$REPO_ROOT" worktree add "$BUILDER_WT" -b "$BRANCH" "origin/$BASE_BRANCH
 
 BASE_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
 log "base: ${BASE_SHA:0:8}"
+
+seed_env "$BUILDER_WT"
 
 log "installing deps"
 ( cd "$BUILDER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed — builder may have to handle it"
@@ -136,6 +157,8 @@ log "reviewer worktree at ${HEAD_SHA:0:8}"
 git -C "$REPO_ROOT" worktree add --detach "$REVIEWER_WT" "$HEAD_SHA" >/dev/null \
   || die "reviewer worktree failed"
 
+seed_env "$REVIEWER_WT"
+
 ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
 
 REVIEW_PROMPT="You are reviewing a change against its specification.
@@ -166,7 +189,11 @@ VERDICT: FAIL"
 
 log "reviewer: codex"
 
-REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox workspace-write "$REVIEW_PROMPT" 2>&1)"
+# --sandbox danger-full-access: bwrap cannot create network namespaces on this
+# host (RTM_NEWADDR: Operation not permitted), so Codex's own sandbox fails to
+# start before it can read anything. Isolation here comes from the detached
+# worktree and the unprivileged fleet user with no sudo — not from bwrap.
+REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2>&1)"
 
 # codex emits JSON Lines, not one object (claude emits one object).
 REVIEW_TEXT="$(echo "$REVIEW_RAW" \
