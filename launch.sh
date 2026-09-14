@@ -14,16 +14,23 @@
 #   round: 0
 #   ---
 #
-#   ready        → waiting in the queue
-#   in_progress  → a launcher is working on it right now
-#   blocked      → the agent asked a question; see .blocked/<id>.md
-#   review_failed→ reviewer said FAIL; see .review/<id>.md
-#   done         → reviewer said PASS; branch waiting for your merge
+#   ready         → waiting in the queue
+#   in_progress   → a launcher is working on it right now
+#   blocked       → the agent asked a question; see .blocked/<id>.md
+#   review_failed → reviewer said FAIL; see .review/<id>.md
+#   done          → reviewer said PASS; branch waiting for your merge
 #
 # Status changes are committed and pushed so the queue is visible from a phone.
 # .runs/<id>.json is machine-local (gitignored) and holds only the PID.
 #
 # A blocked or failed story does NOT stop the queue — it stops itself.
+#
+# KNOWN GAPS (Phase 4b):
+#   - orphan detection checks the LAUNCHER's pid. Killing the launcher does not
+#     kill claude or its children, so work can continue in a worktree the
+#     launcher believes is free. Detection should test the worktree, not a pid.
+#   - no round ceiling: FAIL is recorded but round 2 is never run.
+#   - the .blocked/ path has never been exercised.
 #
 set -uo pipefail
 
@@ -78,12 +85,21 @@ set_story_field() {                   # set_story_field <id> <key> <value>
 }
 
 # Status transitions are commits. Without the push there is no phone view.
+#
+# git add fails ENTIRELY if any one pathspec is missing — it stages nothing and
+# exits 128. Adding all three paths at once silently dropped every status commit
+# whenever .blocked/<id>.md did not exist, which is almost always. Add each path
+# separately, only if it exists.
 commit_status() {                     # commit_status <id> <status>
-  local id="$1" st="$2"
-  git -C "$REPO_ROOT" add ".stories/$id.md" ".review/$id.md" ".blocked/$id.md" 2>/dev/null
+  local id="$1" st="$2" p
+  for p in ".stories/$id.md" ".review/$id.md" ".blocked/$id.md"; do
+    [[ -f "$REPO_ROOT/$p" ]] && git -C "$REPO_ROOT" add "$p"
+  done
   git -C "$REPO_ROOT" diff --cached --quiet && return 0
   git -C "$REPO_ROOT" commit -q -m "story($id): $st" || warn "status commit failed"
-  [[ "$PUSH_STATUS" == "1" ]] && { git -C "$REPO_ROOT" push -q 2>/dev/null || warn "status push failed — queue not visible remotely"; }
+  if [[ "$PUSH_STATUS" == "1" ]]; then
+    git -C "$REPO_ROOT" push -q 2>/dev/null || warn "status push failed — queue not visible remotely"
+  fi
   return 0
 }
 
@@ -99,8 +115,7 @@ set_status() {                        # set_status <id> <status>
 # alone — it holds committed work, and the next run continues from it. That is
 # the recovery path proved in Phase 2: story file + git log, no session state.
 #
-# Caveat: PID liveness can false-positive after PID reuse. Acceptable at one
-# lane; revisit if it ever bites.
+# UNSOUND, see KNOWN GAPS: a dead launcher pid does not mean work stopped.
 
 reap_orphans() {
   local f id pid
@@ -133,8 +148,11 @@ next_ready() {
 seed_env() {
   local target="$1" f
   for f in "${SEED_FILES[@]}"; do
-    [[ -f "$REPO_ROOT/$f" ]] && cp "$REPO_ROOT/$f" "$target/$f" \
-      || warn "$f missing — worktree runs without it"
+    if [[ -f "$REPO_ROOT/$f" ]]; then
+      cp "$REPO_ROOT/$f" "$target/$f"
+    else
+      warn "$f missing — worktree runs without it"
+    fi
   done
 }
 
@@ -212,6 +230,13 @@ BUILD_OUT="$(cd "$BUILDER_WT" && claude -p "$BUILD_PROMPT" \
 BUILD_ERR="$(echo "$BUILD_OUT" | jq -r '.is_error // "parse-failed"' 2>/dev/null)"
 BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
 
+# Without this, a crashed claude (non-JSON output) is reported downstream as
+# "builder produced no commits", hiding the real cause.
+if [[ "$BUILD_ERR" == "parse-failed" ]]; then
+  warn "builder output was not JSON — first 20 lines of raw output:"
+  echo "$BUILD_OUT" | head -20
+fi
+
 # ── postcondition, not self-report ───────────────────────────────────────────
 # Phase 2: is_error was false while the agent did nothing at all.
 
@@ -272,7 +297,8 @@ VERDICT: FAIL"
 log "reviewer: codex"
 REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2>&1)"
 
-# codex emits JSON Lines; claude emits one object.
+# codex emits JSON Lines; claude emits one object. Falls back to raw output if
+# the filter matches nothing — that fallback has already earned its keep once.
 REVIEW_TEXT="$(echo "$REVIEW_RAW" | jq -r 'select(.type=="item.completed") | .item.text // empty' 2>/dev/null)"
 [[ -n "$REVIEW_TEXT" ]] || REVIEW_TEXT="$REVIEW_RAW"
 
@@ -280,8 +306,9 @@ if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT=
 elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
 else VERDICT="UNPARSEABLE"; fi
 
-ROUND="$(( $(story_field "$STORY_ID" round 2>/dev/null || echo 0) + 1 ))"
-[[ "$ROUND" =~ ^[0-9]+$ ]] || ROUND=1
+PREV_ROUND="$(story_field "$STORY_ID" round)"
+[[ "$PREV_ROUND" =~ ^[0-9]+$ ]] || PREV_ROUND=0
+ROUND=$(( PREV_ROUND + 1 ))
 set_story_field "$STORY_ID" round "$ROUND"
 
 cat > "$REVIEW_FILE" <<EOF
