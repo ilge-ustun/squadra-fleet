@@ -2,12 +2,12 @@
 #
 # fleet/launch.sh [story-id]
 #
-# Phase 4a: queue + status + orphan recovery.
+# Phase 4b: queue, orphan recovery, and a review round ceiling.
 #
 #   ./fleet/launch.sh          take the next ready story
-#   ./fleet/launch.sh 003      run one specific story
+#   ./fleet/launch.sh 004      run one specific story
 #
-# STATE lives in git, not here. Each story file carries frontmatter:
+# STATE lives in git. Each story file carries frontmatter:
 #
 #   ---
 #   status: ready
@@ -17,20 +17,15 @@
 #   ready         → waiting in the queue
 #   in_progress   → a launcher is working on it right now
 #   blocked       → the agent asked a question; see .blocked/<id>.md
-#   review_failed → reviewer said FAIL; see .review/<id>.md
+#   needs_human   → MAX_ROUNDS reviews failed; see .review/<id>.md
 #   done          → reviewer said PASS; branch waiting for your merge
 #
+# ROUNDS: on FAIL the builder is re-run with the reviewer's findings in its
+# prompt, then reviewed again. After MAX_ROUNDS failures the story stops at
+# needs_human. A stopped story does NOT stop the queue.
+#
 # Status changes are committed and pushed so the queue is visible from a phone.
-# .runs/<id>.json is machine-local (gitignored) and holds only the PID.
-#
-# A blocked or failed story does NOT stop the queue — it stops itself.
-#
-# KNOWN GAPS (Phase 4b):
-#   - orphan detection checks the LAUNCHER's pid. Killing the launcher does not
-#     kill claude or its children, so work can continue in a worktree the
-#     launcher believes is free. Detection should test the worktree, not a pid.
-#   - no round ceiling: FAIL is recorded but round 2 is never run.
-#   - the .blocked/ path has never been exercised.
+# .runs/<id>.json is machine-local (gitignored).
 #
 set -uo pipefail
 
@@ -40,6 +35,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 BASE_BRANCH="${BASE_BRANCH:-feat/pwa}"
 BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
+MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 INSTALL_CMD="npm ci"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
@@ -84,12 +80,9 @@ set_story_field() {                   # set_story_field <id> <key> <value>
   fi
 }
 
-# Status transitions are commits. Without the push there is no phone view.
-#
 # git add fails ENTIRELY if any one pathspec is missing — it stages nothing and
-# exits 128. Adding all three paths at once silently dropped every status commit
-# whenever .blocked/<id>.md did not exist, which is almost always. Add each path
-# separately, only if it exists.
+# exits 128. Adding all three at once silently dropped every status commit
+# whenever .blocked/<id>.md did not exist. Add each path separately.
 commit_status() {                     # commit_status <id> <status>
   local id="$1" st="$2" p
   for p in ".stories/$id.md" ".review/$id.md" ".blocked/$id.md"; do
@@ -108,25 +101,17 @@ set_status() {                        # set_status <id> <status>
   commit_status "$1" "$2"
 }
 
-# ── orphan recovery ──────────────────────────────────────────────────────────
+# ── worktree occupancy ───────────────────────────────────────────────────────
 #
-# A story left in_progress with no live launcher is an orphan: the process was
-# killed, or the machine was rebuilt. Reset it to ready. The worktree is left
-# alone — it holds committed work, and the next run continues from it. That is
-# the recovery path proved in Phase 2: story file + git log, no session state.
-#
-# UNSOUND, see KNOWN GAPS: a dead launcher pid does not mean work stopped.
+# Found by cwd, not command line. pgrep -f does not work: the builder is started
+# with `cd $WT && claude ...`, so the path never appears in any child's argv —
+# only in its cwd. Verified: pgrep found nothing, /proc scan found the process.
+# Killing the launcher leaves claude and its children alive, so a dead launcher
+# pid is not evidence that work stopped.
 
-
-
-
-# Anything running inside a worktree, found by cwd rather than command line.
-# pgrep -f does not work here: the builder is started with `cd $WT && claude ...`,
-# so the path never appears in any child's argv — only in its cwd. Verified
-# empirically: pgrep found nothing, /proc scan found the process.
 procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
   local wt p cwd
-  wt="$(readlink -f "$1")" || return 0
+  wt="$(readlink -f "$1" 2>/dev/null)" || return 0
   [[ -n "$wt" ]] || return 0
   for p in /proc/[0-9]*; do
     cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
@@ -189,9 +174,10 @@ STORY_FILE="$REPO_ROOT/.stories/$STORY_ID.md"
 CURRENT="$(story_field "$STORY_ID" status)"
 [[ -z "$CURRENT" ]] && { set_story_field "$STORY_ID" status ready; CURRENT=ready; }
 case "$CURRENT" in
-  ready)        : ;;
-  in_progress)  die "$STORY_ID is in_progress (reap_orphans should have caught this)" ;;
-  *)            die "$STORY_ID has status '$CURRENT' — set it back to ready to rerun" ;;
+  ready)       : ;;
+  in_progress) die "$STORY_ID is in_progress (reap_orphans should have caught this)" ;;
+  needs_human) die "$STORY_ID needs a human — read .review/$STORY_ID.md, then set status to ready" ;;
+  *)           die "$STORY_ID has status '$CURRENT' — set it back to ready to rerun" ;;
 esac
 
 BUILDER_WT="$REPO_ROOT/../wt-$STORY_ID"
@@ -206,8 +192,6 @@ trap cleanup_reviewer EXIT
 log "story $STORY_ID"
 set_status "$STORY_ID" in_progress
 printf '{"story":"%s","pid":%d,"started":"%s"}\n' "$STORY_ID" $$ "$(date -Iseconds)" > "$RUN_FILE"
-
-# ── worktree: create, or resume an existing one ──────────────────────────────
 
 git -C "$REPO_ROOT" fetch origin --quiet
 
@@ -227,68 +211,103 @@ fi
 BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$BASE_BRANCH")"
 log "base ${BASE_SHA:0:8}"
 
-# ── builder ──────────────────────────────────────────────────────────────────
-
-BUILD_PROMPT="Read .stories/$STORY_ID.md and implement it.
-Check git log first — if some tasks are already committed, continue from the
-first unfinished one. Do not redo committed work.
-
-Rules that override anything you infer:
+RULES="Rules that override anything you infer:
 - TDD is mandatory. Write the failing test, run it, SEE IT FAIL, then implement.
   A test never observed red is not a test.
+- An instrument must assert what the acceptance criterion claims. If deleting the
+  behaviour under test leaves the suite green, the instrument is absent.
 - One task, one commit.
 - Do not run deploy commands, firebase commands, or anything that writes to Firestore.
 - If a decision is needed that the story does not answer, write .blocked/$STORY_ID.md
-  with the question and the options, and stop. Do not guess.
-  Format: what must be decided, each option with its cost, your recommendation.
+  with the question, each option and its cost, and your recommendation. Then stop.
+  Do not guess.
 - Stay in scope. Mention unrelated problems at the end; do not fix them."
 
-log "builder: $BUILDER_MODEL"
-BUILD_OUT="$(cd "$BUILDER_WT" && claude -p "$BUILD_PROMPT" \
-  --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
-  --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
-BUILD_ERR="$(echo "$BUILD_OUT" | jq -r '.is_error // "parse-failed"' 2>/dev/null)"
-BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
+# ── review rounds ────────────────────────────────────────────────────────────
 
-# Without this, a crashed claude (non-JSON output) is reported downstream as
-# "builder produced no commits", hiding the real cause.
-if [[ "$BUILD_ERR" == "parse-failed" ]]; then
-  warn "builder output was not JSON — first 20 lines of raw output:"
-  echo "$BUILD_OUT" | head -20
-fi
+: > "$REVIEW_FILE.new"
+VERDICT=""
+ROUND=0
 
-# ── postcondition, not self-report ───────────────────────────────────────────
-# Phase 2: is_error was false while the agent did nothing at all.
+while (( ROUND < MAX_ROUNDS )); do
+  ROUND=$(( ROUND + 1 ))
+  set_story_field "$STORY_ID" round "$ROUND"
+  log "round $ROUND of $MAX_ROUNDS"
 
-if [[ -f "$BUILDER_WT/.blocked/$STORY_ID.md" ]]; then
-  cp "$BUILDER_WT/.blocked/$STORY_ID.md" "$REPO_ROOT/.blocked/$STORY_ID.md"
-  warn "BLOCKED — agent asked a question:"
-  cat "$REPO_ROOT/.blocked/$STORY_ID.md"
-  set_status "$STORY_ID" blocked
-  echo
-  echo "answer by editing .stories/$STORY_ID.md, then set status back to ready"
-  exit 0
-fi
+  ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
 
-HEAD_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
-NEW_COMMITS="$(git -C "$BUILDER_WT" rev-list --count "$BASE_SHA..$HEAD_SHA")"
-if [[ "$NEW_COMMITS" -eq 0 ]]; then
-  set_status "$STORY_ID" review_failed
-  die "builder produced no commits (is_error=$BUILD_ERR). Said: $BUILD_MSG"
-fi
-log "builder: $NEW_COMMITS commit(s), head ${HEAD_SHA:0:8}"
+  if (( ROUND == 1 )); then
+    BUILD_PROMPT="Read .stories/$STORY_ID.md and implement it.
+Check git log first — if some tasks are already committed, continue from the
+first unfinished one. Do not redo committed work.
 
-# ── reviewer: clean worktree at the builder's head ───────────────────────────
+$RULES"
+  else
+    BUILD_PROMPT="Read .stories/$STORY_ID.md. Your previous attempt was reviewed
+and REJECTED. The findings are below. Address every one of them.
 
-log "reviewer worktree at ${HEAD_SHA:0:8}"
-git -C "$REPO_ROOT" worktree add --detach "$REVIEWER_WT" "$HEAD_SHA" >/dev/null || die "reviewer worktree failed"
-seed_env "$REVIEWER_WT"
-( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
+Do not argue with a finding in the code — if you believe a finding is wrong,
+write .blocked/$STORY_ID.md explaining why and stop.
 
-REVIEW_PROMPT="You are reviewing a change against its specification.
+=== REVIEW FINDINGS ===
+$REVIEW_TEXT
+=== END FINDINGS ===
+
+$RULES"
+  fi
+
+  log "builder: $BUILDER_MODEL"
+  BUILD_OUT="$(cd "$BUILDER_WT" && claude -p "$BUILD_PROMPT" \
+    --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
+    --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
+
+  # jq's // is the ALTERNATIVE operator: it fires on null AND on false, so
+  # `.is_error // "parse-failed"` rewrote every SUCCESSFUL run as parse-failed.
+  # has() tests for the key, not its truthiness.
+  BUILD_ERR="$(echo "$BUILD_OUT" | jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end' 2>/dev/null)"
+  BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
+
+  if [[ "$BUILD_ERR" == "parse-failed" ]]; then
+    warn "builder output was not JSON — first 20 lines of raw output:"
+    echo "$BUILD_OUT" | head -20
+  fi
+
+  if [[ -f "$BUILDER_WT/.blocked/$STORY_ID.md" ]]; then
+    cp "$BUILDER_WT/.blocked/$STORY_ID.md" "$REPO_ROOT/.blocked/$STORY_ID.md"
+    warn "BLOCKED — agent asked a question:"
+    cat "$REPO_ROOT/.blocked/$STORY_ID.md"
+    set_status "$STORY_ID" blocked
+    rm -f "$REVIEW_FILE.new"
+    echo
+    echo "answer by editing .stories/$STORY_ID.md, then set status back to ready"
+    exit 0
+  fi
+
+  HEAD_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
+  ROUND_COMMITS="$(git -C "$BUILDER_WT" rev-list --count "$ROUND_START_SHA..$HEAD_SHA")"
+  TOTAL_COMMITS="$(git -C "$BUILDER_WT" rev-list --count "$BASE_SHA..$HEAD_SHA")"
+
+  # Postcondition, not self-report. Phase 2: is_error was false while the agent
+  # did nothing at all.
+  if (( ROUND_COMMITS == 0 )); then
+    set_status "$STORY_ID" needs_human
+    die "round $ROUND produced no commits (is_error=$BUILD_ERR). Said: $BUILD_MSG"
+  fi
+  log "builder: $ROUND_COMMITS commit(s) this round, $TOTAL_COMMITS total, head ${HEAD_SHA:0:8}"
+
+  # ── reviewer: clean worktree at the builder's head ─────────────────────────
+
+  cleanup_reviewer
+  log "reviewer worktree at ${HEAD_SHA:0:8}"
+  git -C "$REPO_ROOT" worktree add --detach "$REVIEWER_WT" "$HEAD_SHA" >/dev/null || die "reviewer worktree failed"
+  seed_env "$REVIEWER_WT"
+  ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
+
+  REVIEW_PROMPT="You are reviewing a change against its specification.
 
 The specification is in .stories/$STORY_ID.md — read it first.
 You are in a clean checkout at commit $HEAD_SHA. The base was $BASE_SHA.
+This is review round $ROUND.
 
 Do NOT review by reading the diff. Derive your evidence independently:
 read the current state of the files, run the tests, run the build.
@@ -298,10 +317,12 @@ a finding.
 
 Check specifically:
 1. Does each acceptance criterion hold? Name the instrument that proves it.
-2. Can that instrument go red? Prove it by mutation where you can. A check that
-   passes regardless of what shipped is absent, not weak — say so.
+2. Can that instrument go red, AND does it assert what the criterion claims?
+   Prove it by mutation. Try deleting the behaviour under test outright — if
+   the suite stays green, the instrument is absent, not weak. Say so.
 3. Is anything here outside the story's scope?
-4. Does anything the story did not mention regress?
+4. Does anything the story did not mention regress? Construct the race or edge
+   case if you can.
 
 Run: npm test, npm run build, npm run lint.
 
@@ -310,54 +331,72 @@ VERDICT: PASS
 or
 VERDICT: FAIL"
 
-# --sandbox danger-full-access: bwrap cannot create network namespaces on this
-# host (RTM_NEWADDR: Operation not permitted), so Codex's own sandbox fails to
-# start before it reads anything. Isolation comes from the detached worktree and
-# the unprivileged fleet user with no sudo — not from bwrap.
-log "reviewer: codex"
-REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2>&1)"
+  # --sandbox danger-full-access: bwrap cannot create network namespaces on this
+  # host (RTM_NEWADDR: Operation not permitted), so Codex's own sandbox fails to
+  # start before it reads anything. Isolation comes from the detached worktree
+  # and the unprivileged fleet user with no sudo — not from bwrap.
+  log "reviewer: codex"
+  REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2>&1)"
 
-# codex emits JSON Lines; claude emits one object. Falls back to raw output if
-# the filter matches nothing — that fallback has already earned its keep once.
-REVIEW_TEXT="$(echo "$REVIEW_RAW" | jq -r 'select(.type=="item.completed") | .item.text // empty' 2>/dev/null)"
-[[ -n "$REVIEW_TEXT" ]] || REVIEW_TEXT="$REVIEW_RAW"
+  # codex emits JSON Lines; claude emits one object. Falls back to raw output if
+  # the filter matches nothing — that fallback has already earned its keep once.
+  REVIEW_TEXT="$(echo "$REVIEW_RAW" | jq -r 'select(.type=="item.completed") | .item.text // empty' 2>/dev/null)"
+  [[ -n "$REVIEW_TEXT" ]] || REVIEW_TEXT="$REVIEW_RAW"
 
-if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
-elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
-else VERDICT="UNPARSEABLE"; fi
+  if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
+  elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
+  else VERDICT="UNPARSEABLE"; fi
 
-PREV_ROUND="$(story_field "$STORY_ID" round)"
-[[ "$PREV_ROUND" =~ ^[0-9]+$ ]] || PREV_ROUND=0
-ROUND=$(( PREV_ROUND + 1 ))
-set_story_field "$STORY_ID" round "$ROUND"
+  cat >> "$REVIEW_FILE.new" <<EOF
 
-cat > "$REVIEW_FILE" <<EOF
-# Review: $STORY_ID
+## Round $ROUND — $VERDICT
 
-verdict: $VERDICT
-round: $ROUND
-base: $BASE_SHA
 head: $HEAD_SHA
-commits: $NEW_COMMITS
+commits this round: $ROUND_COMMITS
 reviewed: $(date -Iseconds)
 
-## Builder said
+### Builder said
 
 $BUILD_MSG
 
-## Reviewer
+### Reviewer
 
 $REVIEW_TEXT
 EOF
 
-case "$VERDICT" in
-  PASS) set_status "$STORY_ID" done;          log  "VERDICT: PASS  → $REVIEW_FILE" ;;
-  *)    set_status "$STORY_ID" review_failed; warn "VERDICT: $VERDICT  → $REVIEW_FILE" ;;
-esac
+  if [[ "$VERDICT" == "PASS" ]]; then
+    log "round $ROUND: PASS"
+    break
+  fi
 
-jq -n --arg s "$STORY_ID" --arg v "$VERDICT" --arg h "$HEAD_SHA" \
-  '{story:$s,verdict:$v,head_sha:$h}' > "$RUN_FILE"
+  warn "round $ROUND: $VERDICT"
+  (( ROUND < MAX_ROUNDS )) && log "re-running builder with the findings"
+done
+
+# ── outcome ──────────────────────────────────────────────────────────────────
+
+{
+  echo "# Review: $STORY_ID"
+  echo
+  echo "verdict: $VERDICT"
+  echo "rounds: $ROUND of $MAX_ROUNDS"
+  echo "base: $BASE_SHA"
+  cat "$REVIEW_FILE.new"
+} > "$REVIEW_FILE"
+rm -f "$REVIEW_FILE.new"
+
+if [[ "$VERDICT" == "PASS" ]]; then
+  set_status "$STORY_ID" done
+  log "VERDICT: PASS after $ROUND round(s) → $REVIEW_FILE"
+else
+  set_status "$STORY_ID" needs_human
+  warn "ceiling reached: $MAX_ROUNDS rounds, last verdict $VERDICT → $REVIEW_FILE"
+  warn "this story is stopped. The queue is not."
+fi
+
+jq -n --arg s "$STORY_ID" --arg v "$VERDICT" --arg r "$ROUND" \
+  '{story:$s,verdict:$v,rounds:($r|tonumber)}' > "$RUN_FILE"
 
 echo
 echo "branch $BRANCH, worktree $BUILDER_WT"
-echo "merge it, then: git worktree remove $BUILDER_WT"
+echo "when finished: git worktree remove $BUILDER_WT"
