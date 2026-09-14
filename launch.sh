@@ -117,19 +117,39 @@ set_status() {                        # set_status <id> <status>
 #
 # UNSOUND, see KNOWN GAPS: a dead launcher pid does not mean work stopped.
 
+
+
+
+# Anything running inside a worktree, found by cwd rather than command line.
+# pgrep -f does not work here: the builder is started with `cd $WT && claude ...`,
+# so the path never appears in any child's argv — only in its cwd. Verified
+# empirically: pgrep found nothing, /proc scan found the process.
+procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
+  local wt p cwd
+  wt="$(readlink -f "$1")" || return 0
+  [[ -n "$wt" ]] || return 0
+  for p in /proc/[0-9]*; do
+    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
+    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && basename "$p"
+  done
+}
+
 reap_orphans() {
-  local f id pid
+  local f id wt pids
   for f in "$REPO_ROOT"/.stories/*.md; do
     [[ -e "$f" ]] || continue
     id="$(basename "$f" .md)"
     [[ "$(story_field "$id" status)" == "in_progress" ]] || continue
 
-    pid="$(jq -r '.pid // empty' "$REPO_ROOT/.runs/$id.json" 2>/dev/null)"
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      die "story $id is in_progress under live pid $pid — another launcher is running"
+    wt="$REPO_ROOT/../wt-$id"
+    if [[ -d "$wt" ]]; then
+      pids="$(procs_in_worktree "$wt" | tr '\n' ' ')"
+      if [[ -n "${pids// /}" ]]; then
+        die "story $id: still running in $wt (pids: $pids) — not an orphan"
+      fi
     fi
 
-    warn "orphan: $id was in_progress, no live process — returning to queue"
+    warn "orphan: $id was in_progress, nothing running in its worktree — returning to queue"
     set_status "$id" ready
   done
 }
