@@ -184,6 +184,14 @@ BUILDER_WT="$REPO_ROOT/../wt-$STORY_ID"
 REVIEWER_WT="$REPO_ROOT/../wt-$STORY_ID-review"
 BRANCH="story/$STORY_ID"
 REVIEW_FILE="$REPO_ROOT/.review/$STORY_ID.md"
+# Findings live in .review/<id>.md, not only in this process. Without this a
+# restart after FAIL loses them: the builder re-reads the story, sees its own
+# commits, and concludes the work is done. Observed twice on story 004.
+REVIEW_TEXT=""
+if [[ -f "$REVIEW_FILE" ]] && grep -qE '^verdict: (FAIL|UNPARSEABLE)' "$REVIEW_FILE"; then
+  REVIEW_TEXT="$(cat "$REVIEW_FILE")"
+  warn "prior failing review found — builder starts from the findings"
+fi
 RUN_FILE="$REPO_ROOT/.runs/$STORY_ID.json"
 
 cleanup_reviewer() { [[ -d "$REVIEWER_WT" ]] && git -C "$REPO_ROOT" worktree remove "$REVIEWER_WT" --force 2>/dev/null; }
@@ -236,7 +244,7 @@ while (( ROUND < MAX_ROUNDS )); do
 
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
 
-  if (( ROUND == 1 )); then
+  if (( ROUND == 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
     BUILD_PROMPT="Read .stories/$STORY_ID.md and implement it.
 Check git log first — if some tasks are already committed, continue from the
 first unfinished one. Do not redo committed work.
