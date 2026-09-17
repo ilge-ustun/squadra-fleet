@@ -114,10 +114,12 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
   LOG="$FX/launch.log"
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" FAKE_VITEST=pass BUILD_CMD=true LINT_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
       bash fleet/launch.sh "$id" ) > "$LOG" 2>&1
   RC=$?
 }
+tracked() { git -C "$REPO" ls-tree -r HEAD --name-only; }
 
 field() {                             # field <key> → frontmatter value of the fixture story
   awk -v k="$1" '
@@ -144,6 +146,9 @@ case_1_happy() {
   assert_not_grep '^npm ' "$TRACE/calls" "INSTALL_CMD seam — npm must not be reached"
   assert_eq "$(calls claude)" 1 "builder called once"
   assert_eq "$(calls codex)"  1 "reviewer called once"
+  # Phase 1.2: the harness ran the baseline itself and committed the evidence.
+  assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN' "$REPO/.review/$STORY.md" "machine block records a green baseline"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/baseline/test.summary.json" "baseline evidence committed"
 }
 
 # Red when the no-commits postcondition (set_status needs_human; die) is deleted.
@@ -293,11 +298,37 @@ EOF
   assert_eq "$(calls codex)"  0 "reviewer must not run"
 }
 
+# Phase 1.2. The harness runs test/build/lint in the reviewer tree before
+# the reviewer is asked anything; a red baseline is a machine veto — FAIL
+# whatever the reviewer's VERDICT line says. Red when the veto block after
+# the VERDICT parse is deleted (the model's PASS then stands).
+baseline_case() {                     # baseline_case <name> <label> <expect-in-machine-block> [VAR=value …]
+  local name="$1" label="$2" expect="$3"; shift 3
+  CASE="$label"; fixture "$name"
+  # MAX_ROUNDS=1: a vetoed round is a FAIL and would otherwise (correctly)
+  # trigger round 2; one round keeps the case about the veto itself.
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 "$@"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_eq "$(review_line 3)" "verdict: FAIL" ".review line 3 — machine veto over model PASS"
+  assert_grep "$expect" "$REPO/.review/$STORY.md" "machine block names the red baseline"
+  assert_grep 'model: *PASS' "$REPO/.review/$STORY.md" "model verdict still recorded"
+  assert_eq "$(calls codex)" 1 "reviewer still ran (its prose is evidence)"
+}
+case_12_baseline_test_red()  { baseline_case c12 "12 baseline test RED vetoes PASS"  'baseline: test RED'  FAKE_VITEST=fail
+                               assert_grep '"numFailedTests": *1' "$REPO/.review/$STORY/round-1/baseline/test.summary.json" "summary carries the count"; }
+case_13_baseline_build_red() { baseline_case c13 "13 baseline build RED vetoes PASS" 'build RED'           BUILD_CMD=false
+                               assert_file "$REPO/.review/$STORY/round-1/baseline/build.log" "build log kept"; }
+case_14_baseline_lint_red()  { baseline_case c14 "14 baseline lint RED vetoes PASS"  'lint RED'            LINT_CMD=false; }
+# L-08: a suite that collects zero tests is not green.
+case_15_baseline_notests()   { baseline_case c15 "15 baseline with zero tests is RED" 'baseline: test RED' FAKE_VITEST=notests; }
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable case_7_status_commits_land
-       case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs)
+       case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs
+       case_12_baseline_test_red case_13_baseline_build_red case_14_baseline_lint_red
+       case_15_baseline_notests)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

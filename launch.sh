@@ -42,6 +42,9 @@ MAX_TURNS="${MAX_TURNS:-60}"
 MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 INSTALL_CMD="${INSTALL_CMD:-npm ci}"   # overridable so fleet/test-lib.sh can skip the install
+VITEST_CMD="${VITEST_CMD:-npx vitest run}"   # baseline + mutation runner; test-lib points it at a fake
+BUILD_CMD="${BUILD_CMD:-npm run build}"
+LINT_CMD="${LINT_CMD:-npm run lint}"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
 PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
@@ -96,12 +99,53 @@ commit_status() {                     # commit_status <id> <status>
   for p in ".stories/$id.md" ".review/$id.md" ".blocked/$id.md"; do
     [[ -f "$REPO_ROOT/$p" ]] && git -C "$REPO_ROOT" add "$p"
   done
+  # Evidence directory: baseline results now, mutations later. A directory,
+  # so guarded separately from the files above (same L-02 reasoning).
+  [[ -d "$REPO_ROOT/.review/$id" ]] && git -C "$REPO_ROOT" add ".review/$id"
   git -C "$REPO_ROOT" diff --cached --quiet && return 0
   git -C "$REPO_ROOT" commit -q -m "story($id): $st" || warn "status commit failed"
   if [[ "$PUSH_STATUS" == "1" ]]; then
     git -C "$REPO_ROOT" push -q 2>/dev/null || warn "status push failed — queue not visible remotely"
   fi
   return 0
+}
+
+# ── baseline ─────────────────────────────────────────────────────────────────
+#
+# The harness runs the suite, the build and the lint itself, in the clean
+# reviewer tree, before the reviewer is asked anything. Results are files
+# under .review/<id>/round-N/baseline/, committed with the status: evidence
+# a verdict can cite that is still there tomorrow. A red baseline is a
+# machine veto — the verdict is FAIL whatever the reviewer says.
+#
+# vitest's JSON reporter (shape read from a real run, 17 Sep): a transform
+# error reports numTotalTests=0 with success=false, visually identical to a
+# caught bug in the terminal (L-08). Green therefore requires tests to have
+# actually run: numTotalTests > 0 AND numFailedTests == 0.
+
+run_baseline() {                      # run_baseline <worktree> <evidence-dir> → BASE_TEST BASE_BUILD BASE_LINT
+  local wt="$1" ev="$2/baseline" raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-baseline.json"
+  mkdir -p "$ev"
+  rm -f "$raw"
+
+  ( cd "$wt" && $VITEST_CMD --reporter json --outputFile "$raw" ) > "$ev/test.log" 2>&1
+  if [[ -f "$raw" ]] && jq -e '.numTotalTests > 0 and .numFailedTests == 0' "$raw" >/dev/null; then
+    BASE_TEST=GREEN
+  else
+    BASE_TEST=RED
+  fi
+  if [[ -f "$raw" ]]; then
+    jq '{numTotalTests, numPassedTests, numFailedTests, success,
+         failed: [.testResults[].assertionResults[] | select(.status=="failed") | .fullName]}' \
+      "$raw" > "$ev/test.summary.json"
+  else
+    printf '{"error":"vitest wrote no JSON — see test.log"}\n' > "$ev/test.summary.json"
+  fi
+
+  ( cd "$wt" && $BUILD_CMD ) 2>&1 | tail -n 200 > "$ev/build.log" && BASE_BUILD=GREEN || BASE_BUILD=RED
+  ( cd "$wt" && $LINT_CMD  ) 2>&1 | tail -n 200 > "$ev/lint.log"  && BASE_LINT=GREEN  || BASE_LINT=RED
+
+  log "baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT"
 }
 
 set_status() {                        # set_status <id> <status>
@@ -310,6 +354,9 @@ while (( ROUND < MAX_ROUNDS )); do
   seed_env "$REVIEWER_WT"
   ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
 
+  EVIDENCE_DIR="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
+  run_baseline "$REVIEWER_WT" "$EVIDENCE_DIR"
+
   REVIEW_PROMPT="$(render_prompt review.md)"
 
   # --sandbox danger-full-access: bwrap cannot create network namespaces on this
@@ -329,6 +376,19 @@ while (( ROUND < MAX_ROUNDS )); do
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"
   else VERDICT="UNPARSEABLE"; fi
 
+  # Machine veto. The reviewer's line is one input; a red baseline overrides
+  # a PASS. It never overrides SPEC (the story is wrong, not the build) and
+  # never turns anything INTO a PASS.
+  MODEL_VERDICT="$VERDICT"
+  MACHINE_REASONS=""
+  [[ "$BASE_TEST"  == GREEN ]] || MACHINE_REASONS+="baseline test $BASE_TEST; "
+  [[ "$BASE_BUILD" == GREEN ]] || MACHINE_REASONS+="baseline build $BASE_BUILD; "
+  [[ "$BASE_LINT"  == GREEN ]] || MACHINE_REASONS+="baseline lint $BASE_LINT; "
+  if [[ -n "$MACHINE_REASONS" && "$VERDICT" == "PASS" ]]; then
+    VERDICT="FAIL"
+    warn "machine veto: $MACHINE_REASONS"
+  fi
+
   cat >> "$REVIEW_FILE.new" <<EOF
 
 ## Round $ROUND — $VERDICT
@@ -336,6 +396,12 @@ while (( ROUND < MAX_ROUNDS )); do
 head: $HEAD_SHA
 commits this round: $ROUND_COMMITS
 reviewed: $(date -Iseconds)
+
+### Machine
+
+baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
+model:    $MODEL_VERDICT
+computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
 
 ### Builder said
 
