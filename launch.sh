@@ -371,6 +371,27 @@ while (( ROUND < MAX_ROUNDS )); do
   REVIEW_TEXT="$(echo "$REVIEW_RAW" | jq -r 'select(.type=="item.completed") | .item.text // empty' 2>/dev/null)"
   [[ -n "$REVIEW_TEXT" ]] || REVIEW_TEXT="$REVIEW_RAW"
 
+  # ── reviewer output contract ───────────────────────────────────────────────
+  #
+  # The reviewer proposes mutations as files under .review-out/ and must leave
+  # the tree otherwise untouched — the harness applies them, not the reviewer.
+  # A dirty tree means the contract was not followed and nothing the runner
+  # measures afterwards can be trusted. That is a prompt problem, so it goes
+  # to a human rather than back into the queue.
+  DIRTY="$(git -C "$REVIEWER_WT" status --porcelain | grep -v '^?? \.review-out/' || true)"
+  if [[ -n "$DIRTY" ]]; then
+    set_status "$STORY_ID" needs_human
+    die "reviewer left the tree dirty:"$'\n'"$DIRTY"
+  fi
+
+  # Everything the verdict will rest on, into git before anything is judged.
+  printf '%s\n' "$BUILD_MSG"   > "$EVIDENCE_DIR/builder.md"
+  printf '%s\n' "$REVIEW_TEXT" > "$EVIDENCE_DIR/reviewer.md"
+  if [[ -d "$REVIEWER_WT/.review-out/mutations" ]]; then
+    mkdir -p "$EVIDENCE_DIR/mutations"
+    cp -r "$REVIEWER_WT/.review-out/mutations/." "$EVIDENCE_DIR/mutations/"
+  fi
+
   if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"

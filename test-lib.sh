@@ -322,13 +322,40 @@ case_14_baseline_lint_red()  { baseline_case c14 "14 baseline lint RED vetoes PA
 # L-08: a suite that collects zero tests is not green.
 case_15_baseline_notests()   { baseline_case c15 "15 baseline with zero tests is RED" 'baseline: test RED' FAKE_VITEST=notests; }
 
+# Phase 1.3. The reviewer proposes mutations as files under .review-out/ and
+# must leave the tree otherwise untouched. Red when the clean-tree check
+# after codex is deleted: a reviewer that applied its own mutation then sails
+# through to a verdict.
+case_16_reviewer_dirty_tree() {
+  CASE="16 reviewer leaves the tree dirty → needs_human"; fixture c16
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_MUTATIONS=dirty
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep 'left the tree dirty' "$LOG" "reason in output"
+  assert_grep 'fleet/prompts/rules.md' "$LOG" "names the dirty path"
+}
+
+# Phase 1.3. Red when the copy-out after codex is deleted: the mutation
+# files die with the reviewer worktree and never reach git.
+case_17_reviewer_output_copied() {
+  CASE="17 reviewer output reaches the evidence dir"; fixture c17
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_MUTATIONS=patch MAX_ROUNDS=1
+  local t; t="$(tracked)"
+  assert_contains "$t" ".review/$STORY/round-1/mutations/AC1-marker.patch" "patch committed"
+  assert_contains "$t" ".review/$STORY/round-1/mutations/AC1-marker.test"  "selector committed"
+  assert_contains "$t" ".review/$STORY/round-1/reviewer.md" "reviewer prose committed"
+  assert_contains "$t" ".review/$STORY/round-1/builder.md"  "builder message committed"
+  assert_grep 'FLEET_MUTANT_MARKER' "$REPO/.review/$STORY/round-1/mutations/AC1-marker.patch" "patch content intact"
+  assert_grep 'fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "prose content intact"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable case_7_status_commits_land
        case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs
        case_12_baseline_test_red case_13_baseline_build_red case_14_baseline_lint_red
-       case_15_baseline_notests)
+       case_15_baseline_notests case_16_reviewer_dirty_tree case_17_reviewer_output_copied)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -3,13 +3,26 @@
 # fleet/test/codex — stand-in for the real `codex exec --json …` under fleet/test-lib.sh.
 #
 # The launcher invokes `codex` by bare name with the review prompt as the
-# LAST argument (launch.sh: `codex exec --json --sandbox … "$REVIEW_PROMPT"`)
-# and filters the output with
+# LAST argument (launch.sh: `codex exec --json --sandbox … "$REVIEW_PROMPT"`),
+# cwd = the reviewer worktree, and filters the output with
 #   jq -r 'select(.type=="item.completed") | .item.text'
 # then greps the text for `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$`.
 #
 #   FAKE_REVIEWER=PASS | FAIL | SPEC   a well-formed verdict line
 #   FAKE_REVIEWER=garbage              no line the launcher can parse → UNPARSEABLE
+#
+# Phase 1.3+: the reviewer's output contract is files under .review-out/
+# in its worktree. FAKE_MUTATIONS (default none) writes them:
+#
+#   none      nothing written
+#   patch     .review-out/mutations/AC1-marker.patch + AC1-marker.test
+#             The patch appends FLEET_MUTANT_MARKER to fleet/prompts/rules.md;
+#             fleet/test/vitest in `marker` mode fails iff that line exists.
+#             The tree is left clean (patch generated, then reverted).
+#   cmd       same patch, but AC1-marker.cmd instead of .test
+#   badpatch  AC1-bad.patch that does not apply, + .test
+#   ac2only   the marker patch filed as AC2-marker (AC1 has no mutation)
+#   dirty     same as patch but the change is NOT reverted — contract broken
 #
 # Records calls in $FAKE_TRACE_DIR/calls and the prompt as codex-prompt-N.
 #
@@ -21,6 +34,30 @@ prompt="${*: -1}"
 echo codex >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^codex$' "$FAKE_TRACE_DIR/calls")"
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
+
+marker_patch() {                      # marker_patch <ac> <ext> [keep] — write the mutation files
+  local ac="$1" ext="$2" keep="${3:-}" out=.review-out/mutations
+  mkdir -p "$out"
+  printf '\nFLEET_MUTANT_MARKER\n' >> fleet/prompts/rules.md
+  git diff -- fleet/prompts/rules.md > "$out/$ac-marker.patch"
+  [[ -n "$keep" ]] || git checkout -q -- fleet/prompts/rules.md
+  case "$ext" in
+    test) printf 'fake.test.tsx\n' > "$out/$ac-marker.test" ;;
+    cmd)  printf 'grep -q FLEET_MUTANT_MARKER fleet/prompts/rules.md && exit 1 || exit 0\n' > "$out/$ac-marker.cmd" ;;
+  esac
+}
+
+case "${FAKE_MUTATIONS:-none}" in
+  none)     : ;;
+  patch)    marker_patch AC1 test ;;
+  cmd)      marker_patch AC1 cmd ;;
+  ac2only)  marker_patch AC2 test ;;
+  dirty)    marker_patch AC1 test keep ;;
+  badpatch) mkdir -p .review-out/mutations
+            printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-this line does not exist\n+so this cannot apply\n' > .review-out/mutations/AC1-bad.patch
+            printf 'fake.test.tsx\n' > .review-out/mutations/AC1-bad.test ;;
+  *) echo "fleet/test/codex: unknown FAKE_MUTATIONS='$FAKE_MUTATIONS'" >&2; exit 2 ;;
+esac
 
 case "$FAKE_REVIEWER" in
   PASS|FAIL|SPEC) text=$'fake review, call '"$n"$'.\nfinding: none.\nVERDICT: '"$FAKE_REVIEWER" ;;
