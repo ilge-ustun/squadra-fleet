@@ -188,6 +188,17 @@ case "$CURRENT" in
   *)           die "$STORY_ID has status '$CURRENT' — set it back to ready to rerun" ;;
 esac
 
+# Acceptance criteria are headed `**ACn — …**` at column 0 (.stories/TEMPLATE.md).
+# The mutation runner keys on these ids; a story with none can never be
+# verified, so it leaves the queue before any agent spends quota on it.
+# needs_human rather than a bare die: a die here would leave the story
+# `ready`, first in next_ready(), and wedge the queue unattended.
+AC_IDS="$(grep -oE '^\*\*AC[0-9]+' "$STORY_FILE" | tr -d '*' | sort -u | tr '\n' ' ')"
+if [[ -z "${AC_IDS// /}" ]]; then
+  set_status "$STORY_ID" needs_human
+  die "$STORY_ID declares no acceptance criteria (**ACn — …** at column 0) — nothing a runner can verify"
+fi
+
 BUILDER_WT="$REPO_ROOT/../wt-$STORY_ID"
 REVIEWER_WT="$REPO_ROOT/../wt-$STORY_ID-review"
 BRANCH="story/$STORY_ID"

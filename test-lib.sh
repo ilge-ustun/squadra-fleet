@@ -267,11 +267,37 @@ case_10_render_prompt() {
   assert_contains "$out" "unsubstituted in b.md: {{NOPE}}" "unknown placeholder is named"
 }
 
+# Phase 1.1. Red when the AC-extraction block before the builder is deleted:
+# a story with no `**ACn` heading then reaches the builder and spends quota
+# on something the runner can never verify. Goes to needs_human, not left
+# ready — a plain die would leave it first in the queue forever.
+case_11_no_acs() {
+  CASE="11 story without ACs → needs_human before any agent"; fixture c11
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: ready
+round: 0
+---
+
+# Story 900: fixture story with no criteria
+
+| AC | claim |
+|---|---|
+| AC1 | a table row is not a heading |
+EOF
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep 'no acceptance criteria' "$LOG" "reason in output"
+  assert_eq "$(calls claude)" 0 "builder must not run"
+  assert_eq "$(calls codex)"  0 "reviewer must not run"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable case_7_status_commits_land
-       case_8_is_error_false case_9_spec case_10_render_prompt)
+       case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
