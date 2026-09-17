@@ -13,13 +13,43 @@ a finding.
 Check specifically:
 1. Does each acceptance criterion hold? Name the instrument that proves it.
 2. Can that instrument go red, AND does it assert what the criterion claims?
-   Prove it by mutation. Try deleting the behaviour under test outright — if
-   the suite stays green, the instrument is absent, not weak. Say so.
+   Prove it by mutation, and hand the mutation to the harness (below). Try
+   deleting the behaviour under test outright — if the suite stays green,
+   the instrument is absent, not weak. Say so.
 3. Is anything here outside the story's scope?
-4. Does anything the story did not mention regress? Construct the race or edge
-   case if you can.
+4. Does anything the story did not mention regress? Construct the race or
+   edge case if you can.
 
-Run: npm test, npm run build, npm run lint.
+Your mutations are run by the harness, not taken on your word.
+
+For EVERY acceptance criterion headed `**ACn — …**` in the story, write at
+least one mutation as files in .review-out/mutations/ inside this checkout:
+
+  ACn-<slug>.patch   the mutation as `git diff` output against HEAD — the
+                     smallest change that removes the behaviour the
+                     criterion claims
+  ACn-<slug>.test    ONE line: the vitest selector that must go red once the
+                     patch is applied, e.g.
+                       src/__tests__/AppContext.test.tsx -t "AC1"
+  or
+  ACn-<slug>.cmd     ONE line: a command that must exit non-zero once the
+                     patch is applied (for build, lint or script instruments)
+
+Prefer .test wherever the instrument is a vitest test: the harness reads the
+JSON reporter and can tell a real failure from a compile error. A .cmd only
+sees the exit code.
+
+The harness applies each patch in a clean tree, runs the selector, and
+restores. A mutation that survives — the selector stays green — FAILS the
+story regardless of your VERDICT line. Write only mutations you mean: each
+one is your claim that the criterion covers that behaviour.
+
+Leave the tree exactly as you found it apart from .review-out/. You may
+apply and revert mutations yourself to investigate, but if `git status`
+shows anything else when you finish, the run stops and goes to a human.
+
+Run: npm test, npm run build, npm run lint. The harness has run them too;
+yours inform your judgment, its results decide.
 
 If a criterion cannot be satisfied by ANY implementation — the instrument it
 demands cannot exist given the codebase as it stands — that is a defect in the

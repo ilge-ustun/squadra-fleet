@@ -153,6 +153,10 @@ case_1_happy() {
   # Phase 1.5: PASS was computed, not just parsed — AC1's mutation went RED.
   assert_grep '^computed: PASS$' "$REPO/.review/$STORY.md" "computed PASS with no reasons"
   assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "the mutation that earned it"
+  # Phase 1.7: the rendered review prompt carries the output contract. A text
+  # check — weak, stated as such; the real check is a real story run.
+  assert_grep '\.review-out/mutations/' "$TRACE/codex-prompt-1" "review prompt names the mutation dir"
+  assert_grep 'regardless of your VERDICT line' "$TRACE/codex-prompt-1" "review prompt states the veto"
 }
 
 # Red when the no-commits postcondition (set_status needs_human; die) is deleted.

@@ -2,7 +2,8 @@
 #
 # fleet/launch.sh [story-id]
 #
-# Phase 4b: queue, orphan recovery, and a review round ceiling.
+# Phase 4b + verdict runner: queue, orphan recovery, review round ceiling,
+# harness-run baseline and mutations, computed verdict.
 #
 #   ./fleet/launch.sh          take the next ready story
 #   ./fleet/launch.sh 004      run one specific story
@@ -27,9 +28,14 @@
 # Status changes are committed and pushed so the queue is visible from a phone.
 # .runs/<id>.json is machine-local (gitignored).
 #
-# PROMPTS live in fleet/prompts/*.md, rendered by fleet/render.sh. See
-# fleet/prompts/README.md — in particular the verdict contract, which is parsed
-# in three places that do not reference each other.
+# PROMPTS live in fleet/prompts/*.md, rendered by fleet/render.sh.
+#
+# VERDICT is computed here, not read from the reviewer. The reviewer proposes
+# mutations as files; this script runs the baseline, applies each mutation in
+# a clean tree, classifies, and vetoes a PASS on any surviving mutation, any
+# uncovered AC, or a red baseline. Evidence goes to .review/<id>/round-N/ and
+# is committed. See fleet/prompts/README.md, "The verdict contract".
+# fleet/test-lib.sh exercises every path with fake agents.
 #
 set -uo pipefail
 
