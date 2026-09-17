@@ -13,8 +13,10 @@
 #            suite message "Transform failed …"                       (L-08)
 #
 #   FAKE_VITEST=pass | fail | notests
-#   FAKE_VITEST=marker   fail iff a file under cwd contains FLEET_MUTANT_MARKER
-#                        (Phase 1.4: the fake mutation patch inserts that line)
+#   FAKE_VITEST=marker          fail iff fleet/prompts/rules.md contains FLEET_MUTANT_MARKER
+#                               (Phase 1.4: the fake mutation patch appends that line there)
+#   FAKE_VITEST=marker-notests  pass unmutated; once the marker exists, report zero
+#                               tests (a mutation that breaks compilation — L-08)
 #
 set -euo pipefail
 : "${FAKE_VITEST:?FAKE_VITEST must be set}"
@@ -32,9 +34,11 @@ done
 printf 'vitest %s\n' "${sel[*]:-}" >> "$FAKE_TRACE_DIR/calls"
 
 mode="$FAKE_VITEST"
-if [[ "$mode" == marker ]]; then
-  if grep -rq --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next FLEET_MUTANT_MARKER .; then
-    mode=fail
+if [[ "$mode" == marker || "$mode" == marker-notests ]]; then
+  # Only the file the fake patch targets. A tree-wide grep matched the patch
+  # file itself and this script's own source, so every pre-run was PRE_RED.
+  if grep -q FLEET_MUTANT_MARKER fleet/prompts/rules.md 2>/dev/null; then
+    [[ "$mode" == marker ]] && mode=fail || mode=notests
   else
     mode=pass
   fi

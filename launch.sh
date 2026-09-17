@@ -148,6 +148,86 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
   log "baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT"
 }
 
+# ── mutation runner ──────────────────────────────────────────────────────────
+#
+# The reviewer proposes mutations as files; the harness runs them. For each
+# .review/<id>/round-N/mutations/ACn-<slug>.patch with a .test (vitest
+# selector) or .cmd (any command) beside it, in the clean reviewer tree:
+#
+#   pre-run, unmutated  → must be green, else PRE_RED: the instrument was
+#                         already failing and proves nothing
+#   git apply           → else PATCH_INVALID
+#   run, mutated        → RED needs a REAL failure. .test: numFailedTests > 0;
+#                         zero tests collected is NO_TESTS (the mutation broke
+#                         compilation — L-08), never RED. .cmd: non-zero exit.
+#                         GREEN = the mutation survived: for this behaviour the
+#                         instrument is absent.
+#   restore             → tree must be clean again, or the run stops: nothing
+#                         measured after a failed restore can be trusted
+#
+# Selector lines are executed with bash -c: a .cmd is a command by contract,
+# and a .test may carry `-t "a pattern with spaces"`. Same trust as the
+# reviewer already has — it wrote them in a tree it could edit.
+
+porcelain() { git -C "$1" status --porcelain | grep -v '^?? \.review-out/' || true; }
+
+run_selector() {                      # run_selector <wt> <kind> <selector-file> <raw-out-prefix> → RED|GREEN|NO_TESTS
+  local wt="$1" kind="$2" line raw="$4.json" log="$4.log"
+  line="$(head -n1 "$3")"
+  rm -f "$raw"
+  case "$kind" in
+    test)
+      ( cd "$wt" && bash -c "$VITEST_CMD $line --reporter json --outputFile '$raw'" ) > "$log" 2>&1
+      if   [[ ! -f "$raw" ]];                                  then echo NO_TESTS
+      elif jq -e '.numTotalTests == 0'  "$raw" >/dev/null;     then echo NO_TESTS
+      elif jq -e '.numFailedTests > 0'  "$raw" >/dev/null;     then echo RED
+      else                                                          echo GREEN; fi ;;
+    cmd)
+      if ( cd "$wt" && bash -c "$line" ) > "$log" 2>&1; then echo GREEN; else echo RED; fi ;;
+  esac
+}
+
+run_mutations() {                     # run_mutations <wt> <evidence-dir> → MUT_ROWS (one "ACn CLASS slug" per line)
+  local wt="$1" mdir="$2/mutations" p name ac slug kind sel cls pre raw
+  MUT_ROWS=""
+  [[ -d "$mdir" ]] || return 0
+
+  for p in "$mdir"/AC*-*.patch; do
+    [[ -e "$p" ]] || continue
+    name="$(basename "$p" .patch)"; ac="${name%%-*}"; slug="${name#*-}"
+    raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-$name"
+
+    if   [[ -f "$mdir/$name.test" ]]; then kind=test; sel="$mdir/$name.test"
+    elif [[ -f "$mdir/$name.cmd"  ]]; then kind=cmd;  sel="$mdir/$name.cmd"
+    else kind=""; fi
+
+    if [[ -z "$kind" ]]; then
+      cls=NO_SELECTOR
+    else
+      [[ -z "$(porcelain "$wt")" ]] || die "mutation runner: tree dirty before $name"
+      pre="$(run_selector "$wt" "$kind" "$sel" "$raw-pre")"
+      if [[ "$pre" != GREEN ]]; then
+        cls=PRE_RED
+      elif ! git -C "$wt" apply --check "$p" 2> "$raw-apply.log" || ! git -C "$wt" apply "$p" 2>> "$raw-apply.log"; then
+        cls=PATCH_INVALID
+        git -C "$wt" checkout -q -- . ; git -C "$wt" clean -qfd -e .review-out
+      else
+        cls="$(run_selector "$wt" "$kind" "$sel" "$raw-mut")"
+        git -C "$wt" checkout -q -- . ; git -C "$wt" clean -qfd -e .review-out
+        [[ -z "$(porcelain "$wt")" ]] || die "mutation runner: tree dirty after restoring $name"
+      fi
+    fi
+
+    {
+      echo "$cls"
+      [[ "$kind" == test && -f "$raw-mut.json" ]] && \
+        jq -c '{numTotalTests, numFailedTests, failed: [.testResults[].assertionResults[] | select(.status=="failed") | .fullName]}' "$raw-mut.json"
+    } > "$mdir/$name.result"
+    MUT_ROWS+="$ac $cls $slug"$'\n'
+    log "mutation $name: $cls"
+  done
+}
+
 set_status() {                        # set_status <id> <status>
   set_story_field "$1" status "$2"
   commit_status "$1" "$2"
@@ -392,6 +472,9 @@ while (( ROUND < MAX_ROUNDS )); do
     cp -r "$REVIEWER_WT/.review-out/mutations/." "$EVIDENCE_DIR/mutations/"
   fi
 
+  run_mutations "$REVIEWER_WT" "$EVIDENCE_DIR"
+  MUT_TABLE="$(printf '%s' "$MUT_ROWS" | awk 'NF { printf "%-4s %-13s %s\n", $1, $2, $3 }')"
+
   if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"
@@ -423,6 +506,8 @@ reviewed: $(date -Iseconds)
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
 model:    $MODEL_VERDICT
 computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
+${MUT_TABLE:+mutations:
+$MUT_TABLE}
 
 ### Builder said
 

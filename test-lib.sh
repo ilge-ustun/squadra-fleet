@@ -349,13 +349,36 @@ case_17_reviewer_output_copied() {
   assert_grep 'fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "prose content intact"
 }
 
+# Phase 1.4. The harness applies each proposed mutation in the clean reviewer
+# tree, runs the selector, classifies, restores. Red when run_mutations (or
+# its call) is deleted: no .result files, no rows in the Machine table.
+# The veto on these classes is 1.5; here only the classification is asserted.
+mutation_case() {                     # mutation_case <name> <label> <expected-class> <mutation-name> [VAR=value …]
+  local name="$1" label="$2" cls="$3" mut="$4"; shift 4
+  CASE="$label"; fixture "$name"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 "$@"
+  local res="$REPO/.review/$STORY/round-1/mutations/$mut.result"
+  assert_file "$res" "result file written"
+  assert_eq "$(head -n1 "$res" 2>/dev/null)" "$cls" "classification"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/mutations/$mut.result" "result committed"
+  assert_grep "^${mut%%-*} +$cls +${mut#*-}" "$REPO/.review/$STORY.md" "row in the Machine table"
+}
+case_18_mutation_red()      { mutation_case c18 "18 mutation caught → RED"                 RED          AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker; }
+case_19_mutation_green()    { mutation_case c19 "19 mutation survives → GREEN"             GREEN        AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=pass; }
+case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation → NO_TESTS" NO_TESTS     AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker-notests; }
+case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }
+case_22_mutation_prered()   { mutation_case c22 "22 instrument already red → PRE_RED"      PRE_RED      AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=fail; }
+case_23_mutation_cmd()      { mutation_case c23 "23 .cmd selector, non-zero exit → RED"    RED          AC1-marker FAKE_MUTATIONS=cmd; }
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable case_7_status_commits_land
        case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs
        case_12_baseline_test_red case_13_baseline_build_red case_14_baseline_lint_red
-       case_15_baseline_notests case_16_reviewer_dirty_tree case_17_reviewer_output_copied)
+       case_15_baseline_notests case_16_reviewer_dirty_tree case_17_reviewer_output_copied
+       case_18_mutation_red case_19_mutation_green case_20_mutation_notests
+       case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
