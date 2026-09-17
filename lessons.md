@@ -177,3 +177,21 @@ of one.
 mutation files, per-mutation `.result`s and both agents' text under
 `.review/<id>/round-N/` and commits them with the status. Raw logs stay in
 `.runs/` and are re-derivable from patch + SHA.
+
+### L-17 — unattended changes what the agents print
+First real run of the verdict runner, detached from a terminal. Codex wrote
+"Reading additional input from stdin..." to stderr because stdin was not a
+TTY — something no tmux run had ever shown. The launcher merged stderr into
+the JSON stream, jq aborted on line 1, the fallback put raw JSONL into
+`REVIEW_TEXT`, and the reviewer's `VERDICT: FAIL` — present both rounds —
+sat inside a JSON string, never at column 0. Two rounds parsed UNPARSEABLE.
+The computed verdict was right anyway (three surviving mutations vetoed
+round 1, one vetoed round 2), which is the point of computing it.
+**Lesson:** the first unattended run is a different environment from every
+attended one. Assumptions about agent output that held under a TTY are
+untested until then. A "fallback that earned its keep once" is a silent
+path that will be taken when least expected.
+**Prevention:** by construction — stderr captured as evidence
+(`reviewer.stderr`), never merged; extraction skips non-JSON lines and takes
+only `agent_message` items; an empty extraction is recorded, not papered
+over. `fleet/test/codex` emits the notice on every run.
