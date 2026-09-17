@@ -195,3 +195,20 @@ path that will be taken when least expected.
 (`reviewer.stderr`), never merged; extraction skips non-JSON lines and takes
 only `agent_message` items; an empty extraction is recorded, not papered
 over. `fleet/test/codex` emits the notice on every run.
+
+### L-18 — a prompt on argv has a hard ceiling, and evidence grows
+Round 3 of story 007 died with `is_error=` blank and no output: the
+round-2 prompt embeds the review file, the review file held two rounds of
+raw JSONL (the L-17 artefact), 134,816 bytes went to `claude -p "$PROMPT"`
+as one argument, and `execve` refused it — `MAX_ARG_STRLEN` is 131,072.
+The launcher had never seen a prompt that large because no story had ever
+carried two rounds of evidence before.
+**Lesson:** anything that accumulates per round will cross a fixed limit
+eventually; argv was the wrong channel for a payload that grows. The
+symptom — empty output, blank `is_error` — looked like the builder said
+nothing, when the builder was never started.
+**Prevention:** by construction — prompts go to both agents on stdin
+(`printf '%s' … | claude -p`, `… | codex exec`), which is also codex's
+intended mode and removes the L-17 notice at its root. `fleet/test-lib.sh`
+case 32 grows a review past the limit on a rerun and asserts the builder
+still receives it.
