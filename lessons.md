@@ -212,3 +212,19 @@ nothing, when the builder was never started.
 intended mode and removes the L-17 notice at its root. `fleet/test-lib.sh`
 case 32 grows a review past the limit on a rerun and asserts the builder
 still receives it.
+
+### L-19 — the story the agents read is the branch copy, not the base copy
+Story 007 was amended on `feat/pwa` after four rounds and set back to
+ready. The builder resumed its worktree — a branch cut before the
+amendment — and read the old text; the reviewer's detached tree at the
+builder's head had the same old text. The harness meanwhile extracted AC
+ids from the base copy and judged against the amended set. Neither agent
+could have satisfied a requirement it could not see. Round 5 was stopped
+by process once this was verified.
+**Lesson:** `needs_human` exists so a human can rewrite the story. If the
+rewrite does not reach the worktree, the loop is a human editing a file
+nobody reads. State that is "in git" is only in the branch it is in.
+**Prevention:** by construction — `sync_story` copies the base story into
+the builder worktree and commits it there as the launcher's own commit
+before the round's start SHA (so it is never the builder's work), which
+the reviewer's detached tree inherits. `fleet/test-lib.sh` case 33.
