@@ -243,9 +243,11 @@ while (( ROUND < MAX_ROUNDS )); do
   log "round $ROUND of $MAX_ROUNDS"
 
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
-
+  
   if (( ROUND == 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
     BUILD_PROMPT="$(render_prompt build-round1.md)"
+  elif (( ROUND == 1 )) && grep -qE '^verdict: SPEC' "$REVIEW_FILE" 2>/dev/null; then
+    BUILD_PROMPT="$(render_prompt build-after-spec.md)"
   else
     BUILD_PROMPT="$(render_prompt build-round2.md)"
   fi

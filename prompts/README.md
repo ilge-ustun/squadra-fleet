@@ -12,6 +12,7 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 | `build-round1.md` | `{{STORY_ID}}` `{{RULES}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{REVIEW_TEXT}}` |
 | `review.md` | `{{STORY_ID}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` |
+| `build-after-spec.md` | `{{STORY_ID}}` `{{RULES}}` `{{REVIEW_TEXT}}` |
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 `{{RULES}}` in both build prompts.
