@@ -196,7 +196,7 @@ REVIEW_FILE="$REPO_ROOT/.review/$STORY_ID.md"
 # restart after FAIL loses them: the builder re-reads the story, sees its own
 # commits, and concludes the work is done. Observed twice on story 004.
 REVIEW_TEXT=""
-if [[ -f "$REVIEW_FILE" ]] && grep -qE '^verdict: (FAIL|UNPARSEABLE)' "$REVIEW_FILE"; then
+if [[ -f "$REVIEW_FILE" ]] && grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)' "$REVIEW_FILE"; then
   REVIEW_TEXT="$(cat "$REVIEW_FILE")"
   warn "prior failing review found — builder starts from the findings"
 fi
@@ -313,6 +313,7 @@ while (( ROUND < MAX_ROUNDS )); do
 
   if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
+  elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"
   else VERDICT="UNPARSEABLE"; fi
 
   cat >> "$REVIEW_FILE.new" <<EOF
@@ -337,6 +338,13 @@ EOF
     break
   fi
 
+  # A spec defect cannot be fixed by another build round. Stop the rounds; the
+  # outcome block sends it to needs_human with the reviewer's reasoning intact.
+  if [[ "$VERDICT" == "SPEC" ]]; then
+    warn "round $ROUND: SPEC — the story is wrong, not the build"
+    break
+  fi
+
   warn "round $ROUND: $VERDICT"
   (( ROUND < MAX_ROUNDS )) && log "re-running builder with the findings"
 done
@@ -356,6 +364,10 @@ rm -f "$REVIEW_FILE.new"
 if [[ "$VERDICT" == "PASS" ]]; then
   set_status "$STORY_ID" done
   log "VERDICT: PASS after $ROUND round(s) → $REVIEW_FILE"
+elif [[ "$VERDICT" == "SPEC" ]]; then
+  set_status "$STORY_ID" needs_human
+  warn "SPEC defect on round $ROUND — the story needs rewriting → $REVIEW_FILE"
+  warn "this story is stopped. The queue is not."
 else
   set_status "$STORY_ID" needs_human
   warn "ceiling reached: $MAX_ROUNDS rounds, last verdict $VERDICT → $REVIEW_FILE"
