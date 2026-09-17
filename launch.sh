@@ -27,6 +27,10 @@
 # Status changes are committed and pushed so the queue is visible from a phone.
 # .runs/<id>.json is machine-local (gitignored).
 #
+# PROMPTS live in fleet/prompts/*.md, rendered by fleet/render.sh. See
+# fleet/prompts/README.md — in particular the verdict contract, which is parsed
+# in three places that do not reference each other.
+#
 set -uo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -39,6 +43,7 @@ MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 INSTALL_CMD="npm ci"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
+PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
 # Untracked runtime config a fresh worktree does not inherit.
 # Story 002: without .env.local everything builds and tests green while the app
@@ -49,6 +54,9 @@ RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
 log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
 warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
 die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
+
+# render_prompt() — needs die/warn above, and PROMPTS_DIR from config.
+source "$REPO_ROOT/fleet/render.sh" || die "cannot source fleet/render.sh"
 
 command -v claude >/dev/null || die "claude not on PATH"
 command -v codex  >/dev/null || die "codex not on PATH"
@@ -219,17 +227,9 @@ fi
 BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$BASE_BRANCH")"
 log "base ${BASE_SHA:0:8}"
 
-RULES="Rules that override anything you infer:
-- TDD is mandatory. Write the failing test, run it, SEE IT FAIL, then implement.
-  A test never observed red is not a test.
-- An instrument must assert what the acceptance criterion claims. If deleting the
-  behaviour under test leaves the suite green, the instrument is absent.
-- One task, one commit.
-- Do not run deploy commands, firebase commands, or anything that writes to Firestore.
-- If a decision is needed that the story does not answer, write .blocked/$STORY_ID.md
-  with the question, each option and its cost, and your recommendation. Then stop.
-  Do not guess.
-- Stay in scope. Mention unrelated problems at the end; do not fix them."
+# rules.md itself contains {{STORY_ID}}, so it is rendered first and then
+# embedded as {{RULES}} by the build prompts.
+RULES="$(render_prompt rules.md)"
 
 # ── review rounds ────────────────────────────────────────────────────────────
 
@@ -245,23 +245,9 @@ while (( ROUND < MAX_ROUNDS )); do
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
 
   if (( ROUND == 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
-    BUILD_PROMPT="Read .stories/$STORY_ID.md and implement it.
-Check git log first — if some tasks are already committed, continue from the
-first unfinished one. Do not redo committed work.
-
-$RULES"
+    BUILD_PROMPT="$(render_prompt build-round1.md)"
   else
-    BUILD_PROMPT="Read .stories/$STORY_ID.md. Your previous attempt was reviewed
-and REJECTED. The findings are below. Address every one of them.
-
-Do not argue with a finding in the code — if you believe a finding is wrong,
-write .blocked/$STORY_ID.md explaining why and stop.
-
-=== REVIEW FINDINGS ===
-$REVIEW_TEXT
-=== END FINDINGS ===
-
-$RULES"
+    BUILD_PROMPT="$(render_prompt build-round2.md)"
   fi
 
   log "builder: $BUILDER_MODEL"
@@ -311,33 +297,7 @@ $RULES"
   seed_env "$REVIEWER_WT"
   ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
 
-  REVIEW_PROMPT="You are reviewing a change against its specification.
-
-The specification is in .stories/$STORY_ID.md — read it first.
-You are in a clean checkout at commit $HEAD_SHA. The base was $BASE_SHA.
-This is review round $ROUND.
-
-Do NOT review by reading the diff. Derive your evidence independently:
-read the current state of the files, run the tests, run the build.
-
-For every claim you make, cite file:line. A claim without a citation is not
-a finding.
-
-Check specifically:
-1. Does each acceptance criterion hold? Name the instrument that proves it.
-2. Can that instrument go red, AND does it assert what the criterion claims?
-   Prove it by mutation. Try deleting the behaviour under test outright — if
-   the suite stays green, the instrument is absent, not weak. Say so.
-3. Is anything here outside the story's scope?
-4. Does anything the story did not mention regress? Construct the race or edge
-   case if you can.
-
-Run: npm test, npm run build, npm run lint.
-
-End your response with exactly one line, nothing after it:
-VERDICT: PASS
-or
-VERDICT: FAIL"
+  REVIEW_PROMPT="$(render_prompt review.md)"
 
   # --sandbox danger-full-access: bwrap cannot create network namespaces on this
   # host (RTM_NEWADDR: Operation not permitted), so Codex's own sandbox fails to
