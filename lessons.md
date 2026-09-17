@@ -138,3 +138,42 @@ or emits one per round, the grep silently misses, `REVIEW_TEXT` stays
 empty, and L-05 returns *looking fixed*.
 **Prevention:** by discipline. Strongest argument yet for moving prompts to
 `fleet/prompts/*.md` — the coupling becomes reviewable in one diff.
+
+---
+
+## Found while building the verdict runner (17 Sep, evening)
+
+### L-14 — a fake that does not shadow the real binary is the real binary
+`fleet/test-lib.sh`'s first run named its stand-ins `fake-claude` and
+`fake-codex`. The launcher calls `claude` and `codex` by bare name, so the
+*real* Claude Code started with the fixture story, ran the test script
+itself, and recursed three deep on real quota before being killed by
+process (L-04 applied — the launcher's death stops nothing).
+**Lesson:** a substitution through PATH is only a substitution if the name
+matches; nothing warns when it does not.
+**Prevention:** by construction — `shadow_check` refuses to start the
+launcher unless every fake is what `command -v` resolves, and a nested
+invocation (`FAKE_TRACE_DIR` already set) exits before doing anything.
+
+### L-15 — the verdict was a grep over the reviewer's prose
+`launch.sh` decided PASS by matching `^VERDICT: PASS$` on the model's
+output. Nothing checked that any mutation was applied, any test ran, or
+any cited log said what the prose claimed. L-07's flag-on-the-happy-path,
+at the harness level.
+**Lesson:** a model's report of a check is not the check. The harness owns
+verdict computation only if it computes something.
+**Prevention:** by construction — the reviewer hands mutations to the
+harness as files; the harness applies, runs, classifies, and vetoes a PASS
+on any surviving mutation, any uncovered AC, or a red baseline
+(`fleet/prompts/README.md`, "The verdict contract").
+
+### L-16 — evidence lived in /tmp, at a path the reviewer chose each run
+Four stories, four naming schemes. `.review/004.md` round 1 cites five
+mutation logs that do not exist; the same review corrects one of its own
+citations mid-round. The verdict's evidence was never in any layer.
+**Lesson:** evidence that is not in state is not evidence, it is a memory
+of one.
+**Prevention:** by construction — the harness writes baseline results,
+mutation files, per-mutation `.result`s and both agents' text under
+`.review/<id>/round-N/` and commits them with the status. Raw logs stay in
+`.runs/` and are re-derivable from patch + SHA.
