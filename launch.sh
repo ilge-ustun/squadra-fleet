@@ -445,7 +445,10 @@ while (( ROUND < ROUND_CEILING )); do
   fi
 
   log "builder: $BUILDER_MODEL"
-  BUILD_OUT="$(cd "$BUILDER_WT" && claude -p "$BUILD_PROMPT" \
+  # Prompts go on stdin. A 134 KB round-2 prompt as one argv string exceeded
+  # MAX_ARG_STRLEN (131072) on 007's rerun: claude never exec'd, output was
+  # empty. stdin has no such limit, and for codex it is the intended mode.
+  BUILD_OUT="$(cd "$BUILDER_WT" && printf '%s' "$BUILD_PROMPT" | claude -p \
     --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
     --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
 
@@ -510,7 +513,7 @@ while (( ROUND < ROUND_CEILING )); do
   # First real run of the runner, 17 Sep. stderr is kept as evidence, not
   # merged; the filter skips anything that is not JSON and takes only the
   # reviewer's own messages, not command_execution items.
-  REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2> "$EVIDENCE_DIR/reviewer.stderr")"
+  REVIEW_RAW="$(cd "$REVIEWER_WT" && printf '%s' "$REVIEW_PROMPT" | codex exec --json --sandbox danger-full-access 2> "$EVIDENCE_DIR/reviewer.stderr")"
   REVIEW_TEXT="$(printf '%s\n' "$REVIEW_RAW" | jq -R -r 'fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text // empty')"
   if [[ -z "$REVIEW_TEXT" ]]; then
     # No reviewer message at all. Keep the raw stream where a human can read

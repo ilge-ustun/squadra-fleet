@@ -451,6 +451,23 @@ case_31_codex_stderr_notice() {
   assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.stderr" "stderr committed"
 }
 
+# Found on 007's third round. The round-2 prompt embeds the whole review file;
+# at 134 KB it exceeded the kernel's per-argument limit (MAX_ARG_STRLEN,
+# 131072), `claude -p "$PROMPT"` never exec'd, and the round died with empty
+# output. Prompts now go to the agents on stdin. Red when they go back to argv.
+case_32_huge_review_prompt() {
+  CASE="32 a >128 KB review still reaches the builder (prompt on stdin)"; fixture c32
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  head -c 140000 /dev/zero | tr '\0' x >> "$REPO/.review/$STORY.md"
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(calls claude)" 2 "builder ran on the rerun"
+  assert_grep 'REJECTED' "$TRACE/claude-prompt-2" "builder received the round-2 prompt"
+  local size; size="$(wc -c < "$TRACE/claude-prompt-2" 2>/dev/null || echo 0)"
+  (( size > 131072 )) && ok || fail "prompt size $size not over MAX_ARG_STRLEN — the case does not test the limit"
+  assert_eq "$(field status)" done "story completed"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -463,7 +480,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
        case_27_round2_gets_machine_facts
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
-       case_31_codex_stderr_notice)
+       case_31_codex_stderr_notice case_32_huge_review_prompt)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -30,7 +30,10 @@ set -euo pipefail
 : "${FAKE_REVIEWER:?FAKE_REVIEWER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
 
-prompt="${*: -1}"
+# The prompt arrives on stdin (launch.sh pipes it; `codex exec` reads
+# instructions from stdin when no positional prompt is given) or, for older
+# callers, as the last argument.
+if [[ ! -t 0 ]]; then prompt="$(cat)"; else prompt="${*: -1}"; fi
 echo codex >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^codex$' "$FAKE_TRACE_DIR/calls")"
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"

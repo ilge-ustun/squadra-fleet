@@ -21,13 +21,17 @@ set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
 
+# The prompt arrives on stdin (launch.sh pipes it — a 134 KB round-2 prompt
+# exceeded the kernel's per-argument limit on 007's rerun) or, for older
+# callers, as the value after -p. A `-p` followed by another flag has no value.
 prompt=""
 while (($#)); do
   case "$1" in
-    -p) prompt="${2:-}"; shift 2 ;;
+    -p) if [[ -n "${2:-}" && "${2:-}" != -* ]]; then prompt="$2"; shift 2; else shift; fi ;;
     *)  shift ;;
   esac
 done
+if [[ -z "$prompt" && ! -t 0 ]]; then prompt="$(cat)"; fi
 
 echo claude >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^claude$' "$FAKE_TRACE_DIR/calls")"
