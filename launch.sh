@@ -234,6 +234,46 @@ run_mutations() {                     # run_mutations <wt> <evidence-dir> → MU
   done
 }
 
+# ── scope ────────────────────────────────────────────────────────────────────
+#
+# The story's `scope_deny:` frontmatter — space-separated bash globs — names
+# files the builder must not touch. Deny-only, by decision: no allow list,
+# so the builder is free anywhere not named and the story stays WHAT, not
+# HOW. No line means nothing is forbidden. A hit is a machine veto; the
+# builder's correct move when it needs a denied file is .blocked/, which
+# build-round2.md already says and this now enforces. Two paths the rules
+# themselves require are always allowed, so a broad deny cannot punish a
+# builder for following RULES.
+
+check_scope() {                       # check_scope <evidence-dir> → SCOPE SCOPE_HITS
+  local ev="$1" deny changed f g
+  local -a globs=()
+  deny="$(story_field "$STORY_ID" scope_deny)"
+  changed="$(git -C "$BUILDER_WT" diff --name-only "$BASE_SHA..$HEAD_SHA")"
+  # Split the deny list with pathname expansion OFF: a bare `for g in $deny`
+  # expands `fleet/*` against the launcher's cwd and the glob never reaches
+  # the comparison. Found by test-lib case 28. Inside [[ ]] the unquoted
+  # right-hand side is a pattern, not a path.
+  set -f; read -ra globs <<< "$deny"; set +f
+  SCOPE_HITS=""
+  if (( ${#globs[@]} )); then
+    while read -r f; do
+      [[ -n "$f" ]] || continue
+      [[ "$f" == ".blocked/$STORY_ID.md" || "$f" == docs/fleet/$STORY_ID-*.md ]] && continue
+      for g in "${globs[@]}"; do
+        [[ "$f" == $g ]] && { SCOPE_HITS+="$f "; break; }
+      done
+    done <<< "$changed"
+  fi
+  [[ -n "$SCOPE_HITS" ]] && SCOPE=VIOLATION || SCOPE=CLEAN
+  {
+    echo "deny:    ${deny:-<none>}"
+    echo "scope:   $SCOPE ${SCOPE_HITS}"
+    echo "changed:"; printf '%s\n' "$changed"
+  } > "$ev/scope.txt"
+  log "scope: $SCOPE ${SCOPE_HITS}"
+}
+
 set_status() {                        # set_status <id> <status>
   set_story_field "$1" status "$2"
   commit_status "$1" "$2"
@@ -442,6 +482,7 @@ while (( ROUND < MAX_ROUNDS )); do
 
   EVIDENCE_DIR="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
   run_baseline "$REVIEWER_WT" "$EVIDENCE_DIR"
+  check_scope "$EVIDENCE_DIR"
 
   REVIEW_PROMPT="$(render_prompt review.md)"
 
@@ -499,6 +540,7 @@ while (( ROUND < MAX_ROUNDS )); do
   [[ "$BASE_TEST"  == GREEN ]] || MACHINE_REASONS+="baseline test $BASE_TEST; "
   [[ "$BASE_BUILD" == GREEN ]] || MACHINE_REASONS+="baseline build $BASE_BUILD; "
   [[ "$BASE_LINT"  == GREEN ]] || MACHINE_REASONS+="baseline lint $BASE_LINT; "
+  [[ "$SCOPE" == CLEAN ]] || MACHINE_REASONS+="scope $SCOPE: ${SCOPE_HITS}; "
   for ac in $AC_IDS; do
     grep -q "^$ac " <<< "$MUT_ROWS" || MACHINE_REASONS+="$ac has no mutation; "
   done
@@ -523,6 +565,7 @@ reviewed: $(date -Iseconds)
 
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
 acs:      $AC_IDS
+scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT
 computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
 ${MUT_TABLE:+mutations:

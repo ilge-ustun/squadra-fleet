@@ -9,6 +9,8 @@
 #   FAKE_BUILDER=commit     one empty commit  (the postcondition the launcher checks)
 #   FAKE_BUILDER=nocommit   nothing
 #   FAKE_BUILDER=blocked    writes .blocked/$FAKE_STORY_ID.md, no commit
+#   FAKE_BUILDER=touch      appends a line to $FAKE_TOUCH and commits it
+#                           (Phase 2: a change the scope check can see)
 #
 # It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
 # given as $FAKE_TRACE_DIR/claude-prompt-N, so a test can assert which prompt
@@ -36,6 +38,9 @@ case "$FAKE_BUILDER" in
   nocommit) : ;;
   blocked)  mkdir -p .blocked
             printf 'fake question: which option?\n' > ".blocked/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md" ;;
+  touch)    printf '\nfake builder touched this (call %s)\n' "$n" >> "${FAKE_TOUCH:?FAKE_TOUCH must be set}"
+            git add -- "$FAKE_TOUCH"
+            git commit -q -m "fake(builder): touch $FAKE_TOUCH" ;;
   *) echo "fleet/test/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
 esac
 

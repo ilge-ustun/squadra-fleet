@@ -407,6 +407,26 @@ case_27_round2_gets_machine_facts() {
   assert_grep 'fake review, call 1' "$TRACE/claude-prompt-2" "reviewer prose still present"
 }
 
+# Phase 2.1. `scope_deny:` in the story frontmatter — space-separated globs —
+# names files the builder must not touch. Deny-only: no allow list, no line
+# means nothing forbidden. Red when check_scope (or its veto) is deleted:
+# a builder that changed a denied file then PASSes.
+set_deny() { sed -i "2a scope_deny: $1" "$REPO/.stories/$STORY.md"; }
+scope_case() {                        # scope_case <name> <label> <deny-globs|-> <expect-status> <expect-scope-regex>
+  local name="$1" label="$2" deny="$3" status="$4" scope="$5"
+  CASE="$label"; fixture "$name"
+  [[ "$deny" == - ]] || set_deny "$deny"
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=fleet/prompts/rules.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" "$status" "story status"
+  assert_grep "^scope: +$scope" "$REPO/.review/$STORY.md" "scope line in the Machine block"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/scope.txt" "scope evidence committed"
+  assert_grep 'fleet/prompts/rules.md' "$REPO/.review/$STORY/round-1/scope.txt" "changed path recorded"
+}
+case_28_scope_violation() { scope_case c28 "28 denied file changed → VIOLATION vetoes PASS (nested glob)" 'fleet/*' needs_human 'VIOLATION fleet/prompts/rules.md'
+                            assert_grep '^computed: FAIL — .*scope VIOLATION' "$REPO/.review/$STORY.md" "reason enumerated"; }
+case_29_scope_undeclared() { scope_case c29 "29 no scope_deny → CLEAN, nothing forbidden" - done 'CLEAN'; }
+case_30_scope_elsewhere()  { scope_case c30 "30 deny names other files → CLEAN"           'src/* docs/*' done 'CLEAN'; }
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -417,7 +437,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_18_mutation_red case_19_mutation_green case_20_mutation_notests
        case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
-       case_27_round2_gets_machine_facts)
+       case_27_round2_gets_machine_facts
+       case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
