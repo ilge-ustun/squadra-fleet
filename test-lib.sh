@@ -427,6 +427,22 @@ case_28_scope_violation() { scope_case c28 "28 denied file changed → VIOLATION
 case_29_scope_undeclared() { scope_case c29 "29 no scope_deny → CLEAN, nothing forbidden" - done 'CLEAN'; }
 case_30_scope_elsewhere()  { scope_case c30 "30 deny names other files → CLEAN"           'src/* docs/*' done 'CLEAN'; }
 
+# Found on the first real run (007, round 1). codex prints "Reading
+# additional input from stdin..." to stderr when stdin is not a TTY — every
+# unattended run. Merged into the JSON stream it made jq abort at line 1;
+# the raw JSONL became REVIEW_TEXT and the VERDICT was UNPARSEABLE. The fake
+# now always emits that line, so every reviewer case exercises this; this
+# case names it. Red when stderr is merged back or the filter is strict.
+case_31_codex_stderr_notice() {
+  CASE="31 codex stderr notice does not break extraction"; fixture c31
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$(review_line 3)" "verdict: PASS" "verdict parsed from the agent_message"
+  assert_grep '^fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "reviewer.md is prose, not JSON"
+  assert_not_grep '"type":"item' "$REPO/.review/$STORY/round-1/reviewer.md" "no raw JSONL in reviewer.md"
+  assert_grep 'Reading additional input' "$REPO/.review/$STORY/round-1/reviewer.stderr" "stderr kept as evidence"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.stderr" "stderr committed"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -438,7 +454,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
        case_27_round2_gets_machine_facts
-       case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere)
+       case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
+       case_31_codex_stderr_notice)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

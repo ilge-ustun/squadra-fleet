@@ -65,6 +65,14 @@ case "$FAKE_REVIEWER" in
   *) echo "fleet/test/codex: unknown FAKE_REVIEWER='$FAKE_REVIEWER'" >&2; exit 2 ;;
 esac
 
-# JSON Lines, as codex emits: an unrelated event first, then the completed item.
-jq -cn '{type:"thread.started"}'
-jq -cn --arg t "$text" '{type:"item.completed", item:{text:$t}}'
+# Output shaped like real codex 0.153 (read from a real run, 17 Sep):
+#   stderr  "Reading additional input from stdin..." when stdin is not a TTY —
+#           always on, because that is what every unattended run sees
+#   stdout  JSON Lines: thread.started, command_execution items (no .text),
+#           then the agent_message that carries the verdict, then turn.completed
+echo "Reading additional input from stdin..." >&2
+jq -cn '{type:"thread.started", thread_id:"fake"}'
+jq -cn '{type:"item.started",   item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\""}}'
+jq -cn '{type:"item.completed", item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\"", exit_code:0}}'
+jq -cn --arg t "$text" '{type:"item.completed", item:{id:"item_2", type:"agent_message", text:$t}}'
+jq -cn '{type:"turn.completed", usage:{input_tokens:1, output_tokens:1}}'

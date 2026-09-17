@@ -491,12 +491,24 @@ while (( ROUND < MAX_ROUNDS )); do
   # start before it reads anything. Isolation comes from the detached worktree
   # and the unprivileged fleet user with no sudo — not from bwrap.
   log "reviewer: codex"
-  REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2>&1)"
+  # codex emits JSON Lines on stdout and notices on stderr — "Reading
+  # additional input from stdin..." whenever stdin is not a TTY, i.e. every
+  # unattended run. Merged with 2>&1, that one line made jq abort at line 1,
+  # extraction came back empty, and the raw JSONL became REVIEW_TEXT: the
+  # VERDICT line sat inside a JSON string, never at column 0 → UNPARSEABLE.
+  # First real run of the runner, 17 Sep. stderr is kept as evidence, not
+  # merged; the filter skips anything that is not JSON and takes only the
+  # reviewer's own messages, not command_execution items.
+  REVIEW_RAW="$(cd "$REVIEWER_WT" && codex exec --json --sandbox danger-full-access "$REVIEW_PROMPT" 2> "$EVIDENCE_DIR/reviewer.stderr")"
+  REVIEW_TEXT="$(printf '%s\n' "$REVIEW_RAW" | jq -R -r 'fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text // empty')"
+  if [[ -z "$REVIEW_TEXT" ]]; then
+    # No reviewer message at all. Keep the raw stream where a human can read
+    # it; the verdict path below classifies this as UNPARSEABLE on its own.
+    printf '%s\n' "$REVIEW_RAW" > "$EVIDENCE_DIR/reviewer.raw.jsonl"
+    warn "reviewer produced no agent_message — raw stream kept as reviewer.raw.jsonl"
+    REVIEW_TEXT="(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)"
+  fi
 
-  # codex emits JSON Lines; claude emits one object. Falls back to raw output if
-  # the filter matches nothing — that fallback has already earned its keep once.
-  REVIEW_TEXT="$(echo "$REVIEW_RAW" | jq -r 'select(.type=="item.completed") | .item.text // empty' 2>/dev/null)"
-  [[ -n "$REVIEW_TEXT" ]] || REVIEW_TEXT="$REVIEW_RAW"
 
   # ── reviewer output contract ───────────────────────────────────────────────
   #
