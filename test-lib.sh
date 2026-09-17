@@ -114,7 +114,8 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
   LOG="$FX/launch.log"
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" FAKE_VITEST=pass BUILD_CMD=true LINT_CMD=true \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
       bash fleet/launch.sh "$id" ) > "$LOG" 2>&1
   RC=$?
@@ -149,6 +150,9 @@ case_1_happy() {
   # Phase 1.2: the harness ran the baseline itself and committed the evidence.
   assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN' "$REPO/.review/$STORY.md" "machine block records a green baseline"
   assert_contains "$(tracked)" ".review/$STORY/round-1/baseline/test.summary.json" "baseline evidence committed"
+  # Phase 1.5: PASS was computed, not just parsed — AC1's mutation went RED.
+  assert_grep '^computed: PASS$' "$REPO/.review/$STORY.md" "computed PASS with no reasons"
+  assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "the mutation that earned it"
 }
 
 # Red when the no-commits postcondition (set_status needs_human; die) is deleted.
@@ -238,10 +242,12 @@ case_8_is_error_false() {
 # after-spec prompt branch is deleted (rerun gets the round-2 prompt).
 case_9_spec() {
   CASE="9 SPEC stops the rounds; rerun gets the after-spec prompt"; fixture c9
-  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=SPEC
+  # FAKE_VITEST=pass: the mutation survives (GREEN). Phase 1.5: a machine
+  # veto must not touch SPEC — the story is wrong, not the build.
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=SPEC FAKE_VITEST=pass
   assert_eq "$RC" 0 "exit code"
   assert_eq "$(field status)" needs_human "story status"
-  assert_eq "$(review_line 3)" "verdict: SPEC" ".review line 3"
+  assert_eq "$(review_line 3)" "verdict: SPEC" ".review line 3 — SPEC immune to the veto"
   assert_eq "$(review_line 4)" "rounds: 1 of 2" "stopped after round 1"
   assert_eq "$(calls claude)" 1 "builder called once"
   set_ready
@@ -370,6 +376,33 @@ case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PAT
 case_22_mutation_prered()   { mutation_case c22 "22 instrument already red → PRE_RED"      PRE_RED      AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=fail; }
 case_23_mutation_cmd()      { mutation_case c23 "23 .cmd selector, non-zero exit → RED"    RED          AC1-marker FAKE_MUTATIONS=cmd; }
 
+# Phase 1.5. The verdict is computed: every AC needs ≥1 mutation and every
+# mutation must be RED (D1 — any GREEN vetoes). Red when the mutation checks
+# in the veto block are deleted: the model's PASS then stands.
+veto_case() {                         # veto_case <name> <label> <expected-reason-regex> [VAR=value …]
+  local name="$1" label="$2" reason="$3"; shift 3
+  CASE="$label"; fixture "$name"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 "$@"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
+  assert_grep "^computed: FAIL — .*$reason" "$REPO/.review/$STORY.md" "reason enumerated"
+  assert_grep '^model: *PASS' "$REPO/.review/$STORY.md" "model verdict still recorded"
+}
+case_24_veto_green()       { veto_case c24 "24 a surviving mutation vetoes PASS (D1)" 'AC1 marker GREEN'  FAKE_VITEST=pass; }
+case_25_veto_no_mutation() { veto_case c25 "25 an AC with no mutation vetoes PASS"    'AC1 has no mutation' FAKE_MUTATIONS=none; }
+case_26_veto_wrong_ac()    { veto_case c26 "26 a mutation for another AC does not cover AC1" 'AC1 has no mutation' FAKE_MUTATIONS=ac2only; }
+
+# Phase 1.5. In-run round 2 must see the Machine block, not only the prose.
+# Red when the REVIEW_TEXT refresh after the round section is deleted.
+case_27_round2_gets_machine_facts() {
+  CASE="27 round 2 prompt carries the Machine block"; fixture c27
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_VITEST=pass
+  assert_eq "$(calls claude)" 2 "two rounds ran"
+  assert_grep '^### Machine' "$TRACE/claude-prompt-2" "machine block present"
+  assert_grep '^AC1 +GREEN +marker' "$TRACE/claude-prompt-2" "the surviving mutation, as a fact"
+  assert_grep 'fake review, call 1' "$TRACE/claude-prompt-2" "reviewer prose still present"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -378,7 +411,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_12_baseline_test_red case_13_baseline_build_red case_14_baseline_lint_red
        case_15_baseline_notests case_16_reviewer_dirty_tree case_17_reviewer_output_copied
        case_18_mutation_red case_19_mutation_green case_20_mutation_notests
-       case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd)
+       case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
+       case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
+       case_27_round2_gets_machine_facts)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

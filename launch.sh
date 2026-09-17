@@ -480,18 +480,30 @@ while (( ROUND < MAX_ROUNDS )); do
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"
   else VERDICT="UNPARSEABLE"; fi
 
-  # Machine veto. The reviewer's line is one input; a red baseline overrides
-  # a PASS. It never overrides SPEC (the story is wrong, not the build) and
-  # never turns anything INTO a PASS.
+  # ── verdict ────────────────────────────────────────────────────────────────
+  #
+  # The reviewer's line is one input. The machine may veto a PASS; it never
+  # grants one, and it never touches SPEC (the story is wrong, not the build).
+  #   baseline   test, build, lint all green
+  #   coverage   every AC in the story has at least one mutation
+  #   D1         every mutation is RED — a survivor means the instrument is
+  #              absent or the mutation is wrong, and either needs a human
   MODEL_VERDICT="$VERDICT"
   MACHINE_REASONS=""
   [[ "$BASE_TEST"  == GREEN ]] || MACHINE_REASONS+="baseline test $BASE_TEST; "
   [[ "$BASE_BUILD" == GREEN ]] || MACHINE_REASONS+="baseline build $BASE_BUILD; "
   [[ "$BASE_LINT"  == GREEN ]] || MACHINE_REASONS+="baseline lint $BASE_LINT; "
+  for ac in $AC_IDS; do
+    grep -q "^$ac " <<< "$MUT_ROWS" || MACHINE_REASONS+="$ac has no mutation; "
+  done
+  while read -r ac cls slug; do
+    [[ -n "$ac" && "$cls" != RED ]] && MACHINE_REASONS+="$ac $slug $cls; "
+  done <<< "$MUT_ROWS"
   if [[ -n "$MACHINE_REASONS" && "$VERDICT" == "PASS" ]]; then
     VERDICT="FAIL"
     warn "machine veto: $MACHINE_REASONS"
   fi
+
 
   cat >> "$REVIEW_FILE.new" <<EOF
 
@@ -504,6 +516,7 @@ reviewed: $(date -Iseconds)
 ### Machine
 
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
+acs:      $AC_IDS
 model:    $MODEL_VERDICT
 computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
 ${MUT_TABLE:+mutations:
@@ -517,6 +530,10 @@ $BUILD_MSG
 
 $REVIEW_TEXT
 EOF
+
+  # What the next round's builder reads is the review so far — Machine block
+  # and prose — exactly what a restart reloads from the file. One path.
+  REVIEW_TEXT="$(cat "$REVIEW_FILE.new")"
 
   if [[ "$VERDICT" == "PASS" ]]; then
     log "round $ROUND: PASS"
