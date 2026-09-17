@@ -468,6 +468,23 @@ case_32_huge_review_prompt() {
   assert_eq "$(field status)" done "story completed"
 }
 
+# Found on 007's fifth round. The builder reads the story from its worktree;
+# the reviewer's tree is detached at the builder's head. Both are cut from
+# the story branch, and a story amended on the base after that cut reached
+# neither agent. The launcher now syncs the base copy into the worktree as
+# its own commit before the round starts. Red when sync_story is deleted.
+case_33_story_amendment_reaches_builder() {
+  CASE="33 story amended on base reaches a resumed builder"; fixture c33
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  printf '\n**AC2 — amended after the branch was cut.** Goes red when ignored.\n' >> "$REPO/.stories/$STORY.md"
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=ac2only
+  assert_grep 'amended after the branch was cut' "$FX/wt-$STORY/.stories/$STORY.md" "worktree story carries the amendment"
+  assert_grep 'spec synced' "$(git -C "$FX/wt-$STORY" log --format=%s -3 | tr '\n' ' ' > "$FX/wtlog"; echo "$FX/wtlog")" "sync is a launcher commit on the story branch"
+  assert_grep 'commits this round: 1' "$REPO/.review/$STORY.md" "sync commit not counted as the builder's"
+  assert_grep '^acs: .*AC2' "$REPO/.review/$STORY.md" "verdict computed against the amended AC set"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -480,7 +497,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
        case_27_round2_gets_machine_facts
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
-       case_31_codex_stderr_notice case_32_huge_review_prompt)
+       case_31_codex_stderr_notice case_32_huge_review_prompt
+       case_33_story_amendment_reaches_builder)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

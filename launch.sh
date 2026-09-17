@@ -259,7 +259,7 @@ check_scope() {                       # check_scope <evidence-dir> → SCOPE SCO
   if (( ${#globs[@]} )); then
     while read -r f; do
       [[ -n "$f" ]] || continue
-      [[ "$f" == ".blocked/$STORY_ID.md" || "$f" == docs/fleet/$STORY_ID-*.md ]] && continue
+      [[ "$f" == ".blocked/$STORY_ID.md" || "$f" == ".stories/$STORY_ID.md" || "$f" == docs/fleet/$STORY_ID-*.md ]] && continue
       for g in "${globs[@]}"; do
         [[ "$f" == $g ]] && { SCOPE_HITS+="$f "; break; }
       done
@@ -411,6 +411,31 @@ else
   log "installing deps"
   ( cd "$BUILDER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed"
 fi
+
+# ── story sync ───────────────────────────────────────────────────────────────
+#
+# The builder reads the story from its worktree and the reviewer's tree is
+# detached at the builder's head — both descend from the story branch. A
+# story amended on the base after that branch was cut (a needs_human
+# rewrite, the normal case) reached neither agent: 007 round 5 ran against
+# the pre-amendment text. The base copy is the spec of record; it is synced
+# into the worktree as a launcher commit before the round's start SHA is
+# taken, so it is never counted as the builder's work. Frontmatter differs
+# by design (status, round); only the body decides whether to sync.
+
+story_body() { awk 'NR==1 && $0!="---" {p=1} /^---$/ {d++; next} d>=2 || p' "$1"; }
+
+sync_story() {
+  local wt_story="$BUILDER_WT/.stories/$STORY_ID.md"
+  if [[ ! -f "$wt_story" ]] || ! diff -q <(story_body "$STORY_FILE") <(story_body "$wt_story") >/dev/null; then
+    mkdir -p "$BUILDER_WT/.stories"
+    cp "$STORY_FILE" "$wt_story"
+    git -C "$BUILDER_WT" add ".stories/$STORY_ID.md"
+    git -C "$BUILDER_WT" commit -q -m "story($STORY_ID): spec synced from $BASE_BRANCH" || die "story sync commit failed"
+    log "story spec synced into the worktree (it had changed on $BASE_BRANCH)"
+  fi
+}
+sync_story
 
 BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$BASE_BRANCH")"
 log "base ${BASE_SHA:0:8}"
