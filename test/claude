@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# fleet/test/claude — stand-in for the real `claude -p …` under fleet/test-lib.sh.
+#
+# The launcher invokes `claude` by bare name with cwd = the builder worktree
+# (launch.sh: `cd "$BUILDER_WT" && claude -p "$PROMPT" …`). This script is
+# found first on PATH and does exactly one scripted thing:
+#
+#   FAKE_BUILDER=commit     one empty commit  (the postcondition the launcher checks)
+#   FAKE_BUILDER=nocommit   nothing
+#   FAKE_BUILDER=blocked    writes .blocked/$FAKE_STORY_ID.md, no commit
+#
+# It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
+# given as $FAKE_TRACE_DIR/claude-prompt-N, so a test can assert which prompt
+# the launcher rendered. Output is the one JSON object the launcher parses
+# with jq (launch.sh: `.is_error`, `.result`).
+#
+set -euo pipefail
+: "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
+: "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
+
+prompt=""
+while (($#)); do
+  case "$1" in
+    -p) prompt="${2:-}"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+
+echo claude >> "$FAKE_TRACE_DIR/calls"
+n="$(grep -c '^claude$' "$FAKE_TRACE_DIR/calls")"
+printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
+
+case "$FAKE_BUILDER" in
+  commit)   git commit -q --allow-empty -m "fake(builder): round $n" ;;
+  nocommit) : ;;
+  blocked)  mkdir -p .blocked
+            printf 'fake question: which option?\n' > ".blocked/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md" ;;
+  *) echo "fleet/test/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
+esac
+
+printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n"

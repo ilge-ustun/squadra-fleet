@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#
+# fleet/test/codex — stand-in for the real `codex exec --json …` under fleet/test-lib.sh.
+#
+# The launcher invokes `codex` by bare name with the review prompt as the
+# LAST argument (launch.sh: `codex exec --json --sandbox … "$REVIEW_PROMPT"`)
+# and filters the output with
+#   jq -r 'select(.type=="item.completed") | .item.text'
+# then greps the text for `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$`.
+#
+#   FAKE_REVIEWER=PASS | FAIL | SPEC   a well-formed verdict line
+#   FAKE_REVIEWER=garbage              no line the launcher can parse → UNPARSEABLE
+#
+# Records calls in $FAKE_TRACE_DIR/calls and the prompt as codex-prompt-N.
+#
+set -euo pipefail
+: "${FAKE_REVIEWER:?FAKE_REVIEWER must be set}"
+: "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
+
+prompt="${*: -1}"
+echo codex >> "$FAKE_TRACE_DIR/calls"
+n="$(grep -c '^codex$' "$FAKE_TRACE_DIR/calls")"
+printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
+
+case "$FAKE_REVIEWER" in
+  PASS|FAIL|SPEC) text=$'fake review, call '"$n"$'.\nfinding: none.\nVERDICT: '"$FAKE_REVIEWER" ;;
+  garbage)        text=$'fake review, call '"$n"$'.\nverdict: pass (lowercase, not the contract)' ;;
+  *) echo "fleet/test/codex: unknown FAKE_REVIEWER='$FAKE_REVIEWER'" >&2; exit 2 ;;
+esac
+
+# JSON Lines, as codex emits: an unrelated event first, then the completed item.
+jq -cn '{type:"thread.started"}'
+jq -cn --arg t "$text" '{type:"item.completed", item:{text:$t}}'

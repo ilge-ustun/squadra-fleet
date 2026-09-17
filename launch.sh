@@ -41,7 +41,7 @@ BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
 MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
-INSTALL_CMD="npm ci"
+INSTALL_CMD="${INSTALL_CMD:-npm ci}"   # overridable so fleet/test-lib.sh can skip the install
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
 PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
