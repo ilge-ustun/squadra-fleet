@@ -207,6 +207,14 @@ case_5_restart_after_fail() {
   assert_eq "$(calls claude)" 3 "builder called a third time"
   assert_grep 'REJECTED' "$TRACE/claude-prompt-3" "restart renders the rejected-build prompt"
   assert_grep 'prior failing review found' "$LOG" "launcher says so"
+  # Rounds continue across reruns (found on 007's rerun): the third round is
+  # round 3, its evidence lands in round-3/, round-1/ is not clobbered, and
+  # the review file keeps every round's section. Red when ROUND restarts at 0.
+  assert_eq "$(review_line 4)" "rounds: 3 of 3" "round numbering continues"
+  assert_file "$REPO/.review/$STORY/round-3/reviewer.md" "round-3 evidence dir"
+  assert_grep 'fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "round-1 evidence not clobbered"
+  assert_grep '^## Round 1 ' "$REPO/.review/$STORY.md" "review file keeps round 1"
+  assert_grep '^## Round 3 ' "$REPO/.review/$STORY.md" "review file has round 3"
 }
 
 # Red when the UNPARSEABLE fallthrough is changed to any real verdict.

@@ -382,6 +382,13 @@ if [[ -f "$REVIEW_FILE" ]] && grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)' "$REV
   warn "prior failing review found — builder starts from the findings"
 fi
 RUN_FILE="$REPO_ROOT/.runs/$STORY_ID.json"
+# Rounds continue across reruns. A story sent back to ready after needs_human
+# resumes at its recorded round, so its new evidence lands in a new
+# round-N/ directory and the earlier rounds' sections stay in the review
+# file — instead of a rerun clobbering round-1/. Found on 007's rerun.
+ROUND_START="$(story_field "$STORY_ID" round)"
+[[ "$ROUND_START" =~ ^[0-9]+$ ]] || ROUND_START=0
+ROUND_CEILING=$(( ROUND_START + MAX_ROUNDS ))
 
 cleanup_reviewer() { [[ -d "$REVIEWER_WT" ]] && git -C "$REPO_ROOT" worktree remove "$REVIEWER_WT" --force 2>/dev/null; }
 trap cleanup_reviewer EXIT
@@ -414,20 +421,24 @@ RULES="$(render_prompt rules.md)"
 
 # ── review rounds ────────────────────────────────────────────────────────────
 
-: > "$REVIEW_FILE.new"
+if (( ROUND_START > 0 )) && [[ -f "$REVIEW_FILE" ]]; then
+  awk '/^## Round /{p=1} p' "$REVIEW_FILE" > "$REVIEW_FILE.new"   # keep earlier rounds
+else
+  : > "$REVIEW_FILE.new"
+fi
 VERDICT=""
-ROUND=0
+ROUND=$ROUND_START
 
-while (( ROUND < MAX_ROUNDS )); do
+while (( ROUND < ROUND_CEILING )); do
   ROUND=$(( ROUND + 1 ))
   set_story_field "$STORY_ID" round "$ROUND"
-  log "round $ROUND of $MAX_ROUNDS"
+  log "round $ROUND of $ROUND_CEILING"
 
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
   
-  if (( ROUND == 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
+  if (( ROUND == ROUND_START + 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
     BUILD_PROMPT="$(render_prompt build-round1.md)"
-  elif (( ROUND == 1 )) && grep -qE '^verdict: SPEC' "$REVIEW_FILE" 2>/dev/null; then
+  elif (( ROUND == ROUND_START + 1 )) && grep -qE '^verdict: SPEC' "$REVIEW_FILE" 2>/dev/null; then
     BUILD_PROMPT="$(render_prompt build-after-spec.md)"
   else
     BUILD_PROMPT="$(render_prompt build-round2.md)"
@@ -609,7 +620,7 @@ EOF
   fi
 
   warn "round $ROUND: $VERDICT"
-  (( ROUND < MAX_ROUNDS )) && log "re-running builder with the findings"
+  (( ROUND < ROUND_CEILING )) && log "re-running builder with the findings"
 done
 
 # ── outcome ──────────────────────────────────────────────────────────────────
@@ -618,7 +629,7 @@ done
   echo "# Review: $STORY_ID"
   echo
   echo "verdict: $VERDICT"
-  echo "rounds: $ROUND of $MAX_ROUNDS"
+  echo "rounds: $ROUND of $ROUND_CEILING"
   echo "base: $BASE_SHA"
   cat "$REVIEW_FILE.new"
 } > "$REVIEW_FILE"
