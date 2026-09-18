@@ -187,8 +187,10 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
 # .review/<id>/round-N/mutations/ACn-<slug>.patch with a .test (vitest
 # selector) or .cmd (any command) beside it, in the clean reviewer tree:
 #
-#   pre-run, unmutated  → must be green, else PRE_RED: the instrument was
-#                         already failing and proves nothing
+#   pre-run, unmutated  → must be green. Failing → PRE_RED: the instrument was
+#                         already red and proves nothing. Collecting no tests
+#                         → SELECTOR_INVALID: the selector never named a test,
+#                         which is a different mistake with a different fix
 #   git apply           → else PATCH_INVALID
 #   run, mutated        → RED needs a REAL failure. .test: numFailedTests > 0;
 #                         zero tests collected is NO_TESTS (the mutation broke
@@ -239,7 +241,14 @@ run_mutations() {                     # run_mutations <wt> <evidence-dir> → MU
     else
       [[ -z "$(porcelain "$wt")" ]] || die "mutation runner: tree dirty before $name"
       pre="$(run_selector "$wt" "$kind" "$sel" "$raw-pre")"
-      if [[ "$pre" != GREEN ]]; then
+      if [[ "$pre" == NO_TESTS ]]; then
+        # The selector collected nothing before the mutation was applied: a
+        # path that does not exist, a -t pattern that matches no test, or a
+        # shell command written into a .test file (014, round 1). Not the
+        # same finding as an instrument that runs and fails, and not the same
+        # fix, so not the same name.
+        cls=SELECTOR_INVALID
+      elif [[ "$pre" != GREEN ]]; then
         cls=PRE_RED
       elif ! git -C "$wt" apply --check "$p" 2> "$raw-apply.log" || ! git -C "$wt" apply "$p" 2>> "$raw-apply.log"; then
         cls=PATCH_INVALID

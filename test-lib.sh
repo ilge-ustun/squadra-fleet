@@ -397,6 +397,13 @@ case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation 
 case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }
 case_22_mutation_prered()   { mutation_case c22 "22 instrument already red → PRE_RED"      PRE_RED      AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=fail; }
 case_23_mutation_cmd()      { mutation_case c23 "23 .cmd selector, non-zero exit → RED"    RED          AC1-marker FAKE_MUTATIONS=cmd; }
+# Phase A3. PRE_RED used to mean two things: an instrument that genuinely
+# fails before the mutation (22, worth a human's attention) and a selector
+# that collects no tests at all — a path that does not exist, a shell command
+# in a .test file (014 round 1). They need different answers, so they need
+# different names. Red while both map to PRE_RED.
+case_51_selector_invalid() { mutation_case c51 "51 selector collects no tests → SELECTOR_INVALID" SELECTOR_INVALID AC1-marker FAKE_MUTATIONS=patch FAKE_VITEST=notests
+                             assert_grep '^computed: FAIL — .*SELECTOR_INVALID' "$REPO/.review/$STORY.md" "it vetoes, and says which class"; }
 
 # Phase 1.5. The verdict is computed: every AC needs ≥1 mutation and every
 # mutation must be RED (D1 — any GREEN vetoes). Red when the mutation checks
@@ -936,7 +943,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_35_builder_tdd_mutation case_36_reviewer_probes
        case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
        case_46_baseline_self_test case_47_self_test_only_for_fleet
-       case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure)
+       case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure
+       case_51_selector_invalid)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

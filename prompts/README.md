@@ -66,8 +66,10 @@ Mutation classes: `RED` (a real failure: `numFailedTests > 0`, or non-zero
 exit for `.cmd`), `GREEN` (survived — the instrument is absent for that
 behaviour), `NO_TESTS` (zero tests collected: the mutation broke compilation;
 never counts as RED), `PRE_RED` (the selector was already failing unmutated;
-proves nothing), `PATCH_INVALID`, `NO_SELECTOR`. Only `RED` satisfies the
-verdict.
+proves nothing), `SELECTOR_INVALID` (the selector collected no tests even
+before the mutation — a path that does not exist, a `-t` pattern matching
+nothing, or a shell command in a `.test` file), `PATCH_INVALID`,
+`NO_SELECTOR`. Only `RED` satisfies the verdict.
 
 ## Evidence
 
