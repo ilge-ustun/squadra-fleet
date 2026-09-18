@@ -1,6 +1,12 @@
 You are reviewing a change against its specification.
 
-The specification is in .stories/{{STORY_ID}}.md — read it first.
+The specification is below. It is the specification of record; there is no
+copy of it in the checkout, so quote it rather than citing it by line.
+
+=== STORY ===
+{{STORY}}
+=== END STORY ===
+
 You are in a clean checkout at commit {{HEAD_SHA}}. The base was {{BASE_SHA}}.
 This is review round {{ROUND}}.
 

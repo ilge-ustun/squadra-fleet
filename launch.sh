@@ -460,36 +460,20 @@ else
   ( cd "$BUILDER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed"
 fi
 
-# ── story sync ───────────────────────────────────────────────────────────────
-#
-# The builder reads the story from its worktree and the reviewer's tree is
-# detached at the builder's head — both descend from the story branch. A
-# story amended on the base after that branch was cut (a needs_human
-# rewrite, the normal case) reached neither agent: 007 round 5 ran against
-# the pre-amendment text. The base copy is the spec of record; it is synced
-# into the worktree as a launcher commit before the round's start SHA is
-# taken, so it is never counted as the builder's work. Frontmatter differs
-# by design (status, round); only the body decides whether to sync.
-
-story_body() { awk 'NR==1 && $0!="---" {p=1} /^---$/ {d++; next} d>=2 || p' "$1"; }
-
-sync_story() {
-  local wt_story="$BUILDER_WT/.stories/$STORY_ID.md"
-  if [[ ! -f "$wt_story" ]] || ! diff -q <(story_body "$STORY_FILE") <(story_body "$wt_story") >/dev/null; then
-    mkdir -p "$BUILDER_WT/.stories"
-    cp "$STORY_FILE" "$wt_story"
-    git -C "$BUILDER_WT" add ".stories/$STORY_ID.md"
-    git -C "$BUILDER_WT" commit -q -m "story($STORY_ID): spec synced from $BASE_BRANCH" || die "story sync commit failed"
-    log "story spec synced into the worktree (it had changed on $BASE_BRANCH)"
-  fi
-}
-sync_story
 
 BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$STORY_BASE")"
 log "base ${BASE_SHA:0:8}"
 
 # rules.md itself contains {{STORY_ID}}, so it is rendered first and then
 # embedded as {{RULES}} by the build prompts.
+# The story reaches both agents in their prompt, not as a file in the worktree.
+# A worktree is cut from an epic branch and the reviewer's tree is detached at
+# the builder's head, so neither sees a story amended on the integration branch
+# afterwards (L-19). Syncing the file in fixed that but committed fleet state
+# onto every story branch, which then conflicted at merge on 007, 008 and 010.
+# Embedding closes both: nothing to sync, nothing to conflict.
+STORY_TEXT="$(cat "$STORY_FILE")"
+
 RULES="$(render_prompt rules.md)"
 
 # ── review rounds ────────────────────────────────────────────────────────────

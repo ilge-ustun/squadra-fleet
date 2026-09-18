@@ -14,6 +14,7 @@ render_prompt() {
   out="${out//\{\{STORY_ID\}\}/${STORY_ID:-}}"
   out="${out//\{\{RULES\}\}/${RULES:-}}"
   out="${out//\{\{REVIEW_TEXT\}\}/${REVIEW_TEXT:-}}"
+  out="${out//\{\{STORY\}\}/${STORY_TEXT:-}}"
   out="${out//\{\{HEAD_SHA\}\}/${HEAD_SHA:-}}"
   out="${out//\{\{BASE_SHA\}\}/${BASE_SHA:-}}"
   out="${out//\{\{ROUND\}\}/${ROUND:-}}"
@@ -21,7 +22,7 @@ render_prompt() {
   # A placeholder the file uses but whose variable is empty substitutes to
   # nothing and reaches the agent as a gap, not an error. Name it.
   local p v
-  for p in STORY_ID RULES REVIEW_TEXT HEAD_SHA BASE_SHA ROUND; do
+  for p in STORY_ID RULES REVIEW_TEXT STORY_TEXT HEAD_SHA BASE_SHA ROUND; do
     [[ "$src" == *"{{$p}}"* ]] || continue
     v="${!p:-}"
     [[ -n "$v" ]] || die "$1 uses {{$p}} but $p is empty"

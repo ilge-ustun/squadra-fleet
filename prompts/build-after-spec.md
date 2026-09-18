@@ -1,4 +1,9 @@
-Read .stories/{{STORY_ID}}.md and implement it.
+Implement the story below — this is the corrected version.
+
+=== STORY ===
+{{STORY}}
+=== END STORY ===
+
 
 A previous run stopped because the reviewer found a criterion that could not
 be satisfied by any implementation. The story has since been rewritten — what

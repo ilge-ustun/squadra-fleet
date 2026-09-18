@@ -468,21 +468,25 @@ case_32_huge_review_prompt() {
   assert_eq "$(field status)" done "story completed"
 }
 
-# Found on 007's fifth round. The builder reads the story from its worktree;
-# the reviewer's tree is detached at the builder's head. Both are cut from
-# the story branch, and a story amended on the base after that cut reached
-# neither agent. The launcher now syncs the base copy into the worktree as
-# its own commit before the round starts. Red when sync_story is deleted.
+# Found on 007's fifth round: the builder read the story from its worktree and
+# the reviewer's tree is detached at the builder's head, so a story amended on
+# the base after the branch was cut reached neither. First fixed by syncing the
+# file into the worktree; now fixed at the root — the story text is rendered
+# into both prompts, so no copy of it need exist in the worktree at all. Red
+# when the prompts stop carrying {{STORY}}.
 case_33_story_amendment_reaches_builder() {
-  CASE="33 story amended on base reaches a resumed builder"; fixture c33
+  CASE="33 a story amended on the base reaches both agents"; fixture c33
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
   printf '\n**AC2 — amended after the branch was cut.** Goes red when ignored.\n' >> "$REPO/.stories/$STORY.md"
   set_ready
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=ac2only
-  assert_grep 'amended after the branch was cut' "$FX/wt-$STORY/.stories/$STORY.md" "worktree story carries the amendment"
-  assert_grep 'spec synced' "$(git -C "$FX/wt-$STORY" log --format=%s -3 | tr '\n' ' ' > "$FX/wtlog"; echo "$FX/wtlog")" "sync is a launcher commit on the story branch"
-  assert_grep 'commits this round: 1' "$REPO/.review/$STORY.md" "sync commit not counted as the builder's"
+  assert_grep 'amended after the branch was cut' "$TRACE/claude-prompt-2" "builder prompt carries the amendment"
+  assert_grep 'amended after the branch was cut' "$TRACE/codex-prompt-2" "reviewer prompt carries it too"
   assert_grep '^acs: .*AC2' "$REPO/.review/$STORY.md" "verdict computed against the amended AC set"
+  assert_grep 'commits this round: 1' "$REPO/.review/$STORY.md" "no sync commit inflating the count"
+  # Only commits this run made — the fixture clones the real repo, whose
+  # history genuinely contains "spec synced" commits from stories 007-010.
+  assert_not_grep 'spec synced' <(git -C "$FX/wt-$STORY" log --format=%s origin/base..HEAD) "no fleet state committed to the story branch"
 }
 
 # REVIEW_ONLY: re-review the branch head without a builder round. The case a

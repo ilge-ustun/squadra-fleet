@@ -1,5 +1,12 @@
-Read .stories/{{STORY_ID}}.md. Your previous attempt was reviewed
-and REJECTED. The findings are below.
+Your previous attempt was reviewed and REJECTED. The story is below,
+followed by the findings. The story is the specification of record; there is
+no copy of it in your worktree, and it may have changed since your last
+attempt.
+
+=== STORY ===
+{{STORY}}
+=== END STORY ===
+
 
 Work through every finding. For each one, either address it or write
 .blocked/{{STORY_ID}}.md and stop. Do not argue with a finding in the code.
