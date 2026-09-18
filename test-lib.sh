@@ -926,6 +926,70 @@ case_50_status_commit_failure() {
   assert_eq "$(calls claude)" 0 "the builder must not run"
 }
 
+# Phase A4. Clearing a story so it can be run again was four manual steps:
+# remove the worktree, delete the branch, edit the frontmatter, delete the
+# review. Four steps done by hand at the end of a long session is where state
+# gets left half-cleared.
+#
+# reset() is destructive by definition, so the cases are mostly about what it
+# refuses to do.
+reset_run() {                         # reset_run <args…> → RLOG RRC
+  RLOG="$FX/reset.log"
+  ( cd "$REPO" && env BASE_BRANCH=base PUSH_STATUS=1 \
+      bash fleet/reset.sh "$@" ) > "$RLOG" 2>&1
+  RRC=$?
+}
+
+# Red without fleet/reset.sh, and red again if any one of the four steps is
+# dropped from it.
+case_52_reset() {
+  CASE="52 reset clears a story back to the queue"; fixture c52
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  assert_eq "$(field status)" needs_human "precondition: the story stopped"
+  assert_file "$REPO/.review/$STORY.md" "precondition: a review exists"
+
+  reset_run "$STORY" --force
+  assert_eq "$RRC" 0 "exit code"
+  assert_eq "$(field status)" ready "status back to ready"
+  assert_eq "$(field round)" 0 "round back to 0"
+  [[ -d "$FX/wt-$STORY" ]] && fail "worktree still there" || ok
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && fail "branch still there" || ok
+  assert_no_file "$REPO/.review/$STORY.md" "review file gone"
+  [[ -d "$REPO/.review/$STORY" ]] && fail "evidence dir still there" || ok
+  assert_not_contains "$(tracked)" ".review/$STORY" "and gone from the index, not just the worktree"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "reset" "the reset is a commit, not a local edit"
+}
+
+# The guard that matters. A launcher mid-round has a live process in the
+# worktree; removing it under the agent loses the round and leaves git holding
+# a worktree that is not there. Red when the procs_in_worktree check is
+# deleted: the reset proceeds and the branch is gone.
+case_53_reset_refuses_while_live() {
+  CASE="53 reset refuses while something is running in the worktree"; fixture c53
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  ( cd "$FX/wt-$STORY" && exec sleep 30 ) &
+  local pid=$!
+  sleep 0.3
+  reset_run "$STORY" --force
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_eq "$RRC" 1 "exit code (die)"
+  assert_grep 'running' "$RLOG" "the message says why"
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && ok || fail "the branch must survive"
+  assert_eq "$(field status)" needs_human "and the status is untouched"
+}
+
+# --force is required because the branch holds work that is on no other
+# branch. Red when the unmerged check is deleted: the work goes without a word.
+case_54_reset_refuses_unmerged() {
+  CASE="54 reset refuses to drop unmerged work without --force"; fixture c54
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  reset_run "$STORY"
+  assert_eq "$RRC" 1 "exit code (die)"
+  assert_grep 'force' "$RLOG" "the message names the way through"
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && ok || fail "the branch must survive"
+  assert_eq "$(field status)" needs_human "and the status is untouched"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -944,7 +1008,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
        case_46_baseline_self_test case_47_self_test_only_for_fleet
        case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure
-       case_51_selector_invalid)
+       case_51_selector_invalid
+       case_52_reset case_53_reset_refuses_while_live case_54_reset_refuses_unmerged)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
