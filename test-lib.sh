@@ -69,7 +69,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fixture-repo> — die unless the fakes are what resolves
   local repo="$1" name got
-  for name in claude codex npm; do
+  for name in claude codex npm curl; do
     got="$(PATH="$repo/fleet/test:$PATH" command -v "$name")"
     if [[ "$got" != "$repo/fleet/test/$name" ]]; then
       echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -990,6 +990,329 @@ case_54_reset_refuses_unmerged() {
   assert_eq "$(field status)" needs_human "and the status is untouched"
 }
 
+# Phase C3. status.sh is the only thing that knows where a story stands, and
+# it knows it by parsing frontmatter and asking git — there is no state file,
+# deliberately: a second source of truth would need keeping in sync with the
+# frontmatter, which is already authoritative. --json gives the same values a
+# shape that the Telegram bot and the merger can consume without re-parsing a
+# terminal table.
+#
+# Red without --json: status.sh prints its table and jq rejects it.
+case_55_status_json() {
+  CASE="55 status.sh --json is machine-readable"; fixture c55
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  local out; out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --json )"
+  jq -e . >/dev/null 2>&1 <<< "$out" && ok || fail "output parses as JSON"
+  assert_eq "$(jq -r '.[0].id'      <<< "$out")" "$STORY" "id"
+  assert_eq "$(jq -r '.[0].status'  <<< "$out")" done     "status"
+  assert_eq "$(jq -r '.[0].verdict' <<< "$out")" PASS     "computed verdict"
+  assert_eq "$(jq -r '.[0].round'   <<< "$out")" 1        "round, as a number"
+  assert_eq "$(jq -r '.[0].base'    <<< "$out")" base     "the epic it belongs to"
+  assert_eq "$(jq -r '.[0].merged'  <<< "$out")" false    "not merged into it yet"
+  # One story, still an array: a caller should not need two parsers.
+  local one; one="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --json "$STORY" )"
+  assert_eq "$(jq -r 'length' <<< "$one")" 1 "a single story is an array of one"
+  # The table must still be the default — status.sh is read by people too.
+  local table; table="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh )"
+  assert_contains "$table" "ID" "the human table is still the default"
+}
+
+# Phase E1. Nothing merged itself in thirteen stories; every merge was a
+# human's. merge.sh is what the queue will call on a computed PASS, so most of
+# its cases are about the refusals — the point is not that it merges, it is
+# that it merges only what it should and undoes itself when it is wrong.
+#
+# The post-merge baseline is the check that earns the autonomy: two stories
+# that each passed alone can still break each other on the epic branch, and
+# nothing before this ran a suite against the merged result.
+
+epic_story() {                        # epic_story <case-name> — a story on an epic branch
+  fixture "$1"
+  git -C "$REPO" checkout -q -b epic/test
+  git -C "$REPO" push -q -u origin epic/test
+  git -C "$REPO" checkout -q base
+  sed -i '2a base: epic/test' "$REPO/.stories/$STORY.md"
+}
+
+merge_run() {                         # merge_run <args…> → MLOG MRC
+  MLOG="$FX/merge.log"
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
+      "$@" bash fleet/merge.sh "$STORY" ) > "$MLOG" 2>&1
+  MRC=$?
+}
+
+epic_head() { git -C "$REPO" rev-parse "origin/epic/test"; }
+
+# Red without fleet/merge.sh, and red again if the push or the frontmatter
+# record is dropped: a merge nobody can see, or one that cannot be reverted.
+case_56_merge() {
+  CASE="56 a computed PASS merges into its epic"; epic_story c56
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "precondition: the story passed"
+  local before; before="$(epic_head)"
+
+  merge_run
+  assert_eq "$MRC" 0 "exit code"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/epic/test && ok \
+    || fail "the story is an ancestor of the epic"
+  [[ "$(epic_head)" != "$before" ]] && ok || fail "the epic moved"
+  assert_grep '^merged: [0-9a-f]{7,}' "$REPO/.stories/$STORY.md" "the merge sha is recorded, so it can be reverted"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "merged" "and recorded as a commit on the integration branch"
+}
+
+# Red when the verdict check is deleted: a story the harness vetoed lands.
+case_57_merge_refuses_fail() {
+  CASE="57 merge refuses a story the machine vetoed"; epic_story c57
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  assert_eq "$(field status)" needs_human "precondition: the story failed"
+  local before; before="$(epic_head)"
+  merge_run
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'FAIL|needs_human|not done' "$MLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+}
+
+# The check that earns auto-merge. Red when the post-merge baseline or its
+# undo is deleted: the epic keeps a merge whose suite is red.
+case_58_merge_undoes_itself() {
+  CASE="58 a red post-merge baseline undoes the merge"; epic_story c58
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  merge_run BUILD_CMD=false
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'baseline' "$MLOG" "the message names the baseline"
+  assert_eq "$(epic_head)" "$before" "the epic is exactly where it was"
+  assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "and nothing claims it merged"
+}
+
+# develop and main are human-only, always. Red when that guard is deleted.
+case_59_merge_refuses_integration_branch() {
+  CASE="59 merge refuses to touch the integration branch"; fixture c59
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  merge_run
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'base' "$MLOG" "the message names the branch it will not touch"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
+}
+
+# Phase D. The bot is both halves of the control plane: how the fleet reaches
+# a human and how the human reaches back. fleet/test/curl shadows curl, so no
+# case here touches the network.
+
+bot() {                               # bot <verb> [args…] → BLOG BRC
+  BLOG="$FX/bot.log"
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      FAKE_TRACE_DIR="$TRACE" \
+      TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 \
+      FAKE_TELEGRAM_UPDATES="${FAKE_TELEGRAM_UPDATES:-}" \
+      QUEUE_START_CMD=true \
+      bash fleet/telegram.sh "$@" ) > "$BLOG" 2>&1
+  BRC=$?
+}
+
+update() {                            # update <update_id> <from_id> <text> → writes $FX/updates.json
+  jq -nc --argjson uid "$1" --argjson from "$2" --arg text "$3" \
+    '{ok:true, result:[{update_id:$uid, message:{from:{id:$from}, text:$text}}]}' \
+    > "$FX/updates.json"
+  FAKE_TELEGRAM_UPDATES="$FX/updates.json"
+}
+
+sent() { cat "$TRACE"/curl-args-* 2>/dev/null | grep -c 'sendMessage' ; }
+# The whole recorded argv, not just the line starting with text=: a message is
+# multi-line and only its first line carries the prefix.
+sent_text() { cat "$TRACE"/curl-args-* 2>/dev/null; }
+
+# Red when the send call is removed, or when it stops passing the text.
+case_60_bot_send() {
+  CASE="60 send reaches the API with the text"; fixture c60
+  bot send "014 needs_human"
+  assert_eq "$BRC" 0 "exit code"
+  assert_eq "$(sent)" 1 "one sendMessage"
+  assert_contains "$(sent_text)" "014 needs_human" "carrying the message"
+}
+
+# A fleet with no bot configured must still run: a notification is not part of
+# a verdict. Red if the missing configuration is made fatal.
+case_61_bot_unconfigured_is_not_fatal() {
+  CASE="61 an unconfigured bot does not stop anything"; fixture c61
+  BLOG="$FX/bot.log"
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" FAKE_TRACE_DIR="$TRACE" \
+      bash fleet/telegram.sh send "anyone there" ) > "$BLOG" 2>&1
+  assert_eq "$?" 0 "exit code is still 0"
+  assert_grep 'not configured' "$BLOG" "and it says why"
+  assert_eq "$(sent)" 0 "nothing was sent"
+}
+
+# The whole security model. Anyone who finds the bot can message it; only the
+# configured chat id is acted on, and an unauthorised sender gets no reply at
+# all, because a reply confirms the bot exists.
+# Red when the from.id comparison is deleted: a stranger can promote a story.
+case_62_bot_ignores_strangers() {
+  CASE="62 a message from anyone else changes nothing"; fixture c62
+  update 100 999 "/promote $STORY"
+  bot poll
+  assert_eq "$BRC" 0 "exit code"
+  assert_eq "$(sent)" 0 "no reply — not even a refusal"
+  assert_eq "$(field status)" ready "the story was not touched"
+  assert_grep 'ignored a message from 999' "$BLOG" "but it is recorded"
+}
+
+# Red when /status stops going through status.sh.
+case_63_bot_status() {
+  CASE="63 /status answers with the table"; fixture c63
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  update 101 42 "/status"
+  bot poll
+  assert_eq "$(sent)" 1 "one reply"
+  assert_contains "$(sent_text)" "$STORY" "naming the story"
+  assert_contains "$(sent_text)" "done" "and its status"
+}
+
+# The write path: this is what makes a phone a control plane.
+# Red when cmd_promote stops committing: the queue on the next drain sees
+# nothing, because it reads what is committed.
+case_64_bot_promote() {
+  CASE="64 /promote puts a story back in the queue"; fixture c64
+  sed -i '0,/^status:.*/s//status: draft/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "park the fixture story"
+  update 102 42 "/promote $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "status changed"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "promoted" "and committed, which is what the queue reads"
+  assert_contains "$(sent_text)" "ready" "the human is told"
+}
+
+# An update acknowledged once must never be replayed: /promote twice is
+# harmless, but /run twice is a second drain. Red when the offset write is
+# deleted.
+case_65_bot_offset_advances() {
+  CASE="65 an update is acted on once"; fixture c65
+  update 500 42 "/status"
+  bot poll
+  assert_eq "$(cat "$REPO/.bot-offset" 2>/dev/null)" 501 "offset is one past the last update"
+  assert_grep 'offset=0' "$TRACE/curl-calls" "the first poll started from 0"
+  bot poll
+  assert_grep 'offset=501' "$TRACE/curl-calls" "the second asked only for what follows"
+}
+
+# Phase E3. Auto-merge is allowed to change an epic branch without asking
+# because undoing it is one word on a phone. This is that word.
+
+revert_run() {                        # revert_run → RVLOG RVRC
+  RVLOG="$FX/revert.log"
+  ( cd "$REPO" && env BASE_BRANCH=base PUSH_STATUS=1 \
+      bash fleet/revert.sh "$STORY" ) > "$RVLOG" 2>&1
+  RVRC=$?
+}
+
+# Red when the revert, the push or the frontmatter cleanup is dropped: the
+# epic keeps the merge, or status.sh goes on claiming a merge that is undone.
+case_66_revert() {
+  CASE="66 revert undoes the merge it recorded"; epic_story c66
+  # A builder that changes a file, not an empty commit: reverting a merge that
+  # carried no content is a no-op git refuses, and the case would be testing
+  # the fixture rather than the revert.
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before_tree; before_tree="$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")"
+  local before; before="$(epic_head)"
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  [[ "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" != "$before_tree" ]] \
+    && ok || fail "precondition: the merge changed the epic's content"
+
+  revert_run
+  assert_eq "$RVRC" 0 "exit code"
+  assert_eq "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" "$before_tree" \
+    "the epic's tree is exactly what it was before the merge"
+  [[ "$(epic_head)" != "$before" ]] && ok || fail "by a new commit, not by moving the branch back"
+  assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "and the story no longer claims it"
+}
+
+# Red when the recorded-sha check is deleted: reverting something that never
+# merged would revert whatever HEAD happened to be.
+case_67_revert_needs_a_merge() {
+  CASE="67 revert refuses a story that never merged"; epic_story c67
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  revert_run
+  assert_eq "$RVRC" 1 "exit code (die)"
+  assert_grep 'no recorded merge' "$RVLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+}
+
+# The revert the merge notification offers has to be reachable from the same
+# phone that received it, or the revert window is a window onto a laptop.
+# Red when /revert is not in the dispatch table.
+case_68_bot_revert() {
+  CASE="68 /revert undoes a merge from the phone"; epic_story c68
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before_tree; before_tree="$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")"
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  update 200 42 "/revert $STORY"
+  bot poll
+  assert_eq "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" "$before_tree" "the epic is back"
+  assert_contains "$(sent_text)" "reverted" "and the human is told"
+}
+
+# Phase E2. The launcher decides; the queue merges. A hand-run launch.sh never
+# merges anything — that separation is what keeps a debugging session from
+# changing a branch.
+
+queue_run() {                         # queue_run [VAR=value…] → $FX/queue.log
+  : > "$FX/notify.log"
+  cat > "$FX/notify.sh" <<'EON'
+printf '%s\n---\n' "$*" >> "$(dirname "$0")/notify.log"
+EON
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FLEET_NOTIFY_CMD="bash $FX/notify.sh" \
+      FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      "$@" bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+}
+
+# Red when the merge call is removed from the queue: the story reaches PASS and
+# stops there, which is where the fleet has stopped for thirteen stories.
+case_69_queue_merges_a_pass() {
+  CASE="69 the queue merges a computed PASS and says how to undo it"; epic_story c69
+  local before_tree; before_tree="$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")"
+  queue_run
+  assert_eq "$(field status)" done "the story passed"
+  [[ "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" != "$before_tree" ]] \
+    && ok || fail "the epic has the story's change"
+  assert_grep "merged" "$FX/notify.log" "the human is told it merged"
+  assert_grep "/revert $STORY" "$FX/notify.log" "and told the exact way to undo it"
+}
+
+# A FAIL must never merge, however the queue is feeling. Red when the verdict
+# is read from the reviewer's prose instead of the computed line, or when the
+# merge is called unconditionally.
+case_70_queue_does_not_merge_a_fail() {
+  CASE="70 the queue does not merge a story the machine vetoed"; epic_story c70
+  local before; before="$(epic_head)"
+  queue_run FAKE_REVIEWER=FAIL
+  assert_eq "$(field status)" needs_human "the story stopped"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  assert_grep "needs_human|needs a human" "$FX/notify.log" "and the human is told it needs them"
+}
+
+# AUTO_MERGE=0 is the off switch. Red when it is not honoured — a fleet that
+# cannot be told to stop merging is a fleet you turn off entirely.
+case_71_auto_merge_can_be_turned_off() {
+  CASE="71 AUTO_MERGE=0 leaves the merge to a human"; epic_story c71
+  local before; before="$(epic_head)"
+  queue_run AUTO_MERGE=0
+  assert_eq "$(field status)" done "the story still passed"
+  assert_eq "$(epic_head)" "$before" "but nothing merged"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -1009,7 +1332,15 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_46_baseline_self_test case_47_self_test_only_for_fleet
        case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure
        case_51_selector_invalid
-       case_52_reset case_53_reset_refuses_while_live case_54_reset_refuses_unmerged)
+       case_52_reset case_53_reset_refuses_while_live case_54_reset_refuses_unmerged
+       case_55_status_json
+       case_56_merge case_57_merge_refuses_fail case_58_merge_undoes_itself
+       case_59_merge_refuses_integration_branch
+       case_60_bot_send case_61_bot_unconfigured_is_not_fatal case_62_bot_ignores_strangers
+       case_63_bot_status case_64_bot_promote case_65_bot_offset_advances
+       case_66_revert case_67_revert_needs_a_merge case_68_bot_revert
+       case_69_queue_merges_a_pass case_70_queue_does_not_merge_a_fail
+       case_71_auto_merge_can_be_turned_off)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -1,8 +1,13 @@
 # Running the queue unattended
 
-Two units: a **timer** that fires every 15 minutes and a **oneshot service**
-that drains whatever is `ready`. Nothing here is installed by an agent —
-installing a unit and enabling lingering are a human's calls.
+Four units, in two pairs. **`fleet-queue`** — a timer every 15 minutes and a
+oneshot service that drains whatever is `ready`. **`fleet-bot`** — a timer
+every minute and a oneshot service that reads Telegram commands and answers
+them. Nothing here is installed by an agent — installing a unit and enabling
+lingering are a human's calls.
+
+The bot is a separate pair on purpose: a drain runs for hours, and `/status`
+has to answer while one is running.
 
 ## What happens when there is nothing to do
 
@@ -33,9 +38,35 @@ As the `fleet` user:
 mkdir -p ~/.config/systemd/user
 ln -sf ~/work/khaita/khaita-app/fleet/systemd/fleet-queue.service ~/.config/systemd/user/
 ln -sf ~/work/khaita/khaita-app/fleet/systemd/fleet-queue.timer   ~/.config/systemd/user/
+ln -sf ~/work/khaita/khaita-app/fleet/systemd/fleet-bot.service   ~/.config/systemd/user/
+ln -sf ~/work/khaita/khaita-app/fleet/systemd/fleet-bot.timer     ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now fleet-queue.timer
+systemctl --user enable --now fleet-bot.timer
 ```
+
+### Before the bot pair will do anything
+
+Create the bot with **@BotFather** on Telegram (`/newbot`), then send it any
+message and read your own numeric id from
+`https://api.telegram.org/bot<TOKEN>/getUpdates` — the `message.from.id`.
+Both values go in `.env.fleet` **at the repo root**:
+
+```
+TELEGRAM_BOT_TOKEN=123456:AA…
+TELEGRAM_CHAT_ID=987654321
+```
+
+Not `.env.local`: that file is in the launcher's `SEED_FILES` and is copied
+into every builder and reviewer worktree, so a token there is a token handed
+to every agent. `.env.fleet` is gitignored by the existing `.env*` rule and is
+read by `fleet/telegram.sh` alone.
+
+The token is write access to the repo, through `/promote` and `/answer`. What
+stands between it and a stranger: the bot acts only on messages whose sender
+is `TELEGRAM_CHAT_ID`, answers nobody else at all, has a fixed command set
+with no grammar, passes no message text to a shell, and can touch neither
+`main` nor the integration branch.
 
 **As an admin, once** — without this the units stop the moment your ssh
 session ends, which defeats the point:
@@ -49,11 +80,14 @@ sudo loginctl enable-linger fleet
 ## Watching it
 
 ```bash
-systemctl --user list-timers fleet-queue.timer   # when it next fires
+systemctl --user list-timers 'fleet-*'           # when they next fire
 journalctl --user -u fleet-queue -f              # live
 journalctl --user -u fleet-queue --since today   # what it did
+journalctl --user -u fleet-bot --since today     # what was asked of it
 ./fleet/status.sh                                # where every story stands
 ```
+
+Or `/status` on the phone, which is the same table.
 
 `run-queue.sh` prints a per-story summary and then `status.sh`, so the tail of
 each journal entry is the whole picture.
@@ -77,6 +111,8 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | `.service` | `AGENT_TIMEOUT=1800` | wall clock per agent call; a hung agent is killed and the story goes to `needs_human` |
 | `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is committed before the fleet starts (`docs/fleet/FLEET-HANDOFF.md` §2) and a Next build peaks near 1.4 GB |
 | `.service` | `TimeoutStartSec=6h` | a full drain is long; `AGENT_TIMEOUT` already bounds the part that can hang |
+| `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
+| `fleet-bot.timer` | `Persistent=false` | a missed poll is not worth catching up; the offset means nothing is lost by being late |
 
 ## Not done, and needed before this is useful remotely
 

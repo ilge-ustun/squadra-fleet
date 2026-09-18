@@ -1,0 +1,18 @@
+[Unit]
+Description=Khaita fleet — look for Telegram commands every minute
+Documentation=file:///home/fleet/work/khaita/khaita-app/fleet/systemd/README.md
+
+[Timer]
+# A minute is the delay between typing /status on a phone and getting the
+# table back. One getUpdates request with timeout=0 returns immediately and
+# costs nothing, so the interval is about how responsive the bot feels, not
+# about load.
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+# Unlike the queue, a missed poll is not worth catching up: Telegram keeps
+# updates for 24 hours and the offset means nothing is lost by being late.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

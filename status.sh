@@ -7,6 +7,7 @@
 #
 #   ./fleet/status.sh          every story
 #   ./fleet/status.sh 007      one story, with the latest round's machine block
+#   ./fleet/status.sh --json   the same values as JSON, for the bot and merge.sh
 #
 # The verdict shown is the COMPUTED one (`verdict:` line 3 of .review/<id>.md),
 # not the reviewer's — see fleet/prompts/README.md, "The verdict contract".
@@ -15,7 +16,14 @@ set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BASE_BRANCH="${BASE_BRANCH:-develop}"
-ONE="${1:-}"
+JSON=0; ONE=""
+while (($#)); do
+  case "$1" in
+    --json) JSON=1; shift ;;
+    -*)     echo "usage: fleet/status.sh [--json] [story-id]" >&2; exit 2 ;;
+    *)      ONE="$1"; shift ;;
+  esac
+done
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
 
@@ -52,8 +60,16 @@ live_in() {                           # live_in <worktree> → 0 if a process is
   return 1
 }
 
-printf '%-5s %-12s %-6s %-8s %-9s %s\n' ID STATUS ROUND VERDICT BRANCH NOTES
-printf '%s%s%s\n' "$DIM" "$(printf '%.0s─' {1..78})" "$RST"
+# There is no state file, deliberately: the frontmatter is authoritative and a
+# second copy would need keeping in sync with it. --json is the same walk,
+# emitted as data — one object per story, always an array, so a caller never
+# needs two parsers. jq builds it, so no value has to be escaped by hand.
+JSON_ROWS=""
+
+if (( JSON == 0 )); then
+  printf '%-5s %-12s %-6s %-8s %-9s %s\n' ID STATUS ROUND VERDICT BRANCH NOTES
+  printf '%s%s%s\n' "$DIM" "$(printf '%.0s─' {1..78})" "$RST"
+fi
 
 for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
   id="$(basename "$f" .md)"
@@ -72,9 +88,11 @@ for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
   fi
 
   notes=()
+  has_wt=false; live=false
   wt="$REPO_ROOT/../wt-$id"
   if [[ -d "$wt" ]]; then
-    if live_in "$wt"; then notes+=("RUNNING"); else notes+=("worktree"); fi
+    has_wt=true
+    if live_in "$wt"; then live=true; notes+=("RUNNING"); else notes+=("worktree"); fi
   fi
   branch="story/$id"
   # Merged INTO WHAT: a story belongs to its epic, not to the integration
@@ -83,8 +101,10 @@ for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
   # unmerged forever.
   into="$(story_field "$id" base)"; into="${into:-$BASE_BRANCH}"
   git -C "$REPO_ROOT" rev-parse --verify --quiet "$into" >/dev/null 2>&1 || into="origin/$into"
+  merged=false; ahead=0
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
     if git -C "$REPO_ROOT" merge-base --is-ancestor "$branch" "$into" 2>/dev/null; then
+      merged=true
       notes+=("merged→${into#origin/}")
     else
       ahead="$(git -C "$REPO_ROOT" rev-list --count "$into..$branch" 2>/dev/null)"
@@ -93,8 +113,27 @@ for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
   else
     branch="—"
   fi
-  [[ -f "$REPO_ROOT/.blocked/$id.md" ]] && notes+=("BLOCKED: see .blocked/$id.md")
+  blocked=false
+  [[ -f "$REPO_ROOT/.blocked/$id.md" ]] && { blocked=true; notes+=("BLOCKED: see .blocked/$id.md"); }
   [[ -n "$reasons" ]] && notes+=("$reasons")
+
+  if (( JSON == 1 )); then
+    # Numbers stay numbers and absent values are null, so a caller can test
+    # them rather than string-match a dash.
+    [[ "$round"   =~ ^[0-9]+$ ]] && j_round="$round"   || j_round=null
+    [[ "$ahead"   =~ ^[0-9]+$ ]] && j_ahead="$ahead"   || j_ahead=0
+    [[ "$verdict" == "—" || -z "$verdict" ]] && j_verdict=null || j_verdict="\"$verdict\""
+    JSON_ROWS+="$(jq -nc \
+        --arg  id "$id"       --arg status "$status" --arg base "${into#origin/}" \
+        --arg  branch "$branch" --arg reasons "$reasons" \
+        --argjson round "$j_round" --argjson verdict "$j_verdict" \
+        --argjson ahead "$j_ahead" --argjson merged "$merged" \
+        --argjson worktree "$has_wt" --argjson live "$live" --argjson blocked "$blocked" \
+        '{id:$id, status:$status, round:$round, verdict:$verdict, base:$base,
+          branch:$branch, merged:$merged, ahead:$ahead, worktree:$worktree,
+          live:$live, blocked:$blocked, reasons:$reasons}')"$'\n'
+    continue
+  fi
 
   c="$(colour_for "$status")"
   # Entries contain spaces ("4 unmerged"), so join explicitly — an unquoted
@@ -114,3 +153,6 @@ for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
     [[ -d "$ev" ]] && printf '%sevidence: %s%s\n' "$DIM" "$(ls -1 "$ev" | tr '\n' ' ')" "$RST"
   fi
 done
+
+(( JSON == 1 )) && printf '%s' "$JSON_ROWS" | jq -s .
+exit 0
