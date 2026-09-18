@@ -255,6 +255,14 @@ prose. The nearest mechanical guard is that every AC names the mutations it
 must catch, which 008 did — and which is why the failing rounds were cheap
 and diagnosable rather than mysterious.
 
+**Confirmed by 009**, written the same day with the lesson applied: two ACs,
+one named component, one named mutation each, domain bounded in the AC line
+itself. **PASS in one round** — the first story to pass without a second
+attempt, and in a different area of the codebase (a React page test, not the
+service worker). The sequence across three stories is monotonic in the
+domain, not in the AC count: 5 ACs unbounded → 8 rounds; 2 ACs with one
+unbounded "every" → 3 rounds; 2 ACs bounded → 1 round.
+
 ### L-21 — a spec defect costs a builder round unless the harness has a way to skip it
 008's rounds 1 and 2 ended with a correct build and a wrong spec. Before
 `REVIEW_ONLY`, the only way to get a re-review was to let the builder commit

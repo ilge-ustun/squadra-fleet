@@ -1,4 +1,4 @@
-# Fleet handoff — state as of 18 Sep 2026 (midday)
+# Fleet handoff — state as of 18 Sep 2026 (afternoon)
 
 Autonomous coding-agent fleet for `khaita-app`. Supersedes the 17 Sep handoff.
 Read `docs/fleet/lessons.md` alongside this — L-14 … L-21 were added in the
@@ -70,8 +70,8 @@ launcher from tmux or detached; never as a child of the session driving it.**
 
 ## 3. What changed 17–18 Sep — the verdict is computed
 
-All of this is on `feat/pwa`, pushed, 167 assertions green in
-`bash fleet/test-lib.sh` (34 cases).
+All of this is on `feat/pwa`, pushed, 181 assertions green in
+`bash fleet/test-lib.sh` (36 cases).
 
 ### Harness
 
@@ -126,6 +126,27 @@ All of this is on `feat/pwa`, pushed, 167 assertions green in
   that round's `### Machine` block. Read-only, so safe while a launcher works
   and safe over ssh. Liveness is a `/proc` cwd scan, not the frontmatter
   (L-04: `in_progress` can be a stale orphan).
+
+### Added 18 Sep, afternoon — Phase 3, both producers now hand over evidence
+
+- **Builder TDD mutations.** `rules.md` asks the builder for
+  `ACn-tdd-<slug>.patch` + `.test` proving the test it wrote goes red when the
+  behaviour is removed. The harness copies them out of the builder worktree
+  before the reviewer runs, so one runner judges both producers; the `tdd-`
+  slug prefix shows which is which. "SEE IT FAIL" stops being a sentence in a
+  commit message. Near-inert for instrument stories (there the builder's fix
+  *is* the test); it earns its keep on production-code stories.
+- **Reviewer probes.** `review.md` asks for constructed regressions as
+  runnable tests in `.review-out/probes/<name>.test.tsx` — no patch. Copied
+  under the vitest include glob, run, removed, committed. **A probe is the
+  inverse of a mutation: RED means it found something, so RED vetoes.**
+  Optional by design: requiring "at least one" is a check that cannot go red.
+- `.review-out/` is gitignored, so neither agent can commit scratch onto a
+  story branch.
+
+**What is still judgment after Phase 3:** whether the reviewer thinks of the
+right probe. Everything downstream of that thought is run by the harness and
+kept in git.
 
 ### Agent
 
@@ -189,11 +210,32 @@ re-reviewed the *unchanged head* under `REVIEW_ONLY=1` — no builder round
 spent — and passed with eleven mutations RED, including the two
 `wrong-fetch-url` mutations that had survived every round of 007.
 
-### What the pair measures
+### 009 — the collection page's test renders the real collection (PASS, one round)
 
-Not "fewer ACs" — **a bounded domain**. See lessons L-20. 008 had two ACs and
-still burned two rounds on one unbounded "every". The convention was already
-written in §9 of the 17 Sep handoff and broken the next day by its author.
+Two ACs, domain bounded in the AC line, written after L-20. **PASS in round 1**
+— the first story to pass without a second attempt, and the first outside the
+service worker. Both named mutations RED: `Collection.tsx` returning `null`
+fails AC1; deleting the page's loading branch fails AC2.
+
+Closes story 004's unclosed P1 finding. `CollectionPage.test.tsx` no longer
+mocks the component the page exists to render — it mocks `CollectionSongs` one
+level down, sparing `@dnd-kit` and `CollectionPlayer`. The builder reached the
+same boundary 004's builder did, independently, and the story left that
+judgment to AC1's mutation rather than prescribing it.
+
+### What the three measure
+
+Not "fewer ACs" — **a bounded domain**. See lessons L-20.
+
+| story | ACs | domain | rounds | verdict |
+|---|---|---|---|---|
+| 007 | 5 | unbounded (a whole file) | 8 | FAIL, merged over |
+| 008 | 2 | one unbounded "every" | 3 | PASS |
+| 009 | 2 | bounded in the AC line | **1** | PASS |
+
+008 had two ACs and still burned two rounds on one unbounded "every". The
+convention was already written in §9 of the 17 Sep handoff and broken the next
+day by its author. 009 applied it and passed first time.
 
 Round yield after the L-17/18/19 fixes: **5 of 5 rounds reached a verdict**
 (007 rounds 6–8, 008 rounds 1–3 minus the REVIEW_ONLY one is 5 builder rounds
@@ -321,21 +363,24 @@ docs/fleet/005-verification/ browser evidence, offline routing defect
 
 ## 11. Next, in order
 
-1. **Story 009** — drafted, `status: draft`. The collection page's test mocks
-   away the component it exists to render (`CollectionPage.test.tsx:21-25`,
-   one test in the file); story 004's unextracted P1 finding, verified against
-   the current base. Two ACs, bounded domain, `scope_deny` on the components
-   themselves so the instrument is what changes.
-2. **Phase 3 of the verdict plan** — builder-emitted TDD mutations (the
-   builder's "observed red" becomes a harness postcondition) and reviewer
-   probes (runnable regression tests; a RED probe vetoes). Deferred until a
-   story had gone through; two have.
-3. **Rewrite and rerun 004** from a fresh branch off current `feat/pwa`, now
-   that 009 extracts its instrument finding.
-4. **The escalation fixture** — offline routing written *without* answering the
-   product question, to see `.blocked/` fire for the first time in nine
-   stories.
-5. **`fleet/reset.sh`**, the `warn`→`die` audit, a `.gitattributes` merge
-   driver for `.stories/*.md`.
-6. **Control plane** — decide where the interactive session lives; it costs
-   the fleet host 530 MB. `status.sh` is the artifact it was missing.
+The plan of 17 Sep is complete: the verdict is computed, the launcher is
+tested, scope is enforced, both agents hand over evidence the harness runs.
+What is left is workload and reach, not machinery.
+
+1. **Rewrite and rerun 004** from a fresh branch off current `feat/pwa`. 009
+   extracted its instrument finding; what remains is the persistence R1 and
+   the refuted lease theory in `docs/fleet/004-diagnosis.md`. **This is the
+   first story where Phase 3.1 is not inert** — it changes production code, so
+   the builder's TDD mutation will actually prove something.
+2. **The escalation fixture** — offline routing (§5) written *without*
+   answering the product question, to see `.blocked/` fire for the first time
+   in ten stories. It is the one terminal state never exercised by a real
+   agent.
+3. **`fleet/reset.sh`**, the `warn`→`die` audit (`seed_env` first), and a
+   `.gitattributes` merge driver for `.stories/*.md` so merging a story stops
+   conflicting on its own spec.
+4. **Control plane.** `status.sh` is the artifact it was missing; what remains
+   is deciding where the interactive session lives, since it costs the fleet
+   host 530 MB (§2).
+5. **A second lane** — still gated on queue depth. Ten stories exist, ever, all
+   hand-authored. That, not the harness, is the ceiling.
