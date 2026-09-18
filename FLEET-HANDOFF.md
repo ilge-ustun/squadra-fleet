@@ -113,7 +113,8 @@ final := SPEC if the reviewer said SPEC
 **The machine can veto, never grant.** Mutation classes: `RED` (a real
 failure), `GREEN` (survived — for that behaviour the instrument is absent),
 `NO_TESTS` (zero collected: the mutation broke compilation; never RED),
-`PRE_RED` (already failing unmutated), `PATCH_INVALID`, `NO_SELECTOR`. **A
+`PRE_RED` (already failing unmutated), `SELECTOR_INVALID` (collected no tests
+even unmutated), `PATCH_INVALID`, `NO_SELECTOR`. **A
 probe is the inverse — RED means it found something, so RED vetoes.** Probes
 are optional: requiring one is a check that cannot go red.
 
@@ -245,9 +246,6 @@ ACs → 1.
 - **`.blocked/` has never fired from a builder** in twelve stories. The
   story-writer escalates instead — 011 raised a product question and refused to
   decide — and intake is arguably the right place for it (L-24).
-- **`PRE_RED` overloads two meanings**: a genuinely failing instrument, and a
-  selector of the wrong kind (014 round 1 put a shell command in a `.test`
-  file). Worth splitting.
 - **Epic → develop merges are untested.** Only `story → epic` and
   `story → develop` have happened.
 
