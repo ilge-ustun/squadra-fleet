@@ -191,10 +191,21 @@ timeout the story goes to `needs_human` naming the timeout. Children may
 outlive the kill (L-04) — the next run's `procs_in_worktree` finds them and
 refuses to start, which is correct.
 
+**Notifications and the control plane.** `fleet/telegram.sh` is both: the fleet
+sends through `FLEET_NOTIFY_CMD` (the launcher when a story stops, the queue
+when one merges), and reads commands back by polling `getUpdates` — a pull,
+because the box has no public endpoint. Commands: `/status` `/why` `/promote`
+`/answer` `/revert` `/run`. Only messages from `TELEGRAM_CHAT_ID` are acted on
+and nobody else gets a reply at all. The token goes in `.env.fleet`, never
+`.env.local` — that file is seeded into every agent worktree.
+
+Nothing in the notifier can fail a run. Unconfigured, it warns and returns 0.
+
 **systemd** units are written and pass `systemd-analyze --user verify`, but are
-**not installed**. Two commands in `fleet/systemd/README.md`; one needs an
-admin (`loginctl enable-linger fleet` — currently `no`, so units would die with
-the ssh session).
+**not installed** — now two pairs, `fleet-queue` (15 min) and `fleet-bot`
+(1 min). Commands in `fleet/systemd/README.md`; one needs an admin
+(`loginctl enable-linger fleet` — currently `no`, so units would die with the
+ssh session), and the bot needs a @BotFather token before it does anything.
 
 ---
 
