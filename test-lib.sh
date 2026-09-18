@@ -987,6 +987,74 @@ EOF
   assert_eq "$(field status)" done "AC3: story reached done"
 }
 
+# P1 guard. Red when the MERGE_HEAD guard is removed from fleet/run-queue.sh:
+# the in-progress merge is aborted and the staged resolution is lost.
+# Uses --max 0 so commit_status never runs and MERGE_HEAD stays set.
+case_46_existing_merge_preserved() {
+  CASE="46 an in-progress merge resolution is not discarded by the refresh"
+  FX="$TMP/c46"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: ready
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  printf 'line: original\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add -A fleet .stories conflict-file.txt
+  git -C "$REPO" commit -qm "fixture: launcher + story + files"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout: local commit that conflicts with origin.
+  printf 'line: checkout\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  git -C "$REPO" commit -qm "local: checkout version"
+
+  # Origin: conflicting change on the same line.
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  printf 'line: origin\n' > "$FX/origin2/conflict-file.txt"
+  git -C "$FX/origin2" add conflict-file.txt
+  git -C "$FX/origin2" commit -qm "origin: conflicting version"
+  git -C "$FX/origin2" push -q origin base
+
+  # Human: starts a conflicting merge, carefully resolves it, stages the fix.
+  git -C "$REPO" fetch -q origin
+  git -C "$REPO" merge --no-edit origin/base 2>/dev/null || true
+  printf 'line: carefully resolved human work\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  # MERGE_HEAD now set; the resolution is staged but not committed.
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      bash fleet/run-queue.sh --max 0 ) > "$FX/queue.log" 2>&1
+
+  assert_file "$REPO/.git/MERGE_HEAD" "AC46: MERGE_HEAD not aborted by refresh"
+  assert_eq "$(git -C "$REPO" show :conflict-file.txt)" \
+    "line: carefully resolved human work" "AC46: staged resolution preserved"
+  assert_grep 'refresh skipped' "$FX/queue.log" "AC46: queue log shows refresh was skipped"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -1003,7 +1071,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
        case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
-       case_43_refresh_diverged case_44_refresh_fail case_45_conflict_leaves_local_work)
+       case_43_refresh_diverged case_44_refresh_fail case_45_conflict_leaves_local_work
+       case_46_existing_merge_preserved)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

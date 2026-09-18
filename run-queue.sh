@@ -63,11 +63,16 @@ next_ready() {                        # the same choice launch.sh makes
 #     any new HEAD. Uncommitted edits to files neither side touches are preserved.
 #
 refresh_from_origin() {
-  local upstream
+  local upstream gitdir
   upstream="$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null)" || {
     warn "refresh failed: no upstream configured, continuing on local state"
     return
   }
+  gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || gitdir=".git"
+  if [[ -f "$gitdir/MERGE_HEAD" || -d "$gitdir/rebase-merge" ]]; then
+    warn "refresh skipped: a merge/rebase is already in progress, continuing on local state"
+    return
+  fi
   if ! git fetch origin 2>/dev/null; then
     warn "refresh failed: fetch from origin failed, continuing on local state"
     return
