@@ -485,6 +485,25 @@ case_33_story_amendment_reaches_builder() {
   assert_grep '^acs: .*AC2' "$REPO/.review/$STORY.md" "verdict computed against the amended AC set"
 }
 
+# REVIEW_ONLY: re-review the branch head without a builder round. The case a
+# story hits after needs_human when a human fixes the branch by hand — until
+# now impossible, because the round postcondition demands a builder commit.
+# Red when the postcondition's REVIEW_ONLY guard is deleted (the round dies
+# at "produced no commits"), or when the builder block is no longer skipped.
+case_34_review_only() {
+  CASE="34 REVIEW_ONLY re-reviews the head with no builder round"; fixture c34
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  assert_eq "$(field status)" needs_human "first run stopped"
+  set_ready
+  run "$STORY" FAKE_BUILDER=nocommit FAKE_REVIEWER=PASS MAX_ROUNDS=1 REVIEW_ONLY=1
+  assert_eq "$(calls claude)" 1 "builder did not run again"
+  assert_eq "$(calls codex)"  2 "reviewer ran again"
+  assert_eq "$(field status)" done "verdict computed on the existing head"
+  assert_grep 'commits this round: 0' "$REPO/.review/$STORY.md" "zero commits recorded honestly"
+  assert_grep 'REVIEW_ONLY' "$REPO/.review/$STORY.md" "the round says no builder ran"
+  assert_file "$REPO/.review/$STORY/round-2/mutations/AC1-marker.result" "mutations still ran"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -498,7 +517,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_27_round2_gets_machine_facts
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
        case_31_codex_stderr_notice case_32_huge_review_prompt
-       case_33_story_amendment_reaches_builder)
+       case_33_story_amendment_reaches_builder case_34_review_only)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

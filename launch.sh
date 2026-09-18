@@ -52,6 +52,7 @@ VITEST_CMD="${VITEST_CMD:-npx vitest run}"   # baseline + mutation runner; test-
 BUILD_CMD="${BUILD_CMD:-npm run build}"
 LINT_CMD="${LINT_CMD:-npm run lint}"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
+REVIEW_ONLY="${REVIEW_ONLY:-0}"      # 1 = re-review the head, run no builder
 PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
 # Untracked runtime config a fresh worktree does not inherit.
@@ -469,34 +470,44 @@ while (( ROUND < ROUND_CEILING )); do
     BUILD_PROMPT="$(render_prompt build-round2.md)"
   fi
 
-  log "builder: $BUILDER_MODEL"
-  # Prompts go on stdin. A 134 KB round-2 prompt as one argv string exceeded
-  # MAX_ARG_STRLEN (131072) on 007's rerun: claude never exec'd, output was
-  # empty. stdin has no such limit, and for codex it is the intended mode.
-  BUILD_OUT="$(cd "$BUILDER_WT" && printf '%s' "$BUILD_PROMPT" | claude -p \
-    --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
-    --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
+  # REVIEW_ONLY re-reviews the branch head with no builder round — the case a
+  # story hits after needs_human when a human fixes the branch by hand. Until
+  # this existed the only way to get a re-review was to let the builder make a
+  # commit, because the postcondition below demands one.
+  if [[ "$REVIEW_ONLY" == "1" ]]; then
+    BUILD_ERR="skipped"
+    BUILD_MSG="(REVIEW_ONLY: no builder ran this round; reviewing the existing head)"
+    log "REVIEW_ONLY: skipping the builder"
+  else
+    log "builder: $BUILDER_MODEL"
+    # Prompts go on stdin. A 134 KB round-2 prompt as one argv string exceeded
+    # MAX_ARG_STRLEN (131072) on 007's rerun: claude never exec'd, output was
+    # empty. stdin has no such limit, and for codex it is the intended mode.
+    BUILD_OUT="$(cd "$BUILDER_WT" && printf '%s' "$BUILD_PROMPT" | claude -p \
+      --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
+      --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
 
-  # jq's // is the ALTERNATIVE operator: it fires on null AND on false, so
-  # `.is_error // "parse-failed"` rewrote every SUCCESSFUL run as parse-failed.
-  # has() tests for the key, not its truthiness.
-  BUILD_ERR="$(echo "$BUILD_OUT" | jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end' 2>/dev/null)"
-  BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
+    # jq's // is the ALTERNATIVE operator: it fires on null AND on false, so
+    # `.is_error // "parse-failed"` rewrote every SUCCESSFUL run as parse-failed.
+    # has() tests for the key, not its truthiness.
+    BUILD_ERR="$(echo "$BUILD_OUT" | jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end' 2>/dev/null)"
+    BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
 
-  if [[ "$BUILD_ERR" == "parse-failed" ]]; then
-    warn "builder output was not JSON — first 20 lines of raw output:"
-    echo "$BUILD_OUT" | head -20
-  fi
+    if [[ "$BUILD_ERR" == "parse-failed" ]]; then
+      warn "builder output was not JSON — first 20 lines of raw output:"
+      echo "$BUILD_OUT" | head -20
+    fi
 
-  if [[ -f "$BUILDER_WT/.blocked/$STORY_ID.md" ]]; then
-    cp "$BUILDER_WT/.blocked/$STORY_ID.md" "$REPO_ROOT/.blocked/$STORY_ID.md"
-    warn "BLOCKED — agent asked a question:"
-    cat "$REPO_ROOT/.blocked/$STORY_ID.md"
-    set_status "$STORY_ID" blocked
-    rm -f "$REVIEW_FILE.new"
-    echo
-    echo "answer by editing .stories/$STORY_ID.md, then set status back to ready"
-    exit 0
+    if [[ -f "$BUILDER_WT/.blocked/$STORY_ID.md" ]]; then
+      cp "$BUILDER_WT/.blocked/$STORY_ID.md" "$REPO_ROOT/.blocked/$STORY_ID.md"
+      warn "BLOCKED — agent asked a question:"
+      cat "$REPO_ROOT/.blocked/$STORY_ID.md"
+      set_status "$STORY_ID" blocked
+      rm -f "$REVIEW_FILE.new"
+      echo
+      echo "answer by editing .stories/$STORY_ID.md, then set status back to ready"
+      exit 0
+    fi
   fi
 
   HEAD_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
@@ -505,7 +516,7 @@ while (( ROUND < ROUND_CEILING )); do
 
   # Postcondition, not self-report. Phase 2: is_error was false while the agent
   # did nothing at all.
-  if (( ROUND_COMMITS == 0 )); then
+  if (( ROUND_COMMITS == 0 )) && [[ "$REVIEW_ONLY" != "1" ]]; then
     set_status "$STORY_ID" needs_human
     die "round $ROUND produced no commits (is_error=$BUILD_ERR). Said: $BUILD_MSG"
   fi
