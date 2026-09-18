@@ -125,3 +125,6 @@ say — is picked up on the next timer firing without anyone pulling manually.
 If the fetch fails (no network, bad credentials) the drain continues on local
 state and logs `refresh failed`. If the merge conflicts, it is aborted cleanly
 and the drain continues on the pre-refresh checkout; local work is never lost.
+
+The other route is the bot: `/promote 013` writes the frontmatter, commits and
+pushes for you, under the same lock the launcher's status commits take.
