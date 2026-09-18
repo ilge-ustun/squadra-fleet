@@ -643,8 +643,20 @@ See `docs/fleet/does-not-exist.md` for the diagnosis.
 ## Acceptance criteria
 **AC1 — a claim.** Goes red when removed.
 '
-  lint stale; assert_eq "$rc" 1 "a citation to a missing file fails"
-  assert_contains "$out" "does-not-exist.md" "and names the file"
+  lint stale; assert_eq "$rc" 0 "a missing path with no line is a warning — it may be an instrument to create"
+  assert_contains "$out" "new instrument, or rot" "and says which question it is"
+
+  write_story staleline '---
+status: ready
+round: 0
+---
+# Story: rotted with a line number
+See `docs/fleet/does-not-exist.md:12` for the diagnosis.
+## Acceptance criteria
+**AC1 — a claim.** Goes red when removed.
+'
+  lint staleline; assert_eq "$rc" 1 "a missing path WITH a line number fails — a line asserts it exists now"
+  assert_contains "$out" "does-not-exist.md:12" "and names it"
 
   write_story overrange '---
 status: ready

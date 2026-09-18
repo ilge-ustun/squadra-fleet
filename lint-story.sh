@@ -119,7 +119,17 @@ while read -r cite; do
   [[ "$path" == *.* ]] || continue
   checked=$((checked + 1))
   if [[ ! -e "$REPO_ROOT/$path" ]]; then
-    err "cites a file that does not exist: $path"
+    # A line number asserts the file exists NOW, so a missing one is rot
+    # (story 004 cited a diagnosis that was never on the integration branch).
+    # A bare path may legitimately be forward-looking: a story names the test
+    # file its instrument will create. Story 011 cited
+    # src/components/__tests__/ThemeSwitch.test.tsx before writing it, and the
+    # first version of this check rejected the draft for it.
+    if [[ -n "$lines" ]]; then
+      err "cites $path:$lines but that file does not exist"
+    else
+      warn "cites a file that does not exist — new instrument, or rot? $path"
+    fi
     continue
   fi
   [[ -n "$lines" ]] || continue
