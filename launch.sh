@@ -827,7 +827,7 @@ reviewed: $(date -Iseconds)
 
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT | self $BASE_SELF
 timing:   builder ${T_BUILD}s | baseline ${T_BASE}s | reviewer ${T_REVIEW}s | mutations ${T_MUT}s | total $(( SECONDS - T_ROUND ))s
-model:    $BUILDER_MODEL
+builder:  $BUILDER_MODEL
 acs:      $AC_IDS
 scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT

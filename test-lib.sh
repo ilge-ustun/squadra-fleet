@@ -1426,6 +1426,10 @@ case_76_story_model() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_grep '^fleet-test-model$' "$TRACE/claude-args-1" "the builder ran on the story's model"
   assert_grep 'model: fleet-test-model' "$LOG" "and the run says so"
+  # `model:` in the Machine block is the reviewer's VERDICT; the builder's
+  # model is `builder:`. Two lines called model: in the one place a human
+  # reads to decide is how a block stops being read.
+  assert_grep '^builder:  fleet-test-model' "$REPO/.review/$STORY.md" "and the block records which model built it"
 
   CASE="76b a story that names none gets the default"; fixture c76b
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -1518,6 +1522,22 @@ case_79_writers_do_not_collide() {
   assert_contains "$(git -C "$REPO" log -1 --format=%s)" "promoted" "as a commit, having waited its turn"
 }
 
+# Phase E4, the reading half. Stories are visible one at a time; an epic — the
+# thing a human actually decides to merge — was visible nowhere. Red without
+# --epics, and red again if it stops counting what is merged.
+case_80_status_epics() {
+  CASE="80 status.sh --epics says where each epic stands"; epic_story c80
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local out; out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --epics )"
+  assert_contains "$out" "epic/test" "the epic is listed"
+  assert_contains "$out" "1 story" "with how many stories belong to it"
+  assert_contains "$out" "0 merged" "and how many of them have landed on it"
+  merge_run
+  out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --epics )"
+  assert_contains "$out" "1 merged" "which changes when one does"
+  assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -1549,7 +1569,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_72_lessons_name_real_cases case_73_self_test_env_is_clean
        case_74_merge_epic_into_integration case_75_merge_epic_refuses_non_epic case_76_story_model
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
-       case_79_writers_do_not_collide)
+       case_79_writers_do_not_collide case_80_status_epics)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
