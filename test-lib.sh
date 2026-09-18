@@ -548,6 +548,24 @@ case_36_reviewer_probes() {
   assert_not_grep '^probes:' "$REPO/.review/$STORY.md" "no empty probe table"
 }
 
+# Found on story 010 round 2, by the builder doing the right thing. Told its
+# TDD patches were PATCH_INVALID, it regenerated them and changed no code —
+# correct, and invisible: .review-out/ is gitignored (3.1), so a round whose
+# only legitimate output is evidence can never produce a commit. The
+# postcondition, written when code was the only possible output, killed it.
+# A round is productive if it produced anything the harness can judge.
+# Red when the handover clause is removed from the postcondition.
+# Case 2 still guards the original hazard: nothing at all is still a die.
+case_37_evidence_only_round() {
+  CASE="37 a round that only hands over evidence is not 'no commits'"; fixture c37
+  run "$STORY" FAKE_BUILDER=nocommit FAKE_BUILDER_MUTATIONS=red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "exit code (not the postcondition die)"
+  assert_eq "$(calls codex)" 1 "the reviewer still ran"
+  assert_grep 'commits this round: 0' "$REPO/.review/$STORY.md" "zero commits recorded honestly"
+  assert_grep '^AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "the handed-over evidence was judged"
+  assert_eq "$(field status)" done "the round reached a verdict"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -562,7 +580,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
-       case_35_builder_tdd_mutation case_36_reviewer_probes)
+       case_35_builder_tdd_mutation case_36_reviewer_probes
+       case_37_evidence_only_round)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

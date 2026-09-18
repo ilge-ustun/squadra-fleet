@@ -4,7 +4,11 @@ Rules that override anything you infer:
   Hand that observation to the harness instead of only describing it. For each
   acceptance criterion, write two files in .review-out/mutations/ :
     ACn-tdd-<slug>.patch   the smallest change that removes the behaviour your
-                           test claims — a `git diff` against your own commit
+                           test claims. Produce it with `git diff` from your
+                           working tree, and produce it LAST, after your final
+                           commit — the harness applies it to the head your
+                           round ends on, so a patch written earlier will not
+                           apply and proves nothing. Never hand-author one.
     ACn-tdd-<slug>.test    ONE line: the vitest selector that must then go red,
                            e.g.  src/__tests__/foo.test.ts -t "AC1"
   The harness applies each patch in a clean tree and runs the selector. A patch

@@ -502,6 +502,7 @@ while (( ROUND < ROUND_CEILING )); do
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
   EVIDENCE_DIR_PENDING="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
   mkdir -p "$EVIDENCE_DIR_PENDING"
+  BUILDER_HANDED_OVER=""
   
   if (( ROUND == ROUND_START + 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
     BUILD_PROMPT="$(render_prompt build-round1.md)"
@@ -559,6 +560,7 @@ while (( ROUND < ROUND_CEILING )); do
       mkdir -p "$EVIDENCE_DIR_PENDING/mutations"
       cp -r "$BUILDER_WT/.review-out/mutations/." "$EVIDENCE_DIR_PENDING/mutations/"
       rm -rf "$BUILDER_WT/.review-out"
+      BUILDER_HANDED_OVER=1
       log "builder handed over TDD evidence"
     fi
   fi
@@ -569,7 +571,15 @@ while (( ROUND < ROUND_CEILING )); do
 
   # Postcondition, not self-report. Phase 2: is_error was false while the agent
   # did nothing at all.
-  if (( ROUND_COMMITS == 0 )) && [[ "$REVIEW_ONLY" != "1" ]]; then
+  #
+  # "Did nothing" is not the same as "committed nothing". Since 3.1 a builder
+  # can be asked for evidence rather than code — story 010 round 2 was told its
+  # TDD patches did not apply, regenerated them, and correctly changed no code.
+  # That output lands in .review-out/, which is gitignored, so it can never be
+  # a commit. A round is productive if it produced anything the harness can
+  # judge; handed-over mutations are judged by the runner below exactly as
+  # commits are judged by the reviewer. Nothing at all is still a die.
+  if (( ROUND_COMMITS == 0 )) && [[ "$REVIEW_ONLY" != "1" ]] && [[ -z "$BUILDER_HANDED_OVER" ]]; then
     set_status "$STORY_ID" needs_human
     die "round $ROUND produced no commits (is_error=$BUILD_ERR). Said: $BUILD_MSG"
   fi
