@@ -63,6 +63,7 @@ assert_not_grep() { grep -qE -- "$1" "$2" 2>/dev/null && fail "$3: found /$1/ in
 assert_contains() { [[ "$1" == *"$2"* ]] && ok || fail "$3: expected '$2' in: $1"; }
 assert_file()     { [[ -f "$1" ]] && ok || fail "$2: missing ${1#$TMP/}"; }
 assert_no_file()  { [[ -f "$1" ]] && fail "$2: unexpected ${1#$TMP/}" || ok; }
+assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok; }
 
 # ── fixture ──────────────────────────────────────────────────────────────────
 
@@ -680,6 +681,29 @@ round: 0
   lint unbounded; assert_eq "$rc" 0 "an unquantified every is a warning, not an error"
   assert_contains "$out" "unquantified domain" "and is named (L-20)"
   lint unbounded --strict; assert_eq "$rc" 1 "--strict makes it fatal"
+
+
+  write_story temporal '---
+status: ready
+round: 0
+---
+# Story: determinism, not scope
+## Acceptance criteria
+**AC1 — the same input produces the same output every time.** Goes red when it does not.
+'
+  lint temporal; assert_eq "$rc" 0 "temporal every is not a scope warning"
+  assert_not_contains "$out" "unquantified domain" "every time is determinism, not an unbounded set"
+
+  write_story command '---
+status: ready
+round: 0
+---
+# Story: a command is not a path
+Run `git log -- public/sw.js` to see the history.
+## Acceptance criteria
+**AC1 — a bounded claim.** Goes red when removed.
+'
+  lint command; assert_eq "$rc" 0 "a backticked command is not a citation"
 
   write_story badbase '---
 status: ready

@@ -79,7 +79,9 @@ fi
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   warn "unquantified domain in an AC heading — name the set it ranges over (L-20):"$'\n'"          ${line:0:100}"
-done < <(grep -E '^\*\*AC[0-9]+' "$STORY_FILE" | grep -iE '\b(every|all|any)\b')
+done < <(grep -E '^\*\*AC[0-9]+' "$STORY_FILE" \
+         | grep -ivE '\b(every|each|any|all)[[:space:]]+(time|run|round)s?\b' \
+         | grep -iE '\b(every|all|any)\b')
 
 # The harness runs test/build/lint as the baseline, unconditionally.
 while IFS= read -r line; do
@@ -102,8 +104,10 @@ done
 # (bare filenames in prose) across every real story — 20 false positives, zero
 # real findings. A check that cries wolf is worse than no check.
 #
-# Not checked, deliberately: bare filenames without a directory, and paths
-# beginning with "/" (those are URL paths like /manifest.json, not repo files).
+# Not checked, deliberately: bare filenames without a directory, paths
+# beginning with "/" (URL paths like /manifest.json), and anything containing
+# whitespace — story 012 cited `git log -- public/sw.js`, a command, which the
+# first version read as a path because its character class allowed spaces.
 
 checked=0
 while read -r cite; do
@@ -138,7 +142,7 @@ while read -r cite; do
   if (( first > total )) || (( last > total )); then
     err "cites $path:$lines but the file has $total lines"
   fi
-done < <(grep -oE '`[A-Za-z0-9_./@[:space:]-]*\[?[A-Za-z0-9_.-]*\]?[A-Za-z0-9_./-]*\.[a-z]+(:[0-9]+(-[0-9]+)?)?`' "$STORY_FILE" \
+done < <(grep -oE '`[A-Za-z0-9_./@-]*\[?[A-Za-z0-9_.-]*\]?[A-Za-z0-9_./-]*\.[a-z]+(:[0-9]+(-[0-9]+)?)?`' "$STORY_FILE" \
          | tr -d '`' | sort -u)
 
 # ── verdict ──────────────────────────────────────────────────────────────────
