@@ -355,7 +355,7 @@ escalation if its criteria cannot be met without picking between materially
 different outcomes. Naming the open question in the story — 010 quoted 006
 naming it — is not the same as making it load-bearing.
 **Prevention:** by discipline, and unproven: `.blocked/` has still never fired
-in ten stories. The mechanism is tested (`test-lib` case 3); what is untested
+in fourteen stories. The mechanism is tested (`test-lib` case 3); what is untested
 is any real agent's willingness to use it.
 
 ## Found by story 014 — the fleet working on its own harness (18 Sep)

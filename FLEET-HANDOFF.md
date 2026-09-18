@@ -226,7 +226,7 @@ Run `./fleet/status.sh` rather than trusting this table.
 | 011 | theme toggle icons | done, PASS in 1, **merged into `epic/ui-polish`** |
 | 012 | "new version available" | **draft** — needs a decision, §6 |
 | 013 | offline chip stuck on | **draft**, ready to promote |
-| 014 | the queue refreshes from origin | **needs_human** after 2 rounds, §6 |
+| 014 | the queue refreshes from origin | done, **PASS in 4**, merged into `develop`. Round 3 was vetoed by the harness's own bug (L-27); round 4 was `REVIEW_ONLY=1` and all ten mutations went RED |
 
 **Round yield is governed by the bounded domain, not the AC count** (L-20):
 5 unbounded ACs → 8 rounds; 2 ACs with one unbounded "every" → 3; 2 bounded
@@ -236,36 +236,28 @@ ACs → 1.
 
 ## 6. What needs a human, in order
 
-1. **Story 014** — `needs_human`, worktree `../wt-014` at `88b0b7f`. The
-   behaviour is right: the refresh works, a failed refresh continues the drain,
-   a conflict aborts cleanly, and a human's in-progress merge is protected —
-   that last one found by a reviewer **probe** in round 1 and fixed in round 2.
-   Two survivors, both gaps between an AC's words and its test:
-   `AC2-delete-continuation-message` (the AC says the log line states it is
-   continuing; the test only greps `refresh failed`) and
-   `AC3-drop-final-newline` (the AC says "byte-identical"; the test misses a
-   dropped trailing newline). **Verified by hand: the full harness suite passes
-   on that branch — 243 assertions, nothing existing broken.** Recommended: one
-   more round (`MAX_ROUNDS=1`) strengthening AC3's assertion — byte-identity of
-   uncommitted work is the claim that matters here — and weakening AC2's
-   wording to what its test proves. Merging over the FAIL is the wrong call on
-   this file specifically.
-2. **Story 012** — its root cause is that `public/sw.js` bytes never change on
+1. **A @BotFather token.** Everything in the control plane is built and
+   tested, and none of it does anything until `.env.fleet` has
+   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, and the two `fleet-bot` units
+   are symlinked. Steps in `fleet/systemd/README.md`. Until then every
+   notification is a `warn` into the queue log, which nobody reads at 2 a.m.
+   — which was the whole problem.
+2. **`loginctl enable-linger fleet`** — needs an admin. Without it both timers
+   die with the ssh session.
+3. **Watch the first auto-merge.** The machinery is covered by the suite,
+   including the post-merge baseline that keeps a bad merge off the epic, but
+   it has never run on a real story. `AUTO_MERGE=0` turns it off.
+4. **Story 012** — its root cause is that `public/sw.js` bytes never change on
    deploy, so no new worker installs and the banner is **unreachable**, not
    badly made. Fixing it properly means versioning or stamping `sw.js` at build
    time, which also fixes `/manifest.json` and the icons never refreshing for
    returning users. That reaches into how the app builds. Read its ACs before
    promoting.
-3. **Story 013** — ready to promote as-is.
-4. **The harness-verification gap (L-26)** — the baseline is `npm test` /
-   `build` / `lint`, all of which exercise the app. **Nothing in the baseline
-   touches `fleet/`.** A story that changes the harness is guarded only by the
-   reviewer's mutations plus a human running `test-lib`. Extending
-   `run_baseline` to also run `test-lib` when the changed paths include
-   `fleet/` is ~10 lines and should land before agents touch the harness
-   routinely.
-5. **The remaining khaita items** — mobile search and lyrics-language defaults
+5. **Story 013** — ready to promote as-is. `/promote 013` once the bot is up.
+6. **The remaining khaita items** — mobile search and lyrics-language defaults
    on `epic/search`; "shazam" needs decomposing before it is a story.
+7. **`epic/ui-polish` is 2 ahead of `develop`** (`./fleet/status.sh --epics`).
+   `fleet/merge.sh --epic epic/ui-polish` when you want it in.
 
 ---
 
