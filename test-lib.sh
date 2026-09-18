@@ -594,6 +594,108 @@ case_38_story_base() {
   assert_grep 'EPIC_MARKER.txt' <(git -C "$REPO" show "origin/epic/test:EPIC_MARKER.txt" >/dev/null 2>&1 && echo EPIC_MARKER.txt) "epic base untouched by the run"
 }
 
+# fleet/lint-story.sh — mechanical, no fixture and no launcher needed.
+# Red when a check is removed; the false-positive guard is red when the "/"
+# requirement on citations is dropped, which is how the first version of that
+# check behaved: 20 false positives across the real stories, zero findings.
+case_39_lint_story() {
+  CASE="39 lint-story: shape and citations"
+  local d="$TMP/lint"; mkdir -p "$d"
+  local lint="$SRC/fleet/lint-story.sh" out rc
+
+  write_story() { printf '%s' "$2" > "$d/$1.md"; }
+  lint() { out="$(cd "$SRC" && bash "$lint" "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
+
+  write_story good '---
+status: ready
+round: 0
+scope_deny: src/x/*
+---
+# Story: fine
+It cites `fleet/lint-story.sh` and `fleet/launch.sh:1`.
+## Acceptance criteria
+**AC1 — one bounded claim.** Goes red when removed.
+## Known weakness
+None stated.
+## Out of scope
+- nothing
+'
+  lint good; assert_eq "$rc" 0 "a well-formed story passes"
+
+  write_story noac '---
+status: ready
+round: 0
+---
+# Story: criteria in a table
+| AC | claim |
+|---|---|
+| AC1 | invisible to the launcher |
+'
+  lint noac; assert_eq "$rc" 1 "a story whose ACs are a table fails"
+  assert_contains "$out" "no acceptance criteria" "and says why"
+
+  write_story stale '---
+status: ready
+round: 0
+---
+# Story: rotted
+See `docs/fleet/does-not-exist.md` for the diagnosis.
+## Acceptance criteria
+**AC1 — a claim.** Goes red when removed.
+'
+  lint stale; assert_eq "$rc" 1 "a citation to a missing file fails"
+  assert_contains "$out" "does-not-exist.md" "and names the file"
+
+  write_story overrange '---
+status: ready
+round: 0
+---
+# Story: out of range
+See `fleet/lint-story.sh:99999`.
+## Acceptance criteria
+**AC1 — a claim.** Goes red when removed.
+'
+  lint overrange; assert_eq "$rc" 1 "a line number past the end of the file fails"
+
+  write_story unbounded '---
+status: ready
+round: 0
+---
+# Story: unbounded
+## Acceptance criteria
+**AC1 — every stub in the worker global is argument-sensitive.** Goes red.
+'
+  lint unbounded; assert_eq "$rc" 0 "an unquantified every is a warning, not an error"
+  assert_contains "$out" "unquantified domain" "and is named (L-20)"
+  lint unbounded --strict; assert_eq "$rc" 1 "--strict makes it fatal"
+
+  write_story badbase '---
+status: ready
+round: 0
+base: epic/not-a-real-branch
+---
+# Story: bad base
+## Acceptance criteria
+**AC1 — a claim.** Goes red when removed.
+'
+  lint badbase; assert_eq "$rc" 1 "a base: naming no branch fails"
+
+  # The regression guard: prose full of things that look like paths but are not.
+  write_story prose '---
+status: ready
+round: 0
+---
+# Story: prose
+The handler reads `req.method`, `req.url` and `res.ok`, calls `cache.match`
+and `caches.open`, and lives in `sw.js`. See `02-REVIEW.md`. It fetches
+`/manifest.json` and `/_next/static/chunks/x.js`, and may write
+`.blocked/900.md`.
+## Acceptance criteria
+**AC1 — a bounded claim.** Goes red when removed.
+'
+  lint prose; assert_eq "$rc" 0 "JS expressions, bare filenames and URL paths are not citations"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -609,7 +711,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base)
+       case_37_evidence_only_round case_38_story_base case_39_lint_story)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
