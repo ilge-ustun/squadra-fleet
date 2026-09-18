@@ -80,6 +80,7 @@ intent (a sentence)
                           ACs are **ACn-headed, base: is a real branch; warns on
                           an unquantified every/all/any and on baseline ACs
   → a human reads it and sets status: ready
+        — at a terminal, or /promote <id> from a phone
   → fleet/launch.sh <id>   (or fleet/run-queue.sh for the whole queue)
        zero **ACn headings → needs_human before any agent runs
        worktree ../wt-<id> cut from origin/<base:>
@@ -88,6 +89,8 @@ intent (a sentence)
        postcondition: commits OR handed-over evidence; .blocked/ checked first
        clean reviewer worktree detached at the builder's head
        ★ BASELINE   vitest (JSON) / build / lint → evidence
+                    + fleet/test-lib.sh when the round touched fleet/,
+                      under env -i so this run's config cannot leak (L-27)
        ★ SCOPE      changed paths vs scope_deny globs → evidence
        reviewer (codex exec, prompt on stdin, AGENT_TIMEOUT)
          → .review-out/mutations/ACn-* and optional .review-out/probes/*
@@ -97,6 +100,16 @@ intent (a sentence)
        ★ PROBE RUNNER     each probe run against the tree as it stands
        ★ COMPUTE VERDICT
   → .review/<id>.md + .review/<id>/round-N/ committed with the status
+       stopped (needs_human | blocked) → the launcher notifies, with the
+                                          command that answers it
+  → fleet/merge.sh <id>    (the QUEUE calls this on a computed PASS; a
+                            hand-run launcher never changes a branch)
+       refuses anything but a computed PASS on an epic/* base
+       merges in a throwaway worktree, runs the baseline on the MERGED result,
+       and pushes only if that is green
+       → notifies: "merged → epic/x  ·  undo: /revert <id>"
+  → a human merges the epic into the integration branch:
+       fleet/merge.sh --epic epic/x     — same baseline, never automatic
 ```
 
 ### The verdict
@@ -125,16 +138,25 @@ fleet/launch.sh        the launcher; --reap runs reap_orphans and exits
 fleet/run-queue.sh     drains every ready story; reaps first; --max N
 fleet/write-story.sh   intent → draft story (STORY_MODEL, default claude-opus-5)
 fleet/lint-story.sh    mechanical story checks; --strict makes warnings fatal
-fleet/status.sh        read-only; one line per story + a round's Machine block
-fleet/test-lib.sh      42 cases; fake agents in fleet/test/
+fleet/status.sh        read-only; one line per story, --json for machines
+fleet/merge.sh         story → its epic, or --epic <name> → the integration
+                       branch (a human's call); post-merge baseline before any
+                       push; records the merge sha in the story
+fleet/revert.sh        undoes that merge by story id
+fleet/reset.sh         clears a story back to the queue; refuses if live or
+                       unmerged without --force
+fleet/telegram.sh      send | poll — the notification and the control plane
+fleet/test-lib.sh      the launcher suite; fake agents in fleet/test/
 fleet/render.sh        render_prompt(); {{STORY}} {{INTENT}} {{STORY_BASE}} …
 fleet/prompts/*.md     rules, build-round{1,2}, build-after-spec, review,
                        write-story, README (the verdict contract)
-fleet/systemd/         timer + oneshot service, NOT installed — see its README
-.stories/<id>.md       spec; frontmatter status/round/base/scope_deny
+fleet/systemd/         two timer + oneshot pairs (queue, bot), NOT installed —
+                       see its README, and .env.fleet for the bot's token
+.stories/<id>.md       spec; frontmatter status/round/base/scope_deny/model,
+                       plus merged: written by merge.sh
 .review/<id>.md        summary; `verdict:` on line 3; ### Machine per round
 .review/<id>/round-N/  committed evidence: baseline, scope, mutations, probes,
-                       reviewer.md, reviewer.stderr, builder.md
+                       reviewer.md, reviewer.stderr, builder.md/.json
 .runs/                 raw JSON and logs — machine-local, gitignored
 ```
 
@@ -142,7 +164,10 @@ fleet/systemd/         timer + oneshot service, NOT installed — see its README
 
 `BASE_BRANCH` `BUILDER_MODEL` `STORY_MODEL` `MAX_TURNS` `MAX_ROUNDS`
 `AGENT_TIMEOUT` `INSTALL_CMD` `TEST_CMD` `BUILD_CMD` `LINT_CMD` `VITEST_CMD`
-`PUSH_STATUS` `REVIEW_ONLY`
+`PUSH_STATUS` `REVIEW_ONLY` `SELF_TEST_CMD` `FLEET_NOTIFY_CMD` `AUTO_MERGE`
+`FLEET_LOCK_WAIT` `QUEUE_START_CMD`
+
+A story's `model:` overrides `BUILDER_MODEL` for that story alone.
 
 `REVIEW_ONLY=1` skips the builder and the commit postcondition — for when
 `needs_human` was a spec defect rather than a build defect. It earned itself
@@ -235,18 +260,26 @@ ACs → 1.
 
 ## 7. Harness gaps still open
 
-- **Nothing merges itself.** Every merge so far has been a human's. Being
-  closed now: auto-merge story → epic on a computed PASS, gated on a post-merge
-  baseline, with the revert command in the notification. `epic → develop` and
-  anything touching `main` stay human.
-- **No write-side control plane.** `status.sh` reads; there is no approve /
-  promote / unblock path. Story 014 is the first half of that bridge — the
-  queue seeing a promotion made elsewhere.
-- **`.blocked/` has never fired from a builder** in twelve stories. The
+- **Auto-merge has never run on a real story.** The machinery exists and the
+  suite covers it, including the post-merge baseline that undoes a bad merge
+  and the `AUTO_MERGE=0` switch. What it has not had is a real story on a real
+  epic. Treat the first few as worth watching.
+- **The bot is written and not installed.** It needs a @BotFather token in
+  `.env.fleet` and the two units symlinked; both are a human's, and until then
+  every notification is a `warn` into the queue log.
+- **`.blocked/` has never fired from a builder** in fourteen stories. The
   story-writer escalates instead — 011 raised a product question and refused to
-  decide — and intake is arguably the right place for it (L-24).
-- **Epic → develop merges are untested.** Only `story → epic` and
-  `story → develop` have happened.
+  decide — and intake is arguably the right place for it (L-24). The path is
+  covered by `test-lib`; the field has never exercised it.
+- **The self-test is only as good as its cases.** `run_baseline` now runs
+  `test-lib` for any round touching `fleet/`, which closed L-26 — but the same
+  round could weaken a case and the assertion that guards it. L-27 is the other
+  half of the same warning: the first real use produced a *false* veto, and a
+  false veto looks exactly like a true one.
+- **Lanes.** One, still. The lock (C4) makes two safe; whether two fit is a
+  memory question, and the timing line now in every Machine block is what will
+  answer it. The trigger, stated in advance: ≥3 stories `ready` for a day, and
+  peak RSS under 1.2 GB per lane.
 
 ---
 

@@ -16,11 +16,19 @@ Entries marked *by discipline* are a work queue, not a record.
 
 ## Carried over from the 14 Sep handoff
 
+**Enforced by:** on a lesson names the `fleet/test-lib.sh` case or function
+that fails if the lesson is un-learned. A lesson without the field is making no
+such claim — it is advice, and says so by its absence. `case_72` checks that
+every name here still exists, so a lesson cannot go on claiming an instrument
+it has lost.
+
 ### L-01 — `.env.local` absent in fresh worktrees
 App built, suite fully green, connected to `projects/undefined`. Found by a
 human looking at the screen; no automated check could see it.
 **Lesson:** a green suite says nothing about configuration the suite mocks.
 **Prevention:** by construction — `SEED_FILES` seeded before `npm ci`.
+
+**Enforced by:** `case_48_missing_seed_file`
 
 ### L-02 — `git add a b c` stages nothing if `c` is missing
 Exit 128. Every status commit silently dropped, because `.blocked/<id>.md`
@@ -29,10 +37,14 @@ usually does not exist. `2>/dev/null` hid it.
 the whole call.
 **Prevention:** by construction — each path added separately, guarded.
 
+**Enforced by:** `case_7_status_commits_land`
+
 ### L-03 — jq `//` fires on `null` and `false`
 `.is_error // "parse-failed"` rewrote every *successful* run as parse-failed.
 **Lesson:** the alternative operator is not a null-coalesce.
 **Prevention:** by construction — `if has("is_error") then ... else ... end`.
+
+**Enforced by:** `case_8_is_error_false`
 
 ### L-04 — `kill -9` on the launcher does not stop the work
 `claude`, its shell, `npm` and `vitest` all survive. `pgrep -f "wt-004"`
@@ -42,6 +54,8 @@ named.
 **Prevention:** by construction — `procs_in_worktree()` scans `/proc/*/cwd`
 with `readlink -f` normalisation. Side benefit: multiplexer-agnostic, so
 swapping tmux costs nothing.
+
+**Enforced by:** `case_53_reset_refuses_while_live`
 
 ### L-05 — findings did not survive a restart
 They lived only in a shell variable. After FAIL + restart the builder
@@ -55,6 +69,8 @@ empty.
 ---
 
 ## Found while extracting story 005 (15 Sep)
+
+**Enforced by:** `case_5_restart_after_fail`
 
 ### L-06 — the suite mocks the module under test
 All 18 test files call `vi.mock("@/utils/firebase")`. The module body never
@@ -85,6 +101,8 @@ distinguishing line is `Tests: no tests` versus `Tests: 2 failed | 2 passed`.
 colour. A suite that cannot compile asserts nothing.
 **Prevention:** by discipline. Noted in `.stories/005.md` so the reviewer
 re-running it knows which red is which.
+
+**Enforced by:** `case_15_baseline_notests`
 
 ### L-09 — reasoning from a diff hunk instead of the file
 A comment appeared stale because the hunk began mid-sentence; the full
@@ -155,6 +173,8 @@ matches; nothing warns when it does not.
 launcher unless every fake is what `command -v` resolves, and a nested
 invocation (`FAKE_TRACE_DIR` already set) exits before doing anything.
 
+**Enforced by:** `shadow_check`
+
 ### L-15 — the verdict was a grep over the reviewer's prose
 `launch.sh` decided PASS by matching `^VERDICT: PASS$` on the model's
 output. Nothing checked that any mutation was applied, any test ran, or
@@ -178,6 +198,8 @@ mutation files, per-mutation `.result`s and both agents' text under
 `.review/<id>/round-N/` and commits them with the status. Raw logs stay in
 `.runs/` and are re-derivable from patch + SHA.
 
+**Enforced by:** `case_17_reviewer_output_copied`
+
 ### L-17 — unattended changes what the agents print
 First real run of the verdict runner, detached from a terminal. Codex wrote
 "Reading additional input from stdin..." to stderr because stdin was not a
@@ -196,6 +218,8 @@ path that will be taken when least expected.
 only `agent_message` items; an empty extraction is recorded, not papered
 over. `fleet/test/codex` emits the notice on every run.
 
+**Enforced by:** `case_31_codex_stderr_notice`
+
 ### L-18 — a prompt on argv has a hard ceiling, and evidence grows
 Round 3 of story 007 died with `is_error=` blank and no output: the
 round-2 prompt embeds the review file, the review file held two rounds of
@@ -212,6 +236,8 @@ nothing, when the builder was never started.
 intended mode and removes the L-17 notice at its root. `fleet/test-lib.sh`
 case 32 grows a review past the limit on a rerun and asserts the builder
 still receives it.
+
+**Enforced by:** `case_32_huge_review_prompt`
 
 ### L-19 — the story the agents read is the branch copy, not the base copy
 Story 007 was amended on `feat/pwa` after four rounds and set back to
@@ -230,6 +256,8 @@ before the round's start SHA (so it is never the builder's work), which
 the reviewer's detached tree inherits. `fleet/test-lib.sh` case 33.
 
 ## Found by running two stories back to back (18 Sep)
+
+**Enforced by:** `case_33_story_amendment_reaches_builder`
 
 ### L-20 — what converges a story is the domain, not the number of ACs
 Story 007: five ACs over everything one file does — eight rounds, never a
@@ -276,6 +304,8 @@ round 3, which is the run that passed.
 
 ## Found by story 010 — the first production-code story after Phase 3
 
+**Enforced by:** `case_34_review_only`
+
 ### L-22 — evidence must be produced against the state it will be judged in
 The builder's TDD patches were hand-authored during the TDD step, before the
 fix, and the harness applies them to the head the round ends on. Under
@@ -310,6 +340,8 @@ handed evidence over, which the runner judges exactly as the reviewer judges
 commits. Nothing at all is still a die; `fleet/test-lib.sh` case 2 is
 unchanged and case 37 covers the new path.
 
+**Enforced by:** `case_37_evidence_only_round`
+
 ### L-24 — an escalation fixture must make the decision unavoidable, not merely present
 Story 010 was written to force `.blocked/` to fire for the first time: a
 product question with no technically correct answer — what a collection page
@@ -327,6 +359,8 @@ in ten stories. The mechanism is tested (`test-lib` case 3); what is untested
 is any real agent's willingness to use it.
 
 ## Found by story 014 — the fleet working on its own harness (18 Sep)
+
+**Enforced by:** `case_3_blocked`
 
 ### L-25 — claim only what you instrument
 Story 014's criteria were unusually precise, and precision cuts both ways. AC3
@@ -366,3 +400,33 @@ that did not run must not read as a check that passed. Cases 46 and 47.
 the same builder that weakens a case could weaken the case that guards it.
 Nothing here makes the harness self-verifying — it makes a harness change
 visible to the same instrument every other change already faces.
+
+**Enforced by:** `case_46_baseline_self_test`
+
+### L-27 — a self-test inherits the configuration of the run that calls it
+
+Story 014's round three was started with `MAX_ROUNDS=1`, because it needed
+exactly one more round. The baseline's new self-test step ran
+`bash fleet/test-lib.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
+the environment, so the suite's own fixtures inherited it. Cases 4, 5, 9 and
+27 exist to check what happens across *two* rounds; with the ceiling at one
+they failed. 230 passed, 14 failed, and the machine vetoed a story whose
+sixteen mutations were all RED and whose reviewer said PASS.
+
+Nothing was wrong with the story. The harness had configured its own examiner.
+
+**Lesson:** a check that runs the system under test inherits whatever the
+current run was configured with, and its fixtures assume defaults. The failure
+is not loud — it looks exactly like a real finding, which is worse than a
+crash.
+
+**Prevention:** `env -i` with a four-variable allowlist (`PATH`, `HOME`,
+`TMPDIR`, `LANG`), not a list of variables to drop. A drop-list has to be
+extended every time the launcher grows a seam, and the once it is forgotten
+the symptom is a false veto indistinguishable from a true one. The case proves
+the environment is clean by making the child's environment the log
+(`SELF_TEST_CMD=env`), which is the only way to assert on something a
+subprocess cannot report back.
+
+**Enforced by:** `case_73_self_test_env_is_clean`
+
