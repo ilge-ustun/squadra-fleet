@@ -1,0 +1,23 @@
+[Unit]
+Description=Khaita fleet — look for ready stories every 15 minutes
+Documentation=file:///home/fleet/work/khaita/khaita-app/fleet/systemd/README.md
+
+[Timer]
+# An empty queue costs 0.08s: reap_orphans scans .stories and /proc, finds
+# nothing, exits. No git fetch, no model call, no cost. So polling often is
+# cheap, and the interval is about how soon you want a promoted story picked
+# up, not about load.
+OnBootSec=2min
+OnUnitActiveSec=15min
+
+# A firing missed while the machine was off runs shortly after boot. That is
+# also the crash-recovery path: the first thing run-queue.sh does is reap
+# orphans, so a story stranded at in_progress by a power cut is picked up
+# without anyone asking.
+Persistent=true
+
+# Avoid every timer on the box firing on the same second.
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

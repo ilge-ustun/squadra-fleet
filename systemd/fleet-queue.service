@@ -1,0 +1,43 @@
+[Unit]
+Description=Khaita fleet — drain the story queue
+Documentation=file:///home/fleet/work/khaita/khaita-app/fleet/systemd/README.md
+
+# Do not start if the machine is still coming up; the timer handles catch-up.
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# A oneshot service is never entered twice: while a drain is running, the
+# timer's next firing is skipped rather than queued. That is the overlap
+# guard, and it is free — nothing in the fleet has to know about it.
+
+WorkingDirectory=/home/fleet/work/khaita/khaita-app
+
+# claude lives in ~/.local/bin and codex under nvm, neither of which is on a
+# systemd unit's default PATH. launch.sh resolves both by bare name, so
+# without this the run dies at "claude not on PATH" — loudly, but pointlessly.
+Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/fleet
+
+# Per-agent wall clock. The queue's own ceiling is --max stories.
+Environment=AGENT_TIMEOUT=1800
+
+ExecStart=/bin/bash /home/fleet/work/khaita/khaita-app/fleet/run-queue.sh --max 5
+
+# A full queue is long: several stories, each up to MAX_ROUNDS rounds, each
+# round a builder and a reviewer plus the mutation runs. Generous, because
+# AGENT_TIMEOUT already bounds the part that can actually hang.
+TimeoutStartSec=6h
+
+# The box has 3.9 GB and roughly 1.4 GB is committed before the fleet starts
+# (see docs/fleet/FLEET-HANDOFF.md §2). MemoryHigh throttles rather than kills,
+# so a Next build that spikes is slowed, not OOM-killed mid-round.
+MemoryHigh=2500M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fleet-queue
+
+[Install]
+WantedBy=default.target
