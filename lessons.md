@@ -228,3 +228,40 @@ nobody reads. State that is "in git" is only in the branch it is in.
 the builder worktree and commits it there as the launcher's own commit
 before the round's start SHA (so it is never the builder's work), which
 the reviewer's detached tree inherits. `fleet/test-lib.sh` case 33.
+
+## Found by running two stories back to back (18 Sep)
+
+### L-20 — what converges a story is the domain, not the number of ACs
+Story 007: five ACs over everything one file does — eight rounds, never a
+PASS, merged over a FAIL. Story 008: two ACs over one property — three
+rounds, PASS. The tempting conclusion is "fewer ACs". It is wrong.
+
+008's first two rounds caught **every mutation the story named** and failed
+only on AC1's opening words, "every stub in the worker global". That domain
+is unbounded: it pulled in the `push` and `notificationclick` handlers, which
+no AC of 007 or 008 describes and whose surface is a whole notification
+payload. Two rounds were spent making stubs argument-sensitive for handlers
+nobody had scoped. Quantifying the domain — "every stub the fetch, install
+and activate handlers call" — and re-reviewing the *unchanged* build gave a
+PASS with eleven mutations RED.
+
+So the cost was not five ACs versus two. It was one unbounded "every".
+**Lesson:** a reviewer told to hold a build to "every X" will keep finding a
+new X. The story must say which X. This is the same rule story 006's AC3
+already paid for, written down in the handoff's conventions, and broken here
+anyway — by the author of that handoff entry, one day later.
+**Prevention:** by discipline. Nothing can detect an unbounded domain in
+prose. The nearest mechanical guard is that every AC names the mutations it
+must catch, which 008 did — and which is why the failing rounds were cheap
+and diagnosable rather than mysterious.
+
+### L-21 — a spec defect costs a builder round unless the harness has a way to skip it
+008's rounds 1 and 2 ended with a correct build and a wrong spec. Before
+`REVIEW_ONLY`, the only way to get a re-review was to let the builder commit
+something, because the round postcondition demands a commit — so a spec fix
+cost a full builder round and put unrelated changes in the branch.
+**Lesson:** `needs_human` exists so a human can change the story. The harness
+must then be able to re-judge the same head against the new story.
+**Prevention:** by construction — `REVIEW_ONLY=1` skips the builder and the
+postcondition, and nothing else; `fleet/test-lib.sh` case 34. Used on 008
+round 3, which is the run that passed.
