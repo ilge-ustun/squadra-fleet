@@ -12,6 +12,17 @@
 #   FAKE_BUILDER=touch      appends a line to $FAKE_TOUCH and commits it
 #                           (Phase 2: a change the scope check can see)
 #
+# Phase 3: FAKE_BUILDER_MUTATIONS makes the builder hand the harness its own
+# TDD evidence — "the test I wrote goes red when the behaviour is removed" —
+# in the same .review-out/mutations/ format the reviewer uses, slug-prefixed
+# `tdd-` so the producer is visible:
+#
+#   none   (default) writes nothing
+#   red    a patch that inserts FLEET_MUTANT_MARKER — the fake vitest in
+#          `marker` mode then fails, so the claim holds
+#   green  a patch that changes a comment only — nothing fails, so the
+#          builder's "observed red" claim is false and the story must not pass
+#
 # It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
 # given as $FAKE_TRACE_DIR/claude-prompt-N, so a test can assert which prompt
 # the launcher rendered. Output is the one JSON object the launcher parses
@@ -46,6 +57,23 @@ case "$FAKE_BUILDER" in
             git add -- "$FAKE_TOUCH"
             git commit -q -m "fake(builder): touch $FAKE_TOUCH" ;;
   *) echo "fleet/test/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
+esac
+
+# TDD evidence, written after the commit so the tree is clean apart from
+# .review-out/ — the same contract the reviewer is held to.
+case "${FAKE_BUILDER_MUTATIONS:-none}" in
+  none) : ;;
+  red)   mkdir -p .review-out/mutations
+         printf '\nFLEET_MUTANT_MARKER\n' >> fleet/prompts/rules.md
+         git diff -- fleet/prompts/rules.md > .review-out/mutations/AC1-tdd-observed-red.patch
+         git checkout -q -- fleet/prompts/rules.md
+         printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
+  green) mkdir -p .review-out/mutations
+         printf '\n# a comment the suite cannot see\n' >> fleet/prompts/rules.md
+         git diff -- fleet/prompts/rules.md > .review-out/mutations/AC1-tdd-observed-red.patch
+         git checkout -q -- fleet/prompts/rules.md
+         printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
+  *) echo "fleet/test/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
 esac
 
 printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n"

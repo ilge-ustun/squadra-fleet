@@ -504,6 +504,26 @@ case_34_review_only() {
   assert_file "$REPO/.review/$STORY/round-2/mutations/AC1-marker.result" "mutations still ran"
 }
 
+# Phase 3.1. RULES say "write the failing test, run it, SEE IT FAIL". Until
+# now that was a sentence in a commit message. The builder hands the harness
+# the same evidence the reviewer does — a patch removing the behaviour, and
+# the selector that must go red — and the runner judges it. Red when the
+# builder's copy-out is deleted (no tdd row) or when its classification is
+# left out of the veto (a false "observed red" claim passes).
+case_35_builder_tdd_mutation() {
+  CASE="35 a builder's TDD claim is run, not believed"; fixture c35
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "the builder's claim ran"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/mutations/AC1-tdd-observed-red.result" "committed"
+  assert_eq "$(field status)" done "true claim does not block a PASS"
+
+  CASE="35b a false TDD claim fails the story"; fixture c35b
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^AC1 +GREEN +tdd-observed-red' "$REPO/.review/$STORY.md" "survived"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
+  assert_grep '^computed: FAIL — .*tdd-observed-red GREEN' "$REPO/.review/$STORY.md" "reason names the tdd claim"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -517,7 +537,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_27_round2_gets_machine_facts
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
        case_31_codex_stderr_notice case_32_huge_review_prompt
-       case_33_story_amendment_reaches_builder case_34_review_only)
+       case_33_story_amendment_reaches_builder case_34_review_only
+       case_35_builder_tdd_mutation)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

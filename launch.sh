@@ -461,6 +461,8 @@ while (( ROUND < ROUND_CEILING )); do
   log "round $ROUND of $ROUND_CEILING"
 
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
+  EVIDENCE_DIR_PENDING="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
+  mkdir -p "$EVIDENCE_DIR_PENDING"
   
   if (( ROUND == ROUND_START + 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
     BUILD_PROMPT="$(render_prompt build-round1.md)"
@@ -508,6 +510,18 @@ while (( ROUND < ROUND_CEILING )); do
       echo "answer by editing .stories/$STORY_ID.md, then set status back to ready"
       exit 0
     fi
+
+    # RULES demand the builder observe its test fail before implementing.
+    # That was a sentence in a commit message; now it is evidence the runner
+    # applies. Same format as the reviewer's, slug-prefixed `tdd-` so the
+    # producer is visible in the machine table. Copied before the reviewer
+    # runs, into the same directory, so one runner judges both.
+    if [[ -d "$BUILDER_WT/.review-out/mutations" ]]; then
+      mkdir -p "$EVIDENCE_DIR_PENDING/mutations"
+      cp -r "$BUILDER_WT/.review-out/mutations/." "$EVIDENCE_DIR_PENDING/mutations/"
+      rm -rf "$BUILDER_WT/.review-out"
+      log "builder handed over TDD evidence"
+    fi
   fi
 
   HEAD_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
@@ -530,7 +544,7 @@ while (( ROUND < ROUND_CEILING )); do
   seed_env "$REVIEWER_WT"
   ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
 
-  EVIDENCE_DIR="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
+  EVIDENCE_DIR="$EVIDENCE_DIR_PENDING"
   run_baseline "$REVIEWER_WT" "$EVIDENCE_DIR"
   check_scope "$EVIDENCE_DIR"
 
