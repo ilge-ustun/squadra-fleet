@@ -1,386 +1,276 @@
-# Fleet handoff — state as of 18 Sep 2026 (afternoon)
+# Fleet handoff — state as of 18 Sep 2026, end of day
 
-Autonomous coding-agent fleet for `khaita-app`. Supersedes the 17 Sep handoff.
-Read `docs/fleet/lessons.md` alongside this — L-14 … L-21 were added in the
-session this document closes. The design that session implemented is in
-`fleet/prompts/README.md` ("The verdict contract"); its history is in the
-commits `110d165..92c8982` on `feat/pwa`.
+Autonomous coding-agent fleet for `khaita-app`. Supersedes every earlier
+handoff. Read `docs/fleet/lessons.md` alongside this — L-01 … L-26 hold the
+findings this only summarises.
+
+**Orient by running things, not by trusting this file.** Numbers in prose rot
+(L-11). The commands that produce them:
+
+```bash
+./fleet/status.sh                 # every story: status, round, computed verdict, epic
+bash fleet/test-lib.sh            # the harness's own suite — 42 cases
+npx vitest run                    # the app's suite
+git log --oneline develop -20
+```
 
 ---
 
-## 1. The architecture
-
-Four layers. Unchanged as a model; the harness layer now does what the table
-always said it did.
-
-| Layer | Owns | Implementation |
-|---|---|---|
-| **Harness** | launcher, worktrees, concurrency, retry, **verdict computation** | `fleet/launch.sh` (~650 lines) + `fleet/render.sh`; tested by `fleet/test-lib.sh` |
-| **Agent** | roles, prompts, model per lane, review protocol | `fleet/prompts/*.md`; Claude Code builder, Codex reviewer |
-| **State** | story specs, gates, review log, **evidence** | markdown + frontmatter, `.review/<id>/round-N/`, all in git |
-| **Control plane** | how the human submits work and unblocks gates | tmux + SSH, or a Claude Code session. **Still the weakest layer, and now measured** — see §2. |
+## 1. Branches
 
 ```
-.stories/<id>.md   spec + ACs headed **ACn + frontmatter status/round/scope_deny
-  → launcher picks first `ready`; zero **ACn headings → needs_human before any agent
-  → worktree ../wt-<id>; base copy of the story SYNCED in as a launcher commit
-  → claude -p (prompt on stdin), TDD enforced by RULES
-  → postcondition: did commits appear? (NOT is_error)
-  → clean reviewer worktree at builder's head
-  → ★ harness BASELINE: vitest (JSON reporter) / build / lint → evidence
-  → ★ harness SCOPE: changed paths vs story scope_deny globs → evidence
-  → codex exec (prompt on stdin): prose + VERDICT line + .review-out/mutations/
-  → ★ harness: reviewer tree must be clean apart from .review-out/, else needs_human
-  → ★ harness MUTATION RUNNER: per patch — pre-run green? apply, run, RED/GREEN/
-      NO_TESTS/PRE_RED/PATCH_INVALID, restore, tree clean? → .result per mutation
-  → ★ harness COMPUTES the verdict:
-        machine_pass = baseline green ∧ scope CLEAN ∧ every AC has ≥1 mutation
-                     ∧ every mutation RED
-        final = SPEC if model says SPEC | PASS if machine_pass ∧ model PASS | FAIL
-      The machine can veto, never grant.
-  → .review/<id>.md (### Machine block per round) + .review/<id>/round-N/ committed
-  → FAIL → next round with the review-so-far as findings → ceiling → needs_human
-  → rounds continue across reruns (round: in frontmatter)
+main                        5a16624
+└── develop                 ← integration. FLEET STATE LIVES HERE ONLY.
+     │                        Fast-forwards to main. The checkout sits here.
+     ├── epic/offline-pwa   ← stories 012, 013 target this
+     ├── epic/search        ← nothing yet (items 4, 5 in §6)
+     ├── epic/ui-polish     ← story 011 merged here
+     └── epic/shazam        ← nothing yet; a project, not a story
+          └── story/NNN     ← the launcher cuts these from the story's base:
 ```
+
+`develop` carries `.stories/`, `.review/`, `fleet/`, `docs/fleet/`. Epic
+branches carry **product code only** — a story branch never receives fleet
+state, because the story text reaches both agents in their prompt rather than
+as a file in the worktree (§3). Epics drift from `develop` as fleet work
+continues; that is normal and merges cleanly.
+
+A story names its epic with `base:` in frontmatter. Omitted, it uses
+`BASE_BRANCH` (default `develop`).
+
+`develop` was brought up to date on 18 Sep with `git merge -s ours` from the
+PWA line, **not** a force-push: its twelve stale commits (Feb–May 2026) stay
+reachable, nothing was rewritten, and no `--force` was needed. `feat/pwa`
+still exists, identical to `develop`.
 
 ---
 
 ## 2. Infrastructure
 
-**VPS:** Ubuntu 24.04, 2 CPU / 4 GB / 60 GB + 8 GB swap, IP `179.237.101.204`.
+**VPS:** Ubuntu 24.04, 2 CPU / 3.9 GB / 60 GB + 8 GB swap, `179.237.101.204`.
+Users `ubuntu` (admin), `fleet` (agents, `~/work/khaita/khaita-app`), `hermes`.
 
-**Users, no sudo, home 700:** `ubuntu` (admin), `fleet` (agents,
-`~/work/khaita/khaita-app`), `hermes` (personal agent, systemd user service).
+**Installed under `fleet`:** Claude Code 2.1.263 (`~/.local/bin/claude`),
+Codex 0.153.4 and Node 24 under nvm, jq. Neither agent is on a systemd unit's
+default PATH — `fleet/systemd/fleet-queue.service` sets it explicitly.
 
-**Installed under `fleet`:** Claude Code 2.1.263, Codex 0.153.4, Node 24 via
-nvm, jq.
+**Memory, measured:** an interactive Claude Code session on this host is
+**~530 MB**; Hermes ~694 MB; system ~120 MB. ~1.4 GB is committed before the
+fleet starts and a Next build peaks near 1.4 GB. **Never run the launcher as a
+child of the session driving it** — the tool's own low-memory policy killed one
+mid-builder on 17 Sep. Detached, always:
 
-**Memory — measured 17 Sep evening, not estimated:** an interactive Claude
-Code session on this host = **530 MB**; Hermes = **694 MB** (three python
-processes); system ≈ 120 MB. That is ~1.4 GB committed before the fleet
-starts, on 3.9 GB with 2 CPUs (vitest runs two jsdom workers). The 14 Sep
-"two lanes would fit" was measured without an interactive session on the box.
-A launcher run as a *background task of a Claude Code session* was killed by
-the tool's own low-memory policy mid-builder. Every run after that was
-launched detached — `setsid nohup bash -c 'bash fleet/launch.sh <id>; echo
-"launcher exit=$?"' > log 2>&1 < /dev/null &` — and completed. **Run the
-launcher from tmux or detached; never as a child of the session driving it.**
+```bash
+setsid nohup bash -c 'bash fleet/launch.sh 0NN; echo "exit=$?"' > log 2>&1 < /dev/null &
+```
 
----
-
-## 3. What changed 17–18 Sep — the verdict is computed
-
-All of this is on `feat/pwa`, pushed, 181 assertions green in
-`bash fleet/test-lib.sh` (36 cases).
-
-### Harness
-
-- **`fleet/test-lib.sh` + `fleet/test/{claude,codex,vitest,npm}`** — the
-  launcher's regression suite. Fakes are resolved by bare name on PATH
-  (launch.sh calls `claude`/`codex` unqualified). Each case names the
-  launch.sh block whose deletion turns it red; **every case was observed red
-  before its block existed** (against the pre-change launcher via
-  `FLEET_LAUNCH_OVERRIDE`, or against mutant copies). Two guards, learned the
-  expensive way: `shadow_check` refuses to run unless the fakes are what
-  resolves (the first run started the *real* Claude on the fixture and
-  recursed three deep — L-14); a nested invocation exits.
-- **AC extraction before any agent** (`**ACn` at column 0); none →
-  `needs_human`, not a bare die (a die would leave it first in the queue).
-- **Baseline** run by the harness in the clean reviewer tree: vitest JSON
-  reporter, build, lint. GREEN needs `numTotalTests > 0 ∧ numFailedTests == 0`
-  — a transform error is zero tests and RED (L-08, by construction; shapes
-  read from real vitest 3.2.7 runs).
-- **Scope** — `scope_deny:` frontmatter, deny-only bash globs; no allow list
-  by decision. `.blocked/<id>.md`, `.stories/<id>.md`, `docs/fleet/<id>-*.md`
-  always allowed.
-- **Reviewer output contract** — `.review-out/mutations/ACn-<slug>.patch` +
-  `.test` (vitest selector) or `.cmd`; tree must be clean otherwise, else
-  `needs_human`.
-- **Mutation runner** — applies, runs, classifies, restores; dies if the tree
-  will not restore.
-- **Verdict computation** — as in §1. **D1 by decision: any surviving
-  mutation vetoes.** SPEC is immune. Round 2's `{{REVIEW_TEXT}}` is the
-  review file so far (Machine blocks + prose), the same content a restart
-  reloads.
-- **Evidence** — `.review/<id>/round-N/{baseline/,scope.txt,mutations/*,
-  reviewer.md,reviewer.stderr,builder.md}` committed with each status. Raw
-  vitest JSON and logs in `.runs/` (machine-local, re-derivable from
-  patch + SHA).
-- Found by the first real story and fixed by construction, each with a
-  red-observed case: codex stderr merged into the JSON stream broke
-  extraction under no TTY (**L-17**); a 134 KB prompt on argv exceeded
-  `MAX_ARG_STRLEN` — **prompts now go on stdin** to both agents (**L-18**);
-  a story amended on the base never reached a resumed worktree — **the base
-  story is synced into the worktree as a launcher commit** (**L-19**);
-  rounds now continue across reruns instead of clobbering `round-1/`.
-
-### Added 18 Sep
-
-- **`REVIEW_ONLY=1`** — skip the builder and the commit postcondition, review
-  the branch head as it stands. Everything after the builder runs unchanged
-  and `commits this round: 0` is recorded honestly. The mode a story needs
-  when `needs_human` was a spec defect rather than a build defect; used on 008
-  round 3, which is the run that passed (L-21). `test-lib` case 34.
-- **`fleet/status.sh`** — one line per story: status, round, computed verdict,
-  branch, worktree/merge state, the last round's veto reasons; with a story id,
-  that round's `### Machine` block. Read-only, so safe while a launcher works
-  and safe over ssh. Liveness is a `/proc` cwd scan, not the frontmatter
-  (L-04: `in_progress` can be a stale orphan).
-
-### Added 18 Sep, afternoon — Phase 3, both producers now hand over evidence
-
-- **Builder TDD mutations.** `rules.md` asks the builder for
-  `ACn-tdd-<slug>.patch` + `.test` proving the test it wrote goes red when the
-  behaviour is removed. The harness copies them out of the builder worktree
-  before the reviewer runs, so one runner judges both producers; the `tdd-`
-  slug prefix shows which is which. "SEE IT FAIL" stops being a sentence in a
-  commit message. Near-inert for instrument stories (there the builder's fix
-  *is* the test); it earns its keep on production-code stories.
-- **Reviewer probes.** `review.md` asks for constructed regressions as
-  runnable tests in `.review-out/probes/<name>.test.tsx` — no patch. Copied
-  under the vitest include glob, run, removed, committed. **A probe is the
-  inverse of a mutation: RED means it found something, so RED vetoes.**
-  Optional by design: requiring "at least one" is a check that cannot go red.
-- `.review-out/` is gitignored, so neither agent can commit scratch onto a
-  story branch.
-
-**What is still judgment after Phase 3:** whether the reviewer thinks of the
-right probe. Everything downstream of that thought is run by the harness and
-kept in git.
-
-### Agent
-
-- `review.md` carries the mutation contract and states the veto: *a
-  surviving mutation fails the story regardless of your VERDICT line.*
-- `README.md` — "The verdict contract" rewritten; records honestly that the
-  `^VERDICT:` grep matches any line, not only the last.
-- `TEMPLATE.md` — frontmatter with `scope_deny`; AC heading shape required;
-  no "suite/build/lint green" ACs (baseline is automatic).
-- No model changes. Builder Sonnet, reviewer Codex, unchanged.
-
-### State
-
-- `.stories/007.md`, `.stories/008.md`, `.stories/009.md` (draft), their
-  `.review/<id>.md` and per-round evidence directories.
-- `docs/fleet/lessons.md` L-14 … L-21.
+Two agents plus a Next build at once left ~1.0 GB free. It held, but only just.
 
 ---
 
-## 4. Stories 007 and 008 — the first two through the computed verdict
+## 3. The machine
 
-Both merged into `feat/pwa`. Suite: `npx vitest run` → **20 files / 131
-tests**. `public/sw.js` itself is unchanged by either — `scope_deny` held.
+### Pipeline
 
-### 007 — `public/sw.js` fetch-handler instrument (merged over a FAIL)
+```
+intent (a sentence)
+  → fleet/write-story.sh  Opus 5, read-only worktree at the epic's tip,
+                          writes .stories/<id>.md at status: draft
+  → fleet/lint-story.sh   mechanical: cited paths exist and lines are in range,
+                          ACs are **ACn-headed, base: is a real branch; warns on
+                          an unquantified every/all/any and on baseline ACs
+  → a human reads it and sets status: ready
+  → fleet/launch.sh <id>   (or fleet/run-queue.sh for the whole queue)
+       zero **ACn headings → needs_human before any agent runs
+       worktree ../wt-<id> cut from origin/<base:>
+       builder (claude -p, prompt on stdin, AGENT_TIMEOUT)
+         → hands over .review-out/mutations/ACn-tdd-*  (its "observed red")
+       postcondition: commits OR handed-over evidence; .blocked/ checked first
+       clean reviewer worktree detached at the builder's head
+       ★ BASELINE   vitest (JSON) / build / lint → evidence
+       ★ SCOPE      changed paths vs scope_deny globs → evidence
+       reviewer (codex exec, prompt on stdin, AGENT_TIMEOUT)
+         → .review-out/mutations/ACn-* and optional .review-out/probes/*
+       ★ reviewer's tree must be clean apart from .review-out/, else needs_human
+       ★ MUTATION RUNNER  per patch: pre-run green? apply, run, classify,
+                          restore, verify clean
+       ★ PROBE RUNNER     each probe run against the tree as it stands
+       ★ COMPUTE VERDICT
+  → .review/<id>.md + .review/<id>/round-N/ committed with the status
+```
 
-Five ACs over everything the file does. Eight rounds; rounds 3 and 5 never
-reached a reviewer (harness defects L-18, L-19, both fixed).
+### The verdict
 
-| round | mutations | survived |
+```
+machine_pass := baseline green ∧ scope CLEAN
+              ∧ every **ACn has ≥1 mutation ∧ every mutation RED
+              ∧ no probe RED
+final := SPEC if the reviewer said SPEC
+       | PASS if machine_pass ∧ the reviewer said PASS
+       | FAIL otherwise, every failing condition named on `computed:`
+```
+
+**The machine can veto, never grant.** Mutation classes: `RED` (a real
+failure), `GREEN` (survived — for that behaviour the instrument is absent),
+`NO_TESTS` (zero collected: the mutation broke compilation; never RED),
+`PRE_RED` (already failing unmutated), `PATCH_INVALID`, `NO_SELECTOR`. **A
+probe is the inverse — RED means it found something, so RED vetoes.** Probes
+are optional: requiring one is a check that cannot go red.
+
+### Files
+
+```
+fleet/launch.sh        the launcher; --reap runs reap_orphans and exits
+fleet/run-queue.sh     drains every ready story; reaps first; --max N
+fleet/write-story.sh   intent → draft story (STORY_MODEL, default claude-opus-5)
+fleet/lint-story.sh    mechanical story checks; --strict makes warnings fatal
+fleet/status.sh        read-only; one line per story + a round's Machine block
+fleet/test-lib.sh      42 cases; fake agents in fleet/test/
+fleet/render.sh        render_prompt(); {{STORY}} {{INTENT}} {{STORY_BASE}} …
+fleet/prompts/*.md     rules, build-round{1,2}, build-after-spec, review,
+                       write-story, README (the verdict contract)
+fleet/systemd/         timer + oneshot service, NOT installed — see its README
+.stories/<id>.md       spec; frontmatter status/round/base/scope_deny
+.review/<id>.md        summary; `verdict:` on line 3; ### Machine per round
+.review/<id>/round-N/  committed evidence: baseline, scope, mutations, probes,
+                       reviewer.md, reviewer.stderr, builder.md
+.runs/                 raw JSON and logs — machine-local, gitignored
+```
+
+### Seams (all `${X:-default}`)
+
+`BASE_BRANCH` `BUILDER_MODEL` `STORY_MODEL` `MAX_TURNS` `MAX_ROUNDS`
+`AGENT_TIMEOUT` `INSTALL_CMD` `TEST_CMD` `BUILD_CMD` `LINT_CMD` `VITEST_CMD`
+`PUSH_STATUS` `REVIEW_ONLY`
+
+`REVIEW_ONLY=1` skips the builder and the commit postcondition — for when
+`needs_human` was a spec defect rather than a build defect. It earned itself
+on story 008 the day it landed.
+
+---
+
+## 4. Unattended
+
+`fleet/run-queue.sh` drains the queue: reaps orphans first, runs every `ready`
+story, and a stopped story does not stop the queue. Guards: `--max` (default
+20), and it stops if a story returns to `ready` without finishing.
+
+**Crash resume works and is tested** (`test-lib` case 42). A power cut leaves a
+story at `in_progress` with a worktree holding the builder's commits; the next
+drain reaps it, reuses the worktree, and continues rounds from the frontmatter
+rather than restarting at one.
+
+**`AGENT_TIMEOUT`** (1800s) wraps both agent calls in `timeout -k 30`. On
+timeout the story goes to `needs_human` naming the timeout. Children may
+outlive the kill (L-04) — the next run's `procs_in_worktree` finds them and
+refuses to start, which is correct.
+
+**systemd** units are written and pass `systemd-analyze --user verify`, but are
+**not installed**. Two commands in `fleet/systemd/README.md`; one needs an
+admin (`loginctl enable-linger fleet` — currently `no`, so units would die with
+the ssh session).
+
+---
+
+## 5. Stories
+
+Run `./fleet/status.sh` rather than trusting this table.
+
+| id | what | state |
 |---|---|---|
-| 1 | 10 | `AC2-wrong-storage-key`, `AC3-remove-m1-target`, `AC3-reverse-fallbacks` |
-| 2 | 19 | `AC3-store-payload` |
-| 4 | 7 | `AC2-wrong-cache-key` |
-| 6 | 9 | `AC3-cache-first` |
-| 7 | 22 | `AC3-remove-ok-guard` |
-| 8 | 27 | `AC2-wrong-fetch-url`, `AC3-wrong-fetch-url` |
+| 002, 003 | favourite icon fill; mykhaita tab wrap | done, merged |
+| 004 | offline collection loading | **retired 18 Sep** — superseded, not completed. Its three findings were extracted into 005/006/009; its remaining work rested on a primary-lease theory its own reviewer refuted from the SDK source and the browser evidence contradicts. See the story's Retired section. |
+| 005 | Firestore persistence was never enabled | done by hand, `round: 0` |
+| 006 | an empty snapshot wrote `undefined` | done |
+| 007 | `public/sw.js` had no instrument that could go red | done, **merged over a FAIL** by human decision; reasons and per-round tallies in the story's Outcome section. 8 rounds. |
+| 008 | argument-sensitive stubs | done, PASS in 3 |
+| 009 | the collection page's test mocked away the collection | done, PASS in 1 |
+| 010 | "still loading" vs "loaded and empty" | done, PASS in 3 |
+| 011 | theme toggle icons | done, PASS in 1, **merged into `epic/ui-polish`** |
+| 012 | "new version available" | **draft** — needs a decision, §6 |
+| 013 | offline chip stuck on | **draft**, ready to promote |
+| 014 | the queue refreshes from origin | **needs_human** after 2 rounds, §6 |
 
-Merged at round 8 over the reviewer's FAIL, by human decision, with the
-per-round tallies and the reason recorded in `.stories/007.md` § Outcome so
-`status: done` is never mistaken for a PASS. Every round's survivor was a
-genuine new class the story had not bounded. **Model and machine agreed in
-every round that ran** — including rounds 1–2, where the model's verdict line
-was unreadable (L-17) and the computed verdict was right anyway.
-
-### 008 — argument-sensitive stubs (PASS, the first one computed)
-
-Two ACs over one property, written narrow on purpose. Three rounds.
-
-| round | mutations | survived |
-|---|---|---|
-| 1 | 6 | `AC1-remove-notification-open`, `AC1-unregistered-cache-delete` |
-| 2 | 5 | `AC1-notification-options` |
-| 3 | 11 | **none** → `computed: PASS` |
-
-Rounds 1 and 2 caught **every mutation the story named** and failed only on
-AC1's original unquantified "every stub in the worker global", which pulled
-in the `push` and `notificationclick` handlers that no AC describes. That was
-a spec defect, not a build defect: AC1's domain was quantified, and round 3
-re-reviewed the *unchanged head* under `REVIEW_ONLY=1` — no builder round
-spent — and passed with eleven mutations RED, including the two
-`wrong-fetch-url` mutations that had survived every round of 007.
-
-### 009 — the collection page's test renders the real collection (PASS, one round)
-
-Two ACs, domain bounded in the AC line, written after L-20. **PASS in round 1**
-— the first story to pass without a second attempt, and the first outside the
-service worker. Both named mutations RED: `Collection.tsx` returning `null`
-fails AC1; deleting the page's loading branch fails AC2.
-
-Closes story 004's unclosed P1 finding. `CollectionPage.test.tsx` no longer
-mocks the component the page exists to render — it mocks `CollectionSongs` one
-level down, sparing `@dnd-kit` and `CollectionPlayer`. The builder reached the
-same boundary 004's builder did, independently, and the story left that
-judgment to AC1's mutation rather than prescribing it.
-
-### What the three measure
-
-Not "fewer ACs" — **a bounded domain**. See lessons L-20.
-
-| story | ACs | domain | rounds | verdict |
-|---|---|---|---|---|
-| 007 | 5 | unbounded (a whole file) | 8 | FAIL, merged over |
-| 008 | 2 | one unbounded "every" | 3 | PASS |
-| 009 | 2 | bounded in the AC line | **1** | PASS |
-
-008 had two ACs and still burned two rounds on one unbounded "every". The
-convention was already written in §9 of the 17 Sep handoff and broken the next
-day by its author. 009 applied it and passed first time.
-
-Round yield after the L-17/18/19 fixes: **5 of 5 rounds reached a verdict**
-(007 rounds 6–8, 008 rounds 1–3 minus the REVIEW_ONLY one is 5 builder rounds
-plus one review-only round; none aborted).
-
-## 5. Offline routing — scoped, unchanged
-
-Scoped 17 Sep; nothing built. The findings, all verified against the current
-files then:
-
-- `public/sw.js:78` passes `?_rsc=` through **deliberately** (Phase 2 threat
-  T-02-03: a stale `_rsc` 307s and browsers reject a cached redirect for a
-  navigation). The guard is right online and produces the failure offline.
-  Any fix must satisfy both; deleting the line breaks online navigation.
-- The three failing routes are **dynamic server segments** with no
-  `generateStaticParams` (`routes-manifest.json`), while all three pages are
-  `"use client"` reading `useParams()` — the server round-trip hands the
-  client a parameter it already has in `location.pathname`. That mismatch is
-  the structural cause.
-- `sw.js:111`'s fallback to `/collections/mekhor/M1` is the line that turns a
-  network failure into the wrong page at the right URL. Story 007's AC3 pins
-  it deliberately so the fix starts from red.
-- **Product decisions still open:** what an unvisited route shows offline;
-  whether wrong-content-silently or visible-failure is the interim; whether
-  `/songs/[slug]` (359, unbounded) is in scope — it rules out
-  `generateStaticParams`.
+**Round yield is governed by the bounded domain, not the AC count** (L-20):
+5 unbounded ACs → 8 rounds; 2 ACs with one unbounded "every" → 3; 2 bounded
+ACs → 1.
 
 ---
 
-## 6. Story 004 — unchanged
+## 6. What needs a human, in order
 
-`needs_human`, branch `story/004`, worktree `../wt-004` at `08b02e6`. Same
-plan as 17 Sep: extract the Collection instrument fix path-scoped, rewrite
-per the old 7.2, re-branch from current `feat/pwa`. Note the base has moved
-a lot; `.stories/004.md` predates `scope_deny` and the AC heading rule
-(its ACs *are* `**ACn**`-headed, so it would extract).
-
----
-
-## 7. Harness gaps found by using it
-
-Closed since 17 Sep: no test harness; verdict from prose; evidence in /tmp;
-no `INSTALL_CMD` seam. Still open:
-
-- ~~No review-only entry point~~ — **closed 18 Sep**, `REVIEW_ONLY=1`.
-- ~~No status view~~ — **closed 18 Sep**, `fleet/status.sh`.
-- **Merging a story conflicts on its own story file, every time.** `sync_story`
-  commits the base copy into the worktree, so `.stories/<id>.md` is edited on
-  both sides. It happened on 007 and on 008. The resolution is always
-  `git checkout --ours .stories/<id>.md` — the base copy is the spec of
-  record. Mechanical; a `.gitattributes` merge driver would close it.
-- **The reviewer still runs mutations privately** before handing them over
-  (`.review-out/mutation-results.txt` appears in its worktree). Harmless,
-  costs reviewer time; the prompt could say "you need not run them".
-- **`MAX_ROUNDS` is per launch.** Every rerun of 007 was one round because it
-  was launched with `MAX_ROUNDS=1`; a converging story wants 2.
-- **`die` mid-round leaves `.review/<id>.md.new`** — re-seeded on the next
-  run; cosmetic.
-- **No reset.** `fleet/reset.sh <id>` still absent.
-- **`warn` → `die` audit** — still. `seed_env`'s missing-file warning is
-  still a warning.
-- **Memory / control plane** — §2. Not a harness bug; a deployment fact.
-
----
-
-## 8. `.blocked/` has still never fired — eight stories
-
-007 never blocked: every finding was addressable inside scope. The
-escalation fixture the 17 Sep handoff proposed (offline routing, written
-*without* answering the product question) remains the right test and remains
-untried. `fleet/test-lib.sh` case 3 proves the launcher handles it when it
-does fire.
+1. **Story 014** — `needs_human`, worktree `../wt-014` at `88b0b7f`. The
+   behaviour is right: the refresh works, a failed refresh continues the drain,
+   a conflict aborts cleanly, and a human's in-progress merge is protected —
+   that last one found by a reviewer **probe** in round 1 and fixed in round 2.
+   Two survivors, both gaps between an AC's words and its test:
+   `AC2-delete-continuation-message` (the AC says the log line states it is
+   continuing; the test only greps `refresh failed`) and
+   `AC3-drop-final-newline` (the AC says "byte-identical"; the test misses a
+   dropped trailing newline). **Verified by hand: the full harness suite passes
+   on that branch — 243 assertions, nothing existing broken.** Recommended: one
+   more round (`MAX_ROUNDS=1`) strengthening AC3's assertion — byte-identity of
+   uncommitted work is the claim that matters here — and weakening AC2's
+   wording to what its test proves. Merging over the FAIL is the wrong call on
+   this file specifically.
+2. **Story 012** — its root cause is that `public/sw.js` bytes never change on
+   deploy, so no new worker installs and the banner is **unreachable**, not
+   badly made. Fixing it properly means versioning or stamping `sw.js` at build
+   time, which also fixes `/manifest.json` and the icons never refreshing for
+   returning users. That reaches into how the app builds. Read its ACs before
+   promoting.
+3. **Story 013** — ready to promote as-is.
+4. **The harness-verification gap (L-26)** — the baseline is `npm test` /
+   `build` / `lint`, all of which exercise the app. **Nothing in the baseline
+   touches `fleet/`.** A story that changes the harness is guarded only by the
+   reviewer's mutations plus a human running `test-lib`. Extending
+   `run_baseline` to also run `test-lib` when the changed paths include
+   `fleet/` is ~10 lines and should land before agents touch the harness
+   routinely.
+5. **The remaining khaita items** — mobile search and lyrics-language defaults
+   on `epic/search`; "shazam" needs decomposing before it is a story.
 
 ---
 
-## 9. Conventions worth preserving
+## 7. Harness gaps still open
 
-- One task, one commit. Held through 007's six rounds — every builder commit
-  is one concern.
-- Every AC names its instrument and how it goes red; ACs headed `**ACn**`.
-- Quantify the domain of every AC.
-- State the instrument's weakness in the story.
-- **Read the current file, never a diff hunk.**
-- **A check that cannot go red is absent.** The harness now enforces this on
-  the workload by mutation; test-lib enforces it on the harness by the same
-  rule. Every harness block was observed red before it existed.
-- **Show the `launch.sh` diff before applying it.** Held throughout.
-- **Prompts on stdin, never argv.** (L-18)
-- **Never edit `launch.sh` while a launcher is running it** — bash reads
-  scripts incrementally.
-- Kill by cwd, never by launcher (L-04). Used twice this session.
-- `--sandbox danger-full-access` for Codex — unchanged reason.
+- **Nothing merges itself.** Every merge so far has been a human's. Defensible
+  while computed PASS has five data points; revisit later.
+- **No write-side control plane.** `status.sh` reads; there is no approve /
+  promote / unblock path. Story 014 is the first half of that bridge — the
+  queue seeing a promotion made elsewhere.
+- **No `fleet/reset.sh`.** Clearing a story is still four manual steps.
+- **`warn` → `die` audit.** `seed_env`'s missing-file warning caused bug #1 and
+  is still a warning.
+- **`.blocked/` has never fired from a builder** in twelve stories. The
+  story-writer escalates instead — 011 raised a product question and refused to
+  decide — and intake is arguably the right place for it (L-24).
+- **`PRE_RED` overloads two meanings**: a genuinely failing instrument, and a
+  selector of the wrong kind (014 round 1 put a shell command in a `.test`
+  file). Worth splitting.
+- **Epic → develop merges are untested.** Only `story → epic` and
+  `story → develop` have happened.
+
+---
+
+## 8. Conventions worth preserving
+
+- One task, one commit. Show `git status --short` with each.
+- **Show the `fleet/launch.sh` diff before applying it.**
+- Every AC names its instrument and the mutation that turns it red.
+- **Bound the domain of every AC** (L-20) and **claim only what you instrument**
+  (L-25).
+- State the instrument's weakness in the story rather than letting the reviewer
+  find it.
+- Read the current file, never a diff hunk (L-09).
+- A check that cannot go red is absent, not weak — and a check that cries wolf
+  is worse than no check (`lint-story`'s first version: 20 false positives,
+  zero findings).
+- Prompts on stdin, never argv (L-18).
+- Kill by cwd or by exact process name, never by a `pkill -f` pattern that can
+  match your own command line.
+- Never edit `launch.sh` while a launcher is running it.
 - Never suppress stderr on a step that can fail meaningfully; stderr is
   evidence (`reviewer.stderr`).
-
----
-
-## 10. Files
-
-```
-fleet/launch.sh              launcher (~650 lines): AC extraction, story sync,
-                             baseline, scope, contract check, mutation runner,
-                             computed verdict, evidence commit
-fleet/render.sh              render_prompt(), unchanged
-fleet/test-lib.sh            33 cases, fake agents, FLEET_LAUNCH_OVERRIDE for
-                             observing red against a mutant copy
-fleet/test/{claude,codex,vitest,npm}   fakes, resolved by bare name on PATH
-fleet/prompts/*.md           rules, build-round1, build-round2, build-after-spec,
-                             review (mutation contract), README (verdict contract)
-.stories/<id>.md             specs; frontmatter status/round/scope_deny
-.stories/TEMPLATE.md         story shape and conventions
-.review/<id>.md              summary; verdict: on line 3; ### Machine per round
-.review/<id>/round-N/        committed evidence per round
-.blocked/<id>.md             agent questions (never yet written)
-.runs/                       raw vitest JSON + logs, machine-local, gitignored
-docs/fleet/lessons.md        L-01 … L-19
-docs/fleet/005-verification/ browser evidence, offline routing defect
-```
-
-**Base branch:** `feat/pwa` at `92c8982`, even with origin. 002, 003, 005,
-006 merged. 004 and 007 unmerged. Worktrees `../wt-004`, `../wt-006`
-(stale, removable), `../wt-007` present.
-
----
-
-## 11. Next, in order
-
-The plan of 17 Sep is complete: the verdict is computed, the launcher is
-tested, scope is enforced, both agents hand over evidence the harness runs.
-What is left is workload and reach, not machinery.
-
-1. **Rewrite and rerun 004** from a fresh branch off current `feat/pwa`. 009
-   extracted its instrument finding; what remains is the persistence R1 and
-   the refuted lease theory in `docs/fleet/004-diagnosis.md`. **This is the
-   first story where Phase 3.1 is not inert** — it changes production code, so
-   the builder's TDD mutation will actually prove something.
-2. **The escalation fixture** — offline routing (§5) written *without*
-   answering the product question, to see `.blocked/` fire for the first time
-   in ten stories. It is the one terminal state never exercised by a real
-   agent.
-3. **`fleet/reset.sh`**, the `warn`→`die` audit (`seed_env` first), and a
-   `.gitattributes` merge driver for `.stories/*.md` so merging a story stops
-   conflicting on its own spec.
-4. **Control plane.** `status.sh` is the artifact it was missing; what remains
-   is deciding where the interactive session lives, since it costs the fleet
-   host 530 MB (§2).
-5. **A second lane** — still gated on queue depth. Ten stories exist, ever, all
-   hand-authored. That, not the harness, is the ceiling.
+- `--sandbox danger-full-access` for Codex: bwrap cannot create net namespaces
+  here; isolation comes from the worktree and the unprivileged user.

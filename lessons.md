@@ -325,3 +325,39 @@ naming it — is not the same as making it load-bearing.
 **Prevention:** by discipline, and unproven: `.blocked/` has still never fired
 in ten stories. The mechanism is tested (`test-lib` case 3); what is untested
 is any real agent's willingness to use it.
+
+## Found by story 014 — the fleet working on its own harness (18 Sep)
+
+### L-25 — claim only what you instrument
+Story 014's criteria were unusually precise, and precision cuts both ways. AC3
+said an uncommitted edit must be **"byte-identical"** after a refresh; its test
+compared content and missed a dropped trailing newline, so the reviewer's
+`drop-final-newline` mutation survived. AC2 said the log line "says the drain
+is continuing on local state"; the test only grepped `refresh failed`, so
+deleting the second half of the message survived. Both vetoes were correct —
+the ACs did claim those things.
+**Lesson:** L-20 says bound the domain. This is its complement: state the claim
+at the strength you intend to instrument, no stronger. A stronger claim is not
+a safer one — it is more surface for a mutation to land on, and every extra
+inch of it must be tested or it becomes a finding. "Byte-identical" invited a
+byte-level probe the test never meant to cover.
+**Prevention:** by discipline, with a nudge — `fleet/lint-story.sh` warns on an
+unquantified every/all/any but cannot judge whether a claim exceeds its
+instrument. The writing prompt now says it; nothing enforces it.
+
+### L-26 — the harness verifies the app, not itself
+The baseline is `npm test`, `npm run build`, `npm run lint`. All three exercise
+the application. **Nothing in the baseline touches `fleet/`.** So story 014 —
+which changed `fleet/run-queue.sh` and `fleet/test-lib.sh` — passed a green
+baseline that proved nothing about it, and its only real verification was the
+reviewer's mutations plus a human running `test-lib` by hand afterwards.
+Worse, `test-lib.sh` itself was writable by the builder: a quietly weakened
+unrelated case would have been invisible to the pipeline. It did not happen —
+the diff was purely additive — but nothing prevented it.
+**Lesson:** a verification system's weakest coverage should not be of itself.
+`launch.sh` was protected by `scope_deny`, so the judge was never the judged;
+that part was right. The baseline was the hole.
+**Prevention:** by discipline today — a human runs `test-lib` before merging a
+harness change. By construction when `run_baseline` also runs `test-lib` for a
+story whose changed paths include `fleet/`, which is about ten lines and has
+not been written.
