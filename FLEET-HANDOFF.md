@@ -235,14 +235,13 @@ ACs → 1.
 
 ## 7. Harness gaps still open
 
-- **Nothing merges itself.** Every merge so far has been a human's. Defensible
-  while computed PASS has five data points; revisit later.
+- **Nothing merges itself.** Every merge so far has been a human's. Being
+  closed now: auto-merge story → epic on a computed PASS, gated on a post-merge
+  baseline, with the revert command in the notification. `epic → develop` and
+  anything touching `main` stay human.
 - **No write-side control plane.** `status.sh` reads; there is no approve /
   promote / unblock path. Story 014 is the first half of that bridge — the
   queue seeing a promotion made elsewhere.
-- **No `fleet/reset.sh`.** Clearing a story is still four manual steps.
-- **`warn` → `die` audit.** `seed_env`'s missing-file warning caused bug #1 and
-  is still a warning.
 - **`.blocked/` has never fired from a builder** in twelve stories. The
   story-writer escalates instead — 011 raised a product question and refused to
   decide — and intake is arguably the right place for it (L-24).

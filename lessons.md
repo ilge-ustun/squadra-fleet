@@ -357,7 +357,12 @@ the diff was purely additive — but nothing prevented it.
 **Lesson:** a verification system's weakest coverage should not be of itself.
 `launch.sh` was protected by `scope_deny`, so the judge was never the judged;
 that part was right. The baseline was the hole.
-**Prevention:** by discipline today — a human runs `test-lib` before merging a
-harness change. By construction when `run_baseline` also runs `test-lib` for a
-story whose changed paths include `fleet/`, which is about ten lines and has
-not been written.
+**Prevention:** closed by construction, 18 Sep. `run_baseline` runs
+`SELF_TEST_CMD` (default `bash fleet/test-lib.sh`) whenever the round's changed
+paths include `fleet/`, and a RED result vetoes like any other baseline
+failure. It reports SKIPPED rather than GREEN when it does not run: a check
+that did not run must not read as a check that passed. Cases 46 and 47.
+**What it still does not cover:** the suite is only as good as its cases, and
+the same builder that weakens a case could weaken the case that guards it.
+Nothing here makes the harness self-verifying — it makes a harness change
+visible to the same instrument every other change already faces.
