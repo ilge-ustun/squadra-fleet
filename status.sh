@@ -77,12 +77,18 @@ for f in $(ls -1 "$REPO_ROOT"/.stories/*.md 2>/dev/null | sort); do
     if live_in "$wt"; then notes+=("RUNNING"); else notes+=("worktree"); fi
   fi
   branch="story/$id"
+  # Merged INTO WHAT: a story belongs to its epic, not to the integration
+  # branch. story/011 is merged into epic/ui-polish and will reach develop
+  # only when that epic does; checking against BASE_BRANCH reported it
+  # unmerged forever.
+  into="$(story_field "$id" base)"; into="${into:-$BASE_BRANCH}"
+  git -C "$REPO_ROOT" rev-parse --verify --quiet "$into" >/dev/null 2>&1 || into="origin/$into"
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
-    if git -C "$REPO_ROOT" merge-base --is-ancestor "$branch" "$BASE_BRANCH" 2>/dev/null; then
-      notes+=("merged")
+    if git -C "$REPO_ROOT" merge-base --is-ancestor "$branch" "$into" 2>/dev/null; then
+      notes+=("merged→${into#origin/}")
     else
-      ahead="$(git -C "$REPO_ROOT" rev-list --count "$BASE_BRANCH..$branch" 2>/dev/null)"
-      notes+=("$ahead unmerged")
+      ahead="$(git -C "$REPO_ROOT" rev-list --count "$into..$branch" 2>/dev/null)"
+      notes+=("$ahead unmerged→${into#origin/}")
     fi
   else
     branch="—"
