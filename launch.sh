@@ -121,7 +121,11 @@ commit_status() {                     # commit_status <id> <status>
   # so guarded separately from the files above (same L-02 reasoning).
   [[ -d "$REPO_ROOT/.review/$id" ]] && git -C "$REPO_ROOT" add ".review/$id"
   git -C "$REPO_ROOT" diff --cached --quiet && return 0
-  git -C "$REPO_ROOT" commit -q -m "story($id): $st" || warn "status commit failed"
+  # Nothing staged returned above, so a failure here is a real one: a hook, a
+  # lock, a broken identity. Continuing would run the story on with its state
+  # only in the working tree — invisible to status.sh, to the queue, and to a
+  # resumed run after a crash, which is the state the whole design leans on.
+  git -C "$REPO_ROOT" commit -q -m "story($id): $st" || die "status commit failed for $id ($st)"
   if [[ "$PUSH_STATUS" == "1" ]]; then
     git -C "$REPO_ROOT" push -q 2>/dev/null || warn "status push failed — queue not visible remotely"
   fi
@@ -396,7 +400,11 @@ seed_env() {
     if [[ -f "$REPO_ROOT/$f" ]]; then
       cp "$REPO_ROOT/$f" "$target/$f"
     else
-      warn "$f missing — worktree runs without it"
+      # A seed file is what makes the worktree behave like production — today
+      # .env.local, the Firebase config. Without it the agent works in a tree
+      # where the app cannot reach Firestore, and every result is about that
+      # rather than about the story. This warning produced bug #1.
+      die "$f is missing from $REPO_ROOT — the worktree would not behave like production"
     fi
   done
 }
@@ -485,7 +493,12 @@ else
   fi
   seed_env "$BUILDER_WT"
   log "installing deps"
-  ( cd "$BUILDER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed"
+  # A failed install leaves node_modules stale or absent, and the baseline then
+  # measures the install rather than the story. Output kept: a step that can
+  # fail meaningfully must not have its stderr thrown away.
+  mkdir -p "$REPO_ROOT/.runs"
+  ( cd "$BUILDER_WT" && $INSTALL_CMD ) > "$REPO_ROOT/.runs/$STORY_ID-install-builder.log" 2>&1 \
+    || die "install failed in the builder tree ($INSTALL_CMD) — see .runs/$STORY_ID-install-builder.log"
 fi
 
 
@@ -617,7 +630,8 @@ while (( ROUND < ROUND_CEILING )); do
   log "reviewer worktree at ${HEAD_SHA:0:8}"
   git -C "$REPO_ROOT" worktree add --detach "$REVIEWER_WT" "$HEAD_SHA" >/dev/null || die "reviewer worktree failed"
   seed_env "$REVIEWER_WT"
-  ( cd "$REVIEWER_WT" && $INSTALL_CMD ) >/dev/null 2>&1 || warn "$INSTALL_CMD failed in reviewer tree"
+  ( cd "$REVIEWER_WT" && $INSTALL_CMD ) > "$REPO_ROOT/.runs/$STORY_ID-install-reviewer.log" 2>&1 \
+    || die "install failed in the reviewer tree ($INSTALL_CMD) — see .runs/$STORY_ID-install-reviewer.log"
 
   EVIDENCE_DIR="$EVIDENCE_DIR_PENDING"
   # What this round changed, computed once: the baseline needs it to decide

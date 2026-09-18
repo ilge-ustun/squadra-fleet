@@ -103,6 +103,10 @@ round: 0
 
 **AC1 — the fixture has one criterion.** Goes red when removed.
 EOF
+  # SEED_FILES=(.env.local) and the launcher now dies without it. Production
+  # has one; a bare clone does not, because it is gitignored. Untracked here
+  # too, so the fixture matches production rather than papering over it.
+  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
   git -C "$REPO" add -A fleet .stories
   git -C "$REPO" commit -qm "fixture: launcher under test + story $STORY"
   git -C "$REPO" push -q -u origin base
@@ -871,6 +875,50 @@ case_47_self_test_only_for_fleet() {
   assert_no_file "$REPO/.review/$STORY/round-1/baseline/self-test.log" "no log, because it never ran"
 }
 
+# Phase A2, the warn → die audit. Three warnings guarded conditions under
+# which nothing measured afterwards means anything; each is now a die.
+#
+# A seed file is a file the worktree needs to behave like production — today
+# just .env.local, the Firebase config. Missing it, the builder works in a
+# tree where the app cannot reach Firestore and every result is about that,
+# not about the story. This warning is what produced bug #1.
+#
+# Red while it is a warn: the run continues and the story reaches a verdict.
+case_48_missing_seed_file() {
+  CASE="48 a missing seed file stops the run"; fixture c48
+  rm -f "$REPO/.env.local"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_grep '\.env\.local' "$LOG" "the message names the file"
+  assert_eq "$(calls claude)" 0 "the builder must not run"
+}
+
+# A failed install leaves node_modules stale or absent. The baseline then
+# measures the install, not the story — and reports it as a red suite.
+# Red while it is a warn: the run continues to a verdict.
+case_49_install_failure() {
+  CASE="49 a failed install stops the run"; fixture c49
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS INSTALL_CMD=false
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_grep 'install' "$LOG" "the message names the step"
+  assert_eq "$(calls claude)" 0 "the builder must not run"
+}
+
+# commit_status returns early when there is nothing staged, so a failure here
+# is a real one: a hook, a lock, a broken identity. Continuing means the story
+# runs on with its state only in the working tree — invisible to status.sh,
+# to the queue and to a resumed run after a crash.
+# Red while it is a warn: the run continues with uncommitted state.
+case_50_status_commit_failure() {
+  CASE="50 a failed status commit stops the run"; fixture c50
+  printf '#!/bin/sh\nexit 1\n' > "$REPO/.git/hooks/pre-commit"
+  chmod +x "$REPO/.git/hooks/pre-commit"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_grep 'status commit failed' "$LOG" "the message says what failed"
+  assert_eq "$(calls claude)" 0 "the builder must not run"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -887,7 +935,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
        case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
-       case_46_baseline_self_test case_47_self_test_only_for_fleet)
+       case_46_baseline_self_test case_47_self_test_only_for_fleet
+       case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
