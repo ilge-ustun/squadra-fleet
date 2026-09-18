@@ -704,7 +704,8 @@ scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT
 computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
 ${MUT_TABLE:+mutations:
-$MUT_TABLE}${PROBE_TABLE:+probes:
+$MUT_TABLE
+}${PROBE_TABLE:+probes:
 $PROBE_TABLE}
 
 ### Builder said

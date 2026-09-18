@@ -533,6 +533,7 @@ case_36_reviewer_probes() {
   CASE="36 a green probe is recorded and changes nothing"; fixture c36
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1
   assert_eq "$(field status)" done "a probe that finds nothing does not block"
+  assert_grep '^probes:$' "$REPO/.review/$STORY.md" "probes table starts its own line"
   assert_grep '^GREEN +probe-green.test.tsx' "$REPO/.review/$STORY.md" "row in the Machine table"
   assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-green.test.tsx" "probe committed"
 
