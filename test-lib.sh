@@ -567,6 +567,29 @@ case_37_evidence_only_round() {
   assert_eq "$(field status)" done "the round reached a verdict"
 }
 
+# Epics. A story declares the branch it is cut from, so one queue can serve
+# several epics at once (epic/offline-pwa, epic/search, …) while the fleet's
+# own state — .stories, .review, fleet/, docs/fleet — stays on the
+# integration branch the launcher is checked out on. BASE_BRANCH remains the
+# default for a story that names none. Red when the story's base: is ignored
+# and the worktree is cut from BASE_BRANCH instead.
+case_38_story_base() {
+  CASE="38 a story's base: decides which branch it is cut from"; fixture c38
+  git -C "$REPO" checkout -q -b epic/test
+  echo "only on the epic base" > "$REPO/EPIC_MARKER.txt"
+  git -C "$REPO" add EPIC_MARKER.txt
+  git -C "$REPO" commit -qm "epic/test: a file that exists only here"
+  git -C "$REPO" push -q -u origin epic/test
+  git -C "$REPO" checkout -q base
+  sed -i '2a base: epic/test' "$REPO/.stories/$STORY.md"
+
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_file "$FX/wt-$STORY/EPIC_MARKER.txt" "worktree cut from the story's own base"
+  assert_eq "$(git -C "$FX/wt-$STORY" rev-parse --abbrev-ref HEAD)" "story/$STORY" "on its story branch"
+  assert_eq "$(field status)" done "the story still reaches a verdict"
+  assert_grep 'EPIC_MARKER.txt' <(git -C "$REPO" show "origin/epic/test:EPIC_MARKER.txt" >/dev/null 2>&1 && echo EPIC_MARKER.txt) "epic base untouched by the run"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -582,7 +605,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round)
+       case_37_evidence_only_round case_38_story_base)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -409,6 +409,14 @@ if [[ -z "${AC_IDS// /}" ]]; then
   die "$STORY_ID declares no acceptance criteria (**ACn — …** at column 0) — nothing a runner can verify"
 fi
 
+# Epics. A story may name the branch it is cut from, so one queue can serve
+# several epics (epic/offline-pwa, epic/search, …) while the fleet's own state
+# — .stories, .review, fleet/, docs/fleet — stays on the integration branch
+# this checkout is on. BASE_BRANCH is the default for a story that names none.
+STORY_BASE="$(story_field "$STORY_ID" base)"
+STORY_BASE="${STORY_BASE:-$BASE_BRANCH}"
+[[ "$STORY_BASE" == "$BASE_BRANCH" ]] || log "base: $STORY_BASE (from the story)"
+
 BUILDER_WT="$REPO_ROOT/../wt-$STORY_ID"
 REVIEWER_WT="$REPO_ROOT/../wt-$STORY_ID-review"
 BRANCH="story/$STORY_ID"
@@ -445,7 +453,7 @@ else
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
     git -C "$REPO_ROOT" worktree add "$BUILDER_WT" "$BRANCH" >/dev/null || die "worktree add (existing branch) failed"
   else
-    git -C "$REPO_ROOT" worktree add "$BUILDER_WT" -b "$BRANCH" "origin/$BASE_BRANCH" >/dev/null || die "worktree add failed"
+    git -C "$REPO_ROOT" worktree add "$BUILDER_WT" -b "$BRANCH" "origin/$STORY_BASE" >/dev/null || die "worktree add failed"
   fi
   seed_env "$BUILDER_WT"
   log "installing deps"
@@ -477,7 +485,7 @@ sync_story() {
 }
 sync_story
 
-BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$BASE_BRANCH")"
+BASE_SHA="$(git -C "$BUILDER_WT" merge-base HEAD "origin/$STORY_BASE")"
 log "base ${BASE_SHA:0:8}"
 
 # rules.md itself contains {{STORY_ID}}, so it is rendered first and then
