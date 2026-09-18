@@ -908,7 +908,10 @@ case_44_refresh_fail() {
       bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
 
   assert_eq "$(field status)" done "AC2: story reached done despite fetch failure"
-  assert_grep 'refresh failed' "$FX/queue.log" "AC2: queue log has refresh failed line"
+  local rfl; rfl="$(grep 'refresh failed' "$FX/queue.log" | head -1)"
+  [[ -n "$rfl" ]] && ok || fail "AC2: queue log has no 'refresh failed' line"
+  [[ "$rfl" == *"continuing on local state"* ]] \
+    && ok || fail "AC2: 'refresh failed' line does not say 'continuing on local state'"
 }
 
 # AC3. Red when fleet/run-queue.sh leaves a conflicted merge in place (abort
@@ -954,7 +957,7 @@ EOF
 
   # Uncommitted edit to a tracked file that neither commit touches.
   printf 'dirty\n' >> "$REPO/clean.txt"
-  local expected_clean; expected_clean="$(cat "$REPO/clean.txt")"
+  local clean_sum_before; clean_sum_before="$(sha256sum "$REPO/clean.txt" | awk '{print $1}')"
 
   # Origin: conflict on the same line of conflict-file.txt.
   git clone -q "$FX/origin.git" "$FX/origin2"
@@ -981,8 +984,9 @@ EOF
   assert_no_file "$REPO/.git/MERGE_HEAD" "AC3: no merge left in progress"
   [[ ! -d "$REPO/.git/rebase-merge" ]] && ok || fail "AC3: rebase-merge dir exists"
   assert_not_grep '<<<<<<<' "$REPO/conflict-file.txt" "AC3: no conflict markers in worktree"
-  assert_eq "$(cat "$REPO/clean.txt")" "$expected_clean" \
-    "AC3: uncommitted edit is byte-identical"
+  local clean_sum_after; clean_sum_after="$(sha256sum "$REPO/clean.txt" | awk '{print $1}')"
+  assert_eq "$clean_sum_after" "$clean_sum_before" \
+    "AC3: uncommitted edit is byte-identical (sha256sum)"
   assert_grep 'refresh failed' "$FX/queue.log" "AC3: queue log has refresh failed line"
   assert_eq "$(field status)" done "AC3: story reached done"
 }
