@@ -732,6 +732,75 @@ and `caches.open`, and lives in `sw.js`. See `02-REVIEW.md`. It fetches
   lint prose; assert_eq "$rc" 0 "JS expressions, bare filenames and URL paths are not citations"
 }
 
+# Unattended, a hung agent is indistinguishable from a slow one and blocks the
+# queue for ever. MAX_TURNS bounds the builder's turns, nothing bounded its
+# wall clock — a hung round was killed by hand on 18 Sep only because someone
+# was watching. Red when the timeout wrapper is removed from either call.
+case_40_agent_timeout() {
+  CASE="40 a hung builder is killed and the story stops"; fixture c40
+  run "$STORY" FAKE_BUILDER=hang FAKE_REVIEWER=PASS AGENT_TIMEOUT=5 MAX_ROUNDS=1
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep 'exceeded AGENT_TIMEOUT' "$LOG" "says why"
+  assert_eq "$(calls codex)" 0 "the reviewer never ran"
+
+  CASE="40b a hung reviewer is killed and the story stops"; fixture c40b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=hang AGENT_TIMEOUT=5 MAX_ROUNDS=1
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep 'exceeded AGENT_TIMEOUT' "$LOG" "says why"
+}
+
+# The queue runner. Until it existed a human launched each story, watched it,
+# and launched the next — the fleet did the judgment unattended but not the
+# operating. Red when the loop stops after one story, or when a stopped story
+# stops the queue (it must not: that has been the design since phase 4b).
+case_41_run_queue() {
+  CASE="41 the queue runs every ready story and stops when empty"; fixture c41
+  # a second and third story beside the fixture's own
+  for extra in 901 902; do
+    sed "s/Story $STORY/Story $extra/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/$extra.md"
+  done
+  # 901 will fail its round; the queue must carry on to 902 regardless
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  local qrc=$?
+
+  assert_eq "$qrc" 0 "the runner exits cleanly"
+  assert_grep 'queue empty' "$FX/queue.log" "it stopped because nothing was ready"
+  for id in "$STORY" 901 902; do
+    assert_eq "$(awk -v k=status '/^---$/{d++; next} d==1 && $0 ~ "^"k":" {sub("^"k":[[:space:]]*",""); print; exit}' "$REPO/.stories/$id.md")" done "story $id reached a verdict"
+  done
+  assert_eq "$(calls claude)" 3 "the builder ran once per story"
+
+  CASE="41b a stopped story does not stop the queue"; fixture c41b
+  sed "s/Story $STORY/Story 901/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  # no ACs at all: 900 dies before any agent runs, 901 must still run
+  cat > "$REPO/.stories/$STORY.md" <<'EOS'
+---
+status: ready
+round: 0
+---
+# Story 900: no criteria the launcher can see
+EOS
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=901 \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_grep 'no acceptance criteria' "$FX/queue.log" "900 was rejected"
+  assert_eq "$(awk -v k=status '/^---$/{d++; next} d==1 && $0 ~ "^"k":" {sub("^"k":[[:space:]]*",""); print; exit}' "$REPO/.stories/901.md")" done "901 still ran and finished"
+  assert_grep 'queue empty' "$FX/queue.log" "and the queue drained"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -747,7 +816,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base case_39_lint_story)
+       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

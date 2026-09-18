@@ -10,6 +10,7 @@
 #
 #   FAKE_REVIEWER=PASS | FAIL | SPEC   a well-formed verdict line
 #   FAKE_REVIEWER=garbage              no line the launcher can parse → UNPARSEABLE
+#   FAKE_REVIEWER=hang                 never returns — for the agent-timeout case
 #
 # Phase 1.3+: the reviewer's output contract is files under .review-out/
 # in its worktree. FAKE_MUTATIONS (default none) writes them:
@@ -80,6 +81,8 @@ case "${FAKE_PROBES:-none}" in
                > ".review-out/probes/probe-$FAKE_PROBES.test.tsx" ;;
   *) echo "fleet/test/codex: unknown FAKE_PROBES='$FAKE_PROBES'" >&2; exit 2 ;;
 esac
+
+[[ "$FAKE_REVIEWER" == hang ]] && sleep 999
 
 case "$FAKE_REVIEWER" in
   PASS|FAIL|SPEC) text=$'fake review, call '"$n"$'.\nfinding: none.\nVERDICT: '"$FAKE_REVIEWER" ;;

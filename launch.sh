@@ -45,6 +45,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 BASE_BRANCH="${BASE_BRANCH:-develop}"   # integration branch; a story may name an epic with base:
 BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
+# Wall clock per agent call. MAX_TURNS bounds the builder's turns, nothing
+# bounded its time: unattended, a hung agent is indistinguishable from a slow
+# one and blocks the queue for ever. -k gives it 30s to die politely before
+# KILL. Children may outlive it (L-04); the next run's procs_in_worktree sees
+# them and refuses to start, which is the right answer.
+AGENT_TIMEOUT="${AGENT_TIMEOUT:-1800}"
 MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 INSTALL_CMD="${INSTALL_CMD:-npm ci}"   # overridable so fleet/test-lib.sh can skip the install
@@ -517,9 +523,15 @@ while (( ROUND < ROUND_CEILING )); do
     # Prompts go on stdin. A 134 KB round-2 prompt as one argv string exceeded
     # MAX_ARG_STRLEN (131072) on 007's rerun: claude never exec'd, output was
     # empty. stdin has no such limit, and for codex it is the intended mode.
-    BUILD_OUT="$(cd "$BUILDER_WT" && printf '%s' "$BUILD_PROMPT" | claude -p \
+    BUILD_OUT="$(cd "$BUILDER_WT" && printf '%s' "$BUILD_PROMPT" \
+      | timeout -k 30 "$AGENT_TIMEOUT" claude -p \
       --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
       --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
+    BUILD_RC=$?
+    if (( BUILD_RC == 124 )); then
+      set_status "$STORY_ID" needs_human
+      die "round $ROUND: the builder exceeded AGENT_TIMEOUT (${AGENT_TIMEOUT}s) and was killed"
+    fi
 
     # jq's // is the ALTERNATIVE operator: it fires on null AND on false, so
     # `.is_error // "parse-failed"` rewrote every SUCCESSFUL run as parse-failed.
@@ -604,7 +616,13 @@ while (( ROUND < ROUND_CEILING )); do
   # First real run of the runner, 17 Sep. stderr is kept as evidence, not
   # merged; the filter skips anything that is not JSON and takes only the
   # reviewer's own messages, not command_execution items.
-  REVIEW_RAW="$(cd "$REVIEWER_WT" && printf '%s' "$REVIEW_PROMPT" | codex exec --json --sandbox danger-full-access 2> "$EVIDENCE_DIR/reviewer.stderr")"
+  REVIEW_RAW="$(cd "$REVIEWER_WT" && printf '%s' "$REVIEW_PROMPT" \
+    | timeout -k 30 "$AGENT_TIMEOUT" codex exec --json --sandbox danger-full-access 2> "$EVIDENCE_DIR/reviewer.stderr")"
+  REVIEW_RC=$?
+  if (( REVIEW_RC == 124 )); then
+    set_status "$STORY_ID" needs_human
+    die "round $ROUND: the reviewer exceeded AGENT_TIMEOUT (${AGENT_TIMEOUT}s) and was killed"
+  fi
   REVIEW_TEXT="$(printf '%s\n' "$REVIEW_RAW" | jq -R -r 'fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text // empty')"
   if [[ -z "$REVIEW_TEXT" ]]; then
     # No reviewer message at all. Keep the raw stream where a human can read
