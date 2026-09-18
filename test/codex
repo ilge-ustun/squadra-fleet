@@ -24,6 +24,14 @@
 #   ac2only   the marker patch filed as AC2-marker (AC1 has no mutation)
 #   dirty     same as patch but the change is NOT reverted — contract broken
 #
+# Phase 3.2: FAKE_PROBES writes .review-out/probes/ — runnable tests the
+# reviewer constructs to hunt regressions no existing test covers. No patch:
+# the harness runs them against the tree as it stands. A RED probe vetoes.
+#
+#   none   (default) writes nothing — probes are optional and zero is not a finding
+#   green  a probe the fake vitest passes (no regression found)
+#   red    a probe the fake vitest fails (a regression the suite did not cover)
+#
 # Records calls in $FAKE_TRACE_DIR/calls and the prompt as codex-prompt-N.
 #
 set -euo pipefail
@@ -60,6 +68,17 @@ case "${FAKE_MUTATIONS:-none}" in
             printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-this line does not exist\n+so this cannot apply\n' > .review-out/mutations/AC1-bad.patch
             printf 'fake.test.tsx\n' > .review-out/mutations/AC1-bad.test ;;
   *) echo "fleet/test/codex: unknown FAKE_MUTATIONS='$FAKE_MUTATIONS'" >&2; exit 2 ;;
+esac
+
+# A probe carries no patch and needs no selector — the file IS both. Its name
+# tells the fake vitest what to report, so a probe can fail while the suite
+# around it passes, which is the whole point of a probe.
+case "${FAKE_PROBES:-none}" in
+  none) : ;;
+  green|red) mkdir -p .review-out/probes
+             printf '// fake probe (%s)\n' "$FAKE_PROBES" \
+               > ".review-out/probes/probe-$FAKE_PROBES.test.tsx" ;;
+  *) echo "fleet/test/codex: unknown FAKE_PROBES='$FAKE_PROBES'" >&2; exit 2 ;;
 esac
 
 case "$FAKE_REVIEWER" in

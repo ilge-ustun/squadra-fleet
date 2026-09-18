@@ -48,6 +48,17 @@ Leave the tree exactly as you found it apart from .review-out/. You may
 apply and revert mutations yourself to investigate, but if `git status`
 shows anything else when you finish, the run stops and goes to a human.
 
+If you construct a race or edge case to hunt a regression (check 4), leave it
+behind as a PROBE instead of describing it: write the test itself to
+.review-out/probes/<name>.test.tsx . No patch — the harness runs it against
+the tree as it stands, in the same worktree, then removes it.
+
+A probe is the inverse of a mutation: it FAILING is the finding. A failing
+probe fails the story, whatever your VERDICT line says, and is committed
+verbatim so it can become the next story's instrument. Probes are optional
+and writing none is not held against you — but a regression you only describe
+in prose is a regression nobody can re-run.
+
 Run: npm test, npm run build, npm run lint. The harness has run them too;
 yours inform your judgment, its results decide.
 

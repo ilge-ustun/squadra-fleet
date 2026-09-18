@@ -524,6 +524,30 @@ case_35_builder_tdd_mutation() {
   assert_grep '^computed: FAIL — .*tdd-observed-red GREEN' "$REPO/.review/$STORY.md" "reason names the tdd claim"
 }
 
+# Phase 3.2. A probe is a test the reviewer constructs to hunt a regression no
+# existing test covers (004's reverse-race, 006's cache→empty→populated). They
+# used to be written to /tmp and lost with the worktree. A probe is the INVERSE
+# of a mutation: RED means it found something, so RED vetoes. Red when
+# run_probes, its copy-out, or the probe clause of the veto is deleted.
+case_36_reviewer_probes() {
+  CASE="36 a green probe is recorded and changes nothing"; fixture c36
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1
+  assert_eq "$(field status)" done "a probe that finds nothing does not block"
+  assert_grep '^GREEN +probe-green.test.tsx' "$REPO/.review/$STORY.md" "row in the Machine table"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-green.test.tsx" "probe committed"
+
+  CASE="36b a red probe vetoes and is kept as the next story's instrument"; fixture c36b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=red MAX_ROUNDS=1
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
+  assert_grep '^computed: FAIL — .*probe probe-red.test.tsx RED' "$REPO/.review/$STORY.md" "reason names the probe"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-red.test.tsx" "the failing probe is committed verbatim"
+
+  CASE="36c no probes is not a finding"; fixture c36c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "probes are optional"
+  assert_not_grep '^probes:' "$REPO/.review/$STORY.md" "no empty probe table"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -538,7 +562,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
-       case_35_builder_tdd_mutation)
+       case_35_builder_tdd_mutation case_36_reviewer_probes)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

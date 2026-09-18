@@ -275,6 +275,45 @@ check_scope() {                       # check_scope <evidence-dir> → SCOPE SCO
   log "scope: $SCOPE ${SCOPE_HITS}"
 }
 
+# ── probes ───────────────────────────────────────────────────────────────────
+#
+# A probe is a test the reviewer constructs to hunt a regression no existing
+# test covers — 004's reverse-race, 006's cache→empty→populated. They used to
+# be written to /tmp and lost with the worktree. Now they are run against the
+# tree as it stands (no patch), committed, and a RED one vetoes: either a real
+# regression, or a wrong probe, and both need a human. Probes are OPTIONAL —
+# requiring "at least one" is a check that cannot go red, since a vacuous probe
+# satisfies it, so zero probes is not a finding.
+#
+# A probe must land inside vitest's include glob or it collects no tests; it is
+# copied into src/__tests__/ under a fleet- prefix, run, then removed.
+
+run_probes() {                        # run_probes <wt> <evidence-dir> → PROBE_ROWS
+  local wt="$1" pdir="$2/probes" p name dest cls raw
+  PROBE_ROWS=""
+  [[ -d "$pdir" ]] || return 0
+
+  for p in "$pdir"/*.test.tsx "$pdir"/*.test.ts; do
+    [[ -e "$p" ]] || continue
+    name="$(basename "$p")"
+    dest="src/__tests__/fleet-probe-$name"
+    raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-probe-$name"
+
+    [[ -z "$(porcelain "$wt")" ]] || die "probe runner: tree dirty before $name"
+    cp "$p" "$wt/$dest"
+    # run_selector reads its selector from a file; a probe's selector is just
+    # the path it was copied to.
+    printf '%s\n' "$dest" > "$raw.sel"
+    cls="$(run_selector "$wt" test "$raw.sel" "$raw")"
+    rm -f "$wt/$dest"
+    [[ -z "$(porcelain "$wt")" ]] || die "probe runner: tree dirty after removing $name"
+
+    printf '%s\n' "$cls" > "$pdir/$name.result"
+    PROBE_ROWS+="$name $cls"$'\n'
+    log "probe $name: $cls"
+  done
+}
+
 set_status() {                        # set_status <id> <status>
   set_story_field "$1" status "$2"
   commit_status "$1" "$2"
@@ -594,9 +633,15 @@ while (( ROUND < ROUND_CEILING )); do
     mkdir -p "$EVIDENCE_DIR/mutations"
     cp -r "$REVIEWER_WT/.review-out/mutations/." "$EVIDENCE_DIR/mutations/"
   fi
+  if [[ -d "$REVIEWER_WT/.review-out/probes" ]]; then
+    mkdir -p "$EVIDENCE_DIR/probes"
+    cp -r "$REVIEWER_WT/.review-out/probes/." "$EVIDENCE_DIR/probes/"
+  fi
 
   run_mutations "$REVIEWER_WT" "$EVIDENCE_DIR"
+  run_probes "$REVIEWER_WT" "$EVIDENCE_DIR"
   MUT_TABLE="$(printf '%s' "$MUT_ROWS" | awk 'NF { printf "%-4s %-13s %s\n", $1, $2, $3 }')"
+  PROBE_TABLE="$(printf '%s' "$PROBE_ROWS" | awk 'NF { printf "%-13s %s\n", $2, $1 }')"
 
   if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
   elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
@@ -623,6 +668,10 @@ while (( ROUND < ROUND_CEILING )); do
   while read -r ac cls slug; do
     [[ -n "$ac" && "$cls" != RED ]] && MACHINE_REASONS+="$ac $slug $cls; "
   done <<< "$MUT_ROWS"
+  # A probe is the inverse of a mutation: RED means it FOUND something.
+  while read -r pname pcls; do
+    [[ -n "$pname" && "$pcls" == RED ]] && MACHINE_REASONS+="probe $pname RED; "
+  done <<< "$PROBE_ROWS"
   if [[ -n "$MACHINE_REASONS" && "$VERDICT" == "PASS" ]]; then
     VERDICT="FAIL"
     warn "machine veto: $MACHINE_REASONS"
@@ -645,7 +694,8 @@ scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT
 computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
 ${MUT_TABLE:+mutations:
-$MUT_TABLE}
+$MUT_TABLE}${PROBE_TABLE:+probes:
+$PROBE_TABLE}
 
 ### Builder said
 

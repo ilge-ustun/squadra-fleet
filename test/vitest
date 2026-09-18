@@ -34,6 +34,13 @@ done
 printf 'vitest %s\n' "${sel[*]:-}" >> "$FAKE_TRACE_DIR/calls"
 
 mode="$FAKE_VITEST"
+# A probe selector names its own expected outcome (probe-red / probe-green),
+# so a probe can fail while the suite around it passes — which is the whole
+# point of a probe.
+case "${sel[*]:-}" in
+  *probe-red*)   mode=fail ;;
+  *probe-green*) mode=pass ;;
+esac
 if [[ "$mode" == marker || "$mode" == marker-notests ]]; then
   # Only the file the fake patch targets. A tree-wide grep matched the patch
   # file itself and this script's own source, so every pre-run was PRE_RED.
