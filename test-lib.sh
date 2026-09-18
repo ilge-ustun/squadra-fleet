@@ -110,13 +110,18 @@ EOF
   shadow_check "$REPO"
 }
 
+# SELF_TEST_CMD=true in the defaults is load-bearing: any case whose builder
+# touches fleet/ (28–30 do) would otherwise make the launcher run THIS suite
+# inside the fixture, where the nesting guard exits 3 and every such case
+# fails for a reason that has nothing to do with what it tests. Cases 46 and
+# 47 override it; env takes the last assignment, and "$@" comes after.
 run() {                               # run <story-id> [VAR=value …] → LOG RC
   local id="$1"; shift
   LOG="$FX/launch.log"
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
       VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
       bash fleet/launch.sh "$id" ) > "$LOG" 2>&1
   RC=$?
@@ -765,7 +770,7 @@ case_41_run_queue() {
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
       VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
       FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
       bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
@@ -791,7 +796,7 @@ EOS
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
       VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=901 \
       FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
       bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
@@ -816,7 +821,7 @@ case_42_resume_after_crash() {
   ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
       VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
       FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
       bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
@@ -826,6 +831,44 @@ case_42_resume_after_crash() {
   assert_grep 'resuming existing worktree' "$FX/queue.log" "its worktree was reused, not rebuilt"
   assert_contains "$(git -C "$FX/wt-$STORY" log --format=%s origin/base..HEAD | tr '\n' ' ')" \
     "work the builder had already done" "the work it had already done survived"
+}
+
+# Phase A1 (L-26). The baseline is npm test / build / lint and none of them
+# touch fleet/: a round that changes the harness is judged by an instrument
+# that cannot see it. When the round's diff includes a fleet/ path, the
+# launcher's own suite joins the baseline.
+#
+# SELF_TEST_CMD exists for this case. The real command is
+# `bash fleet/test-lib.sh`, and running it from here is this suite recursing
+# into itself — the nesting guard at the top would exit 3 whatever the
+# launcher did, so the case could never distinguish pass from fail.
+#
+# Cases 43–45 are reserved for story 014, whose acceptance criteria name them.
+#
+# Red when the self-test branch in run_baseline is deleted: a harness suite
+# that fails no longer stops the story.
+case_46_baseline_self_test() {
+  CASE="46 a round touching fleet/ runs the launcher's own suite"; fixture c46
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=fleet/prompts/rules.md \
+      FAKE_REVIEWER=PASS MAX_ROUNDS=1 SELF_TEST_CMD=false
+  assert_eq "$(field status)" needs_human "story status"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over a model PASS"
+  assert_grep 'self RED' "$REPO/.review/$STORY.md" "machine block names the self-test"
+  assert_grep '^computed: FAIL — .*baseline self RED' "$REPO/.review/$STORY.md" "and gives it as a reason"
+  assert_file "$REPO/.review/$STORY/round-1/baseline/self-test.log" "its output is evidence"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/baseline/self-test.log" "evidence committed"
+}
+
+# The other half of the same branch: a round that changes nothing under fleet/
+# must not pay for the suite. Red when the fleet/ guard is dropped and the
+# self-test runs unconditionally — SELF_TEST_CMD=false would then veto here too.
+case_47_self_test_only_for_fleet() {
+  CASE="47 a round outside fleet/ does not run the self-test"; fixture c47
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md \
+      FAKE_REVIEWER=PASS MAX_ROUNDS=1 SELF_TEST_CMD=false
+  assert_eq "$(field status)" done "story status"
+  assert_grep 'self SKIPPED' "$REPO/.review/$STORY.md" "machine block says it was skipped"
+  assert_no_file "$REPO/.review/$STORY/round-1/baseline/self-test.log" "no log, because it never ran"
 }
 
 # ── run ──────────────────────────────────────────────────────────────────────
@@ -843,7 +886,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash)
+       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
+       case_46_baseline_self_test case_47_self_test_only_for_fleet)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
