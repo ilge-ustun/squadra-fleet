@@ -42,7 +42,7 @@ set -uo pipefail
 # ── config ───────────────────────────────────────────────────────────────────
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-feat/pwa}"
+BASE_BRANCH="${BASE_BRANCH:-develop}"   # integration branch; a story may name an epic with base:
 BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
 MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling

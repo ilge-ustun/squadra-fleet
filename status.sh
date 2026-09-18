@@ -14,7 +14,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-feat/pwa}"
+BASE_BRANCH="${BASE_BRANCH:-develop}"
 ONE="${1:-}"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
