@@ -801,6 +801,33 @@ EOS
   assert_grep 'queue empty' "$FX/queue.log" "and the queue drained"
 }
 
+# Server stops mid-round: power cut, reboot, OOM. What that leaves is a story
+# at `in_progress`, a worktree on disk with the builder's commits in it, and no
+# processes anywhere. Everything that matters is on disk or in git, so the
+# question is only whether the fleet picks it back up by itself.
+case_42_resume_after_crash() {
+  CASE="42 a crashed run is reaped and resumed by the queue"; fixture c42
+  # Exactly the state a reboot leaves behind.
+  git -C "$REPO" worktree add -q "$FX/wt-$STORY" -b "story/$STORY" origin/base
+  git -C "$REPO" -C "$FX/wt-$STORY" commit -q --allow-empty -m "work the builder had already done" 2>/dev/null \
+    || git -C "$FX/wt-$STORY" commit -q --allow-empty -m "work the builder had already done"
+  sed -i '0,/^status:.*/s//status: in_progress/' "$REPO/.stories/$STORY.md"
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_grep 'orphan' "$FX/queue.log" "the stranded story was recognised as an orphan"
+  assert_eq "$(field status)" done "and carried through to a verdict"
+  assert_grep 'resuming existing worktree' "$FX/queue.log" "its worktree was reused, not rebuilt"
+  assert_contains "$(git -C "$FX/wt-$STORY" log --format=%s origin/base..HEAD | tr '\n' ' ')" \
+    "work the builder had already done" "the work it had already done survived"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -816,7 +843,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue)
+       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

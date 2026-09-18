@@ -389,6 +389,12 @@ seed_env() {
 
 reap_orphans
 
+# Reaping is what makes a crash recoverable: a story left `in_progress` by a
+# power cut is invisible to any scan for `ready`. fleet/run-queue.sh calls this
+# once before it looks at the queue, because otherwise it would report the
+# queue empty while a stranded story sat there for ever.
+[[ "${1:-}" == "--reap" ]] && exit 0
+
 STORY_ID="${1:-$(next_ready)}"
 [[ -n "$STORY_ID" ]] || { log "queue empty — nothing ready"; exit 0; }
 

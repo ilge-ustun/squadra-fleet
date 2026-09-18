@@ -53,6 +53,13 @@ next_ready() {                        # the same choice launch.sh makes
   echo ""
 }
 
+# A crash leaves a story at `in_progress` with nothing running. Any scan for
+# `ready` misses it, so the queue would report itself empty while a stranded
+# story sat there for ever. Reap first — launch.sh owns that logic and knows
+# to check the worktree for live processes before declaring anything an orphan.
+log "reaping orphans from any interrupted run"
+bash "$REPO_ROOT/fleet/launch.sh" --reap
+
 STARTED="$(date -Iseconds)"
 RAN=(); PREV=""
 n=0
