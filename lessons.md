@@ -273,3 +273,55 @@ must then be able to re-judge the same head against the new story.
 **Prevention:** by construction — `REVIEW_ONLY=1` skips the builder and the
 postcondition, and nothing else; `fleet/test-lib.sh` case 34. Used on 008
 round 3, which is the run that passed.
+
+## Found by story 010 — the first production-code story after Phase 3
+
+### L-22 — evidence must be produced against the state it will be judged in
+The builder's TDD patches were hand-authored during the TDD step, before the
+fix, and the harness applies them to the head the round ends on. Under
+one-task-one-commit there were three commits in between, so two of three
+patches were `PATCH_INVALID` — twice. `rules.md` had said "a `git diff`
+against your own commit", which does not say *which* commit.
+**Lesson:** a claim about state is only checkable against the state it is
+checked in. An agent asked for evidence must be told when to produce it, not
+only what to produce. The builder worked this out itself in round 2 — *"the
+patches were regenerated directly from `git diff` on the actual working tree
+(not hand-authored), which is why they were PATCH_INVALID last round"* —
+which is the reviewer-grade diagnosis the format is supposed to make possible.
+**Prevention:** by construction for the checking (`PATCH_INVALID` is a class
+the runner reports and vetoes on, so an unverifiable claim can never read as a
+verified one); by wording for the producing — `rules.md` now says produce it
+with `git diff` from the working tree, LAST, after the final commit.
+
+### L-23 — a productive round need not produce a commit
+Phase 3.1 gitignored `.review-out/` so neither agent could commit scratch onto
+a story branch. That made a round whose only correct output is evidence
+invisible to the no-commits postcondition, which was written when code was the
+only output a builder could produce. Story 010 round 2 did exactly the right
+thing — regenerated its patches, changed no code because none needed changing
+— and was killed for it.
+**Lesson:** an invariant encodes the set of outcomes that existed when it was
+written. Adding a new kind of output silently narrows it into a false
+negative. The question the postcondition means to ask is "did this round
+produce anything the harness can judge", and commits had been the only
+possible answer.
+**Prevention:** by construction — the check also stands down when the builder
+handed evidence over, which the runner judges exactly as the reviewer judges
+commits. Nothing at all is still a die; `fleet/test-lib.sh` case 2 is
+unchanged and case 37 covers the new path.
+
+### L-24 — an escalation fixture must make the decision unavoidable, not merely present
+Story 010 was written to force `.blocked/` to fire for the first time: a
+product question with no technically correct answer — what a collection page
+should show when it is loaded and empty. The builder did not block. It gated
+the existing `<Loading />` on the new signal and let the page fall through to
+the frame it already renders, satisfying the AC without inventing any UI.
+**Lesson:** that is arguably not a guess. AC2 asked for an observable absence
+("does not render the loading state"), and an absence can be delivered by
+removing something rather than by choosing what to add. A fixture only forces
+escalation if its criteria cannot be met without picking between materially
+different outcomes. Naming the open question in the story — 010 quoted 006
+naming it — is not the same as making it load-bearing.
+**Prevention:** by discipline, and unproven: `.blocked/` has still never fired
+in ten stories. The mechanism is tested (`test-lib` case 3); what is untested
+is any real agent's willingness to use it.
