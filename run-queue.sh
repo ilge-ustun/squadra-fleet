@@ -65,12 +65,47 @@ next_ready() {                        # the same choice launch.sh makes
   echo ""
 }
 
+# Bring the local branch up to date with origin before scanning for ready
+# stories. A promotion made anywhere (phone, GitLab web UI) is visible on the
+# next drain without a manual pull.
+#
+# Rules that protect local work:
+#   - A failed fetch does not stop the drain — continue on local state and say so.
+#   - A merge conflict is aborted cleanly; pre-run HEAD remains an ancestor of
+#     any new HEAD. Uncommitted edits to files neither side touches are preserved.
+#
+refresh_from_origin() {
+  local upstream gitdir
+  upstream="$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null)" || {
+    warn "refresh failed: no upstream configured, continuing on local state"
+    return
+  }
+  gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || gitdir=".git"
+  if [[ -f "$gitdir/MERGE_HEAD" || -d "$gitdir/rebase-merge" ]]; then
+    warn "refresh skipped: a merge/rebase is already in progress, continuing on local state"
+    return
+  fi
+  if ! git fetch origin 2>/dev/null; then
+    warn "refresh failed: fetch from origin failed, continuing on local state"
+    return
+  fi
+  if ! git merge --no-edit "$upstream" 2>/dev/null; then
+    git merge --abort 2>/dev/null || true
+    warn "refresh failed: merge conflict with $upstream, continuing on local state"
+    return
+  fi
+  log "refreshed from $upstream"
+}
+
 # A crash leaves a story at `in_progress` with nothing running. Any scan for
 # `ready` misses it, so the queue would report itself empty while a stranded
 # story sat there for ever. Reap first — launch.sh owns that logic and knows
 # to check the worktree for live processes before declaring anything an orphan.
 log "reaping orphans from any interrupted run"
 bash "$REPO_ROOT/fleet/launch.sh" --reap
+
+log "refreshing from origin before scan"
+refresh_from_origin
 
 STARTED="$(date -Iseconds)"
 RAN=(); PREV=""

@@ -1538,38 +1538,290 @@ case_80_status_epics() {
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
 }
 
+# AC1. Red when the refresh call is deleted from fleet/run-queue.sh: the
+# checkout never learns the story is ready and the queue reports nothing ready.
+# Also red when the refresh is replaced with `git pull --ff-only` (refused on
+# divergence) or with `git reset --hard` (pre-run HEAD is no longer ancestor).
+case_43_refresh_diverged() {
+  CASE="43 story promoted on origin runs even with local-only commits"
+  FX="$TMP/c43"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
+  # build their fixture by hand rather than through fixture(), so they have
+  # to seed it themselves — found when story 014 merged into the branch that
+  # made the missing-seed warning a die.
+  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: draft
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  git -C "$REPO" add -A fleet .stories
+  git -C "$REPO" commit -qm "fixture: launcher + story $STORY (draft)"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout adds a commit touching a different file; story stays draft.
+  echo "local-only" > "$REPO/local-only.txt"
+  git -C "$REPO" add local-only.txt
+  git -C "$REPO" commit -qm "local: local-only file"
+  local pre_head; pre_head="$(git -C "$REPO" rev-parse HEAD)"
+
+  # Origin: promote story to ready via a second clone (simulates phone edit).
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  sed -i '0,/^status:.*/s//status: ready/' "$FX/origin2/.stories/$STORY.md"
+  git -C "$FX/origin2" add ".stories/$STORY.md"
+  git -C "$FX/origin2" commit -qm "phone: promote story to ready"
+  git -C "$FX/origin2" push -q origin base
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_eq "$(field status)" done "AC1: story reached done"
+  git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
+    && ok || fail "AC1: pre-run HEAD is not an ancestor of new HEAD"
+}
+
+# AC2. Red when the failure branch exits or dies instead of continuing (the
+# story is never run), or when the warning line is removed.
+case_44_refresh_fail() {
+  CASE="44 failed refresh does not stop the drain"; fixture c44
+
+  # Break the origin URL so fetch fails immediately.
+  git -C "$REPO" remote set-url origin "/no/such/path"
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_eq "$(field status)" done "AC2: story reached done despite fetch failure"
+  local rfl; rfl="$(grep 'refresh failed' "$FX/queue.log" | head -1)"
+  [[ -n "$rfl" ]] && ok || fail "AC2: queue log has no 'refresh failed' line"
+  [[ "$rfl" == *"continuing on local state"* ]] \
+    && ok || fail "AC2: 'refresh failed' line does not say 'continuing on local state'"
+}
+
+# AC3. Red when fleet/run-queue.sh leaves a conflicted merge in place (abort
+# deleted), when -X theirs resolves it silently (no warning, conflict-file
+# gets origin's version), or when the uncommitted edit is lost.
+case_45_conflict_leaves_local_work() {
+  CASE="45 conflicting refresh leaves local work unchanged"
+  FX="$TMP/c45"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
+  # build their fixture by hand rather than through fixture(), so they have
+  # to seed it themselves — found when story 014 merged into the branch that
+  # made the missing-seed warning a die.
+  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: ready
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  printf 'line: original\n'  > "$REPO/conflict-file.txt"
+  printf 'initial content\n' > "$REPO/clean.txt"
+  git -C "$REPO" add -A fleet .stories conflict-file.txt clean.txt
+  git -C "$REPO" commit -qm "fixture: launcher + story + files"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout: commit a change to conflict-file.txt; story stays ready.
+  printf 'line: checkout\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  git -C "$REPO" commit -qm "local: checkout version"
+  local pre_head; pre_head="$(git -C "$REPO" rev-parse HEAD)"
+
+  # Uncommitted edit to a tracked file that neither commit touches.
+  printf 'dirty\n' >> "$REPO/clean.txt"
+  local clean_sum_before; clean_sum_before="$(sha256sum "$REPO/clean.txt" | awk '{print $1}')"
+
+  # Origin: conflict on the same line of conflict-file.txt.
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  printf 'line: origin\n' > "$FX/origin2/conflict-file.txt"
+  git -C "$FX/origin2" add conflict-file.txt
+  git -C "$FX/origin2" commit -qm "origin: origin version"
+  git -C "$FX/origin2" push -q origin base
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
+    && ok || fail "AC3: pre-run HEAD is not an ancestor of new HEAD"
+  assert_eq "$(git -C "$REPO" show HEAD:conflict-file.txt)" "line: checkout" \
+    "AC3: committed conflict-file still has checkout version"
+  assert_no_file "$REPO/.git/MERGE_HEAD" "AC3: no merge left in progress"
+  [[ ! -d "$REPO/.git/rebase-merge" ]] && ok || fail "AC3: rebase-merge dir exists"
+  assert_not_grep '<<<<<<<' "$REPO/conflict-file.txt" "AC3: no conflict markers in worktree"
+  local clean_sum_after; clean_sum_after="$(sha256sum "$REPO/clean.txt" | awk '{print $1}')"
+  assert_eq "$clean_sum_after" "$clean_sum_before" \
+    "AC3: uncommitted edit is byte-identical (sha256sum)"
+  assert_grep 'refresh failed' "$FX/queue.log" "AC3: queue log has refresh failed line"
+  assert_eq "$(field status)" done "AC3: story reached done"
+}
+
+# P1 guard. Red when the MERGE_HEAD guard is removed from fleet/run-queue.sh:
+# the in-progress merge is aborted and the staged resolution is lost.
+# Uses --max 0 so commit_status never runs and MERGE_HEAD stays set.
+case_81_existing_merge_preserved() {
+  CASE="81 an in-progress merge resolution is not discarded by the refresh"
+  FX="$TMP/c81"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
+  # build their fixture by hand rather than through fixture(), so they have
+  # to seed it themselves — found when story 014 merged into the branch that
+  # made the missing-seed warning a die.
+  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: ready
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  printf 'line: original\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add -A fleet .stories conflict-file.txt
+  git -C "$REPO" commit -qm "fixture: launcher + story + files"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout: local commit that conflicts with origin.
+  printf 'line: checkout\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  git -C "$REPO" commit -qm "local: checkout version"
+
+  # Origin: conflicting change on the same line.
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  printf 'line: origin\n' > "$FX/origin2/conflict-file.txt"
+  git -C "$FX/origin2" add conflict-file.txt
+  git -C "$FX/origin2" commit -qm "origin: conflicting version"
+  git -C "$FX/origin2" push -q origin base
+
+  # Human: starts a conflicting merge, carefully resolves it, stages the fix.
+  git -C "$REPO" fetch -q origin
+  git -C "$REPO" merge --no-edit origin/base 2>/dev/null || true
+  printf 'line: carefully resolved human work\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  # MERGE_HEAD now set; the resolution is staged but not committed.
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      bash fleet/run-queue.sh --max 0 ) > "$FX/queue.log" 2>&1
+
+  assert_file "$REPO/.git/MERGE_HEAD" "AC81: MERGE_HEAD not aborted by refresh"
+  assert_eq "$(git -C "$REPO" show :conflict-file.txt)" \
+    "line: carefully resolved human work" "AC81: staged resolution preserved"
+  assert_grep 'refresh skipped' "$FX/queue.log" "AC81: queue log shows refresh was skipped"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
-       case_5_restart_after_fail case_6_unparseable case_7_status_commits_land
-       case_8_is_error_false case_9_spec case_10_render_prompt case_11_no_acs
-       case_12_baseline_test_red case_13_baseline_build_red case_14_baseline_lint_red
-       case_15_baseline_notests case_16_reviewer_dirty_tree case_17_reviewer_output_copied
-       case_18_mutation_red case_19_mutation_green case_20_mutation_notests
+       case_5_restart_after_fail case_6_unparseable
+       case_7_status_commits_land case_8_is_error_false case_9_spec
+       case_10_render_prompt case_11_no_acs case_12_baseline_test_red
+       case_13_baseline_build_red case_14_baseline_lint_red
+       case_15_baseline_notests case_16_reviewer_dirty_tree
+       case_17_reviewer_output_copied case_18_mutation_red
+       case_19_mutation_green case_20_mutation_notests
        case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
-       case_27_round2_gets_machine_facts
-       case_28_scope_violation case_29_scope_undeclared case_30_scope_elsewhere
+       case_27_round2_gets_machine_facts case_28_scope_violation
+       case_29_scope_undeclared case_30_scope_elsewhere
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
-       case_46_baseline_self_test case_47_self_test_only_for_fleet
-       case_48_missing_seed_file case_49_install_failure case_50_status_commit_failure
-       case_51_selector_invalid
-       case_52_reset case_53_reset_refuses_while_live case_54_reset_refuses_unmerged
-       case_55_status_json
-       case_56_merge case_57_merge_refuses_fail case_58_merge_undoes_itself
-       case_59_merge_refuses_integration_branch
-       case_60_bot_send case_61_bot_unconfigured_is_not_fatal case_62_bot_ignores_strangers
-       case_63_bot_status case_64_bot_promote case_65_bot_offset_advances
-       case_66_revert case_67_revert_needs_a_merge case_68_bot_revert
+       case_37_evidence_only_round case_38_story_base case_39_lint_story
+       case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
+       case_43_refresh_diverged case_44_refresh_fail
+       case_45_conflict_leaves_local_work case_46_baseline_self_test
+       case_47_self_test_only_for_fleet case_48_missing_seed_file
+       case_49_install_failure case_50_status_commit_failure
+       case_51_selector_invalid case_52_reset
+       case_53_reset_refuses_while_live case_54_reset_refuses_unmerged
+       case_55_status_json case_56_merge case_57_merge_refuses_fail
+       case_58_merge_undoes_itself case_59_merge_refuses_integration_branch
+       case_60_bot_send case_61_bot_unconfigured_is_not_fatal
+       case_62_bot_ignores_strangers case_63_bot_status case_64_bot_promote
+       case_65_bot_offset_advances case_66_revert
+       case_67_revert_needs_a_merge case_68_bot_revert
        case_69_queue_merges_a_pass case_70_queue_does_not_merge_a_fail
-       case_71_auto_merge_can_be_turned_off
-       case_72_lessons_name_real_cases case_73_self_test_env_is_clean
-       case_74_merge_epic_into_integration case_75_merge_epic_refuses_non_epic case_76_story_model
+       case_71_auto_merge_can_be_turned_off case_72_lessons_name_real_cases
+       case_73_self_test_env_is_clean case_74_merge_epic_into_integration
+       case_75_merge_epic_refuses_non_epic case_76_story_model
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
-       case_79_writers_do_not_collide case_80_status_epics)
+       case_79_writers_do_not_collide case_80_status_epics
+       case_81_existing_merge_preserved)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
