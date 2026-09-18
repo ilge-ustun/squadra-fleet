@@ -65,6 +65,20 @@ send() {                              # send <text>
 
 story_ok() { [[ "$1" =~ ^[0-9]{3}$ && -f "$REPO_ROOT/.stories/$1.md" ]]; }
 
+# The launcher commits in this same checkout on its own schedule. Two writers,
+# one index: the loser gets "Unable to create .git/index.lock", and since a
+# failed status commit is a die, the loser is a dead round. Every writer takes
+# the same advisory lock first — fleet/launch.sh does the same in
+# commit_status.
+with_lock() {                         # with_lock <command…>
+  exec 9>"$REPO_ROOT/.git/fleet.lock"
+  flock -w "${FLEET_LOCK_WAIT:-120}" 9 || warn "waited ${FLEET_LOCK_WAIT:-120}s for the fleet lock — going ahead"
+  "$@"
+  local rc=$?
+  flock -u 9
+  return $rc
+}
+
 cmd_status() { ( cd "$REPO_ROOT" && bash fleet/status.sh ) | sed 's/\x1b\[[0-9;]*m//g'; }
 
 cmd_why() {                           # cmd_why <id>
@@ -124,9 +138,9 @@ dispatch() {                          # dispatch <text> → reply on stdout
   case "$verb" in
     /status)  cmd_status ;;
     /why)     cmd_why "${arg:-}" ;;
-    /promote) cmd_promote "${arg:-}" ;;
-    /answer)  [[ -n "${rest:-}" ]] && cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <id> <text>" ;;
-    /revert)  cmd_revert "${arg:-}" ;;
+    /promote) with_lock cmd_promote "${arg:-}" ;;
+    /answer)  [[ -n "${rest:-}" ]] && with_lock cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <id> <text>" ;;
+    /revert)  with_lock cmd_revert "${arg:-}" ;;
     /run)     cmd_run ;;
     *)        printf '%s\n' "/status  /why <id>  /promote <id>  /answer <id> <text>  /revert <id>  /run" ;;
   esac

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# fleet/merge.sh <id>
+# fleet/merge.sh <id>          a story into its epic   — the queue calls this
+# fleet/merge.sh --epic <name> an epic into the integration branch — a human
+#                              calls this, and nothing in the fleet does
 #
 # Merge a story into its epic branch, but only if the machine already said so
 # and only if the merged result still holds up.
@@ -43,11 +45,19 @@ log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
 warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
 die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
 
-ID="${1:-}"
-[[ -n "$ID" ]] || die "usage: fleet/merge.sh <id>"
-[[ -f "$REPO_ROOT/.stories/$ID.md" ]] || die "no such story: .stories/$ID.md"
+MODE=story; ID="${1:-}"
+if [[ "$ID" == --epic ]]; then
+  MODE=epic; ID="${2:-}"
+  [[ -n "$ID" ]] || die "usage: fleet/merge.sh --epic <epic/name>"
+  # The one thing this must never do is point the same machinery at main.
+  [[ "$ID" == epic/* ]] || die "--epic takes an epic/... branch, not '$ID'"
+else
+  [[ -n "$ID" ]] || die "usage: fleet/merge.sh <id> | --epic <epic/name>"
+  [[ -f "$REPO_ROOT/.stories/$ID.md" ]] || die "no such story: .stories/$ID.md"
+fi
+LOGID="${ID//\//-}"
 
-MWT="$REPO_ROOT/../merge-$ID"
+MWT="$REPO_ROOT/../merge-$LOGID"
 cleanup() { [[ -d "$MWT" ]] && git -C "$REPO_ROOT" worktree remove "$MWT" --force >/dev/null 2>&1; }
 trap cleanup EXIT
 
@@ -55,6 +65,15 @@ trap cleanup EXIT
 #
 # status.sh --json is the single reader of story state; duplicating its
 # frontmatter parsing here is how the two would drift.
+
+if [[ "$MODE" == epic ]]; then
+  BRANCH="$ID"; BASE="$BASE_BRANCH"; MERGE_REF="origin/$BRANCH"
+  git -C "$REPO_ROOT" fetch -q origin || die "fetch failed"
+  git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/$BRANCH" >/dev/null \
+    || die "origin has no $BRANCH"
+  git -C "$REPO_ROOT" merge-base --is-ancestor "origin/$BRANCH" "origin/$BASE" 2>/dev/null \
+    && { log "$BRANCH is already in $BASE"; exit 0; }
+else
 
 S="$(cd "$REPO_ROOT" && BASE_BRANCH="$BASE_BRANCH" bash fleet/status.sh --json "$ID")" \
   || die "could not read the story's state"
@@ -75,25 +94,26 @@ case "$BASE" in
     die "$ID is based on $BASE — the integration branch and main are merged by a human, never here" ;;
 esac
 
-# ── merge, in a worktree nobody else is standing in ──────────────────────────
-
 git -C "$REPO_ROOT" fetch -q origin || die "fetch failed"
 git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/$BASE" >/dev/null \
   || die "origin has no $BASE"
+fi
 
 cleanup
+# Detached at origin's tip, in both modes. Naming the branch instead fails
+# outright when it is checked out somewhere — and the integration branch
+# always is, in the checkout this is running from. What gets published is
+# HEAD:refs/heads/<base>, so the local branch is a cache to be refreshed
+# afterwards, never the thing being merged into.
 if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$BASE"; then
   git -C "$REPO_ROOT" merge-base --is-ancestor "$BASE" "origin/$BASE" \
-    || die "local $BASE has commits origin does not — push or reset it first"
-  git -C "$REPO_ROOT" worktree add "$MWT" "$BASE" >/dev/null || die "worktree add failed"
-  git -C "$MWT" merge --ff-only "origin/$BASE" >/dev/null 2>&1
-else
-  git -C "$REPO_ROOT" worktree add "$MWT" -b "$BASE" "origin/$BASE" >/dev/null || die "worktree add failed"
+    || die "local $BASE has commits origin does not — push or reset it first, or they would be merged over"
 fi
+git -C "$REPO_ROOT" worktree add --detach "$MWT" "origin/$BASE" >/dev/null || die "worktree add failed"
 
 BEFORE="$(git -C "$MWT" rev-parse HEAD)"
 log "merging $BRANCH into $BASE (at ${BEFORE:0:8})"
-if ! git -C "$MWT" merge --no-ff "$BRANCH" -m "merge($ID): $BRANCH into $BASE" > "$MWT/../merge-$ID.log" 2>&1; then
+if ! git -C "$MWT" merge --no-ff "${MERGE_REF:-$BRANCH}" -m "merge($ID): $BRANCH into $BASE" > "$REPO_ROOT/.runs/$LOGID-merge.log" 2>&1; then
   git -C "$MWT" merge --abort 2>/dev/null
   die "$BRANCH does not merge cleanly into $BASE — a human has to resolve it"
 fi
@@ -107,23 +127,24 @@ fi
 for f in "${SEED_FILES[@]}"; do
   [[ -f "$REPO_ROOT/$f" ]] && cp "$REPO_ROOT/$f" "$MWT/$f"
 done
+mkdir -p "$REPO_ROOT/.runs"
 log "installing deps in the merge worktree"
-( cd "$MWT" && $INSTALL_CMD ) > "$REPO_ROOT/.runs/$ID-merge-install.log" 2>&1 \
-  || die "install failed in the merge worktree — see .runs/$ID-merge-install.log"
+( cd "$MWT" && $INSTALL_CMD ) > "$REPO_ROOT/.runs/$LOGID-merge-install.log" 2>&1 \
+  || die "install failed in the merge worktree — see .runs/$LOGID-merge-install.log"
 
-RAW="$REPO_ROOT/.runs/$ID-merge-baseline.json"
-mkdir -p "$REPO_ROOT/.runs"; rm -f "$RAW"
-( cd "$MWT" && $VITEST_CMD --reporter json --outputFile "$RAW" ) > "$REPO_ROOT/.runs/$ID-merge-test.log" 2>&1
+RAW="$REPO_ROOT/.runs/$LOGID-merge-baseline.json"
+rm -f "$RAW"
+( cd "$MWT" && $VITEST_CMD --reporter json --outputFile "$RAW" ) > "$REPO_ROOT/.runs/$LOGID-merge-test.log" 2>&1
 if [[ -f "$RAW" ]] && jq -e '.numTotalTests > 0 and .numFailedTests == 0' "$RAW" >/dev/null; then
   M_TEST=GREEN; else M_TEST=RED; fi
-( cd "$MWT" && $BUILD_CMD ) > "$REPO_ROOT/.runs/$ID-merge-build.log" 2>&1 && M_BUILD=GREEN || M_BUILD=RED
-( cd "$MWT" && $LINT_CMD  ) > "$REPO_ROOT/.runs/$ID-merge-lint.log"  2>&1 && M_LINT=GREEN  || M_LINT=RED
+( cd "$MWT" && $BUILD_CMD ) > "$REPO_ROOT/.runs/$LOGID-merge-build.log" 2>&1 && M_BUILD=GREEN || M_BUILD=RED
+( cd "$MWT" && $LINT_CMD  ) > "$REPO_ROOT/.runs/$LOGID-merge-lint.log"  2>&1 && M_LINT=GREEN  || M_LINT=RED
 log "post-merge baseline: test $M_TEST | build $M_BUILD | lint $M_LINT"
 
 if [[ "$M_TEST$M_BUILD$M_LINT" != GREENGREENGREEN ]]; then
   # Nothing was pushed, so there is nothing to undo: the merge exists only in
   # a worktree this script is about to delete.
-  die "post-merge baseline is red (test $M_TEST, build $M_BUILD, lint $M_LINT) — $BASE is untouched, logs in .runs/$ID-merge-*"
+  die "post-merge baseline is red (test $M_TEST, build $M_BUILD, lint $M_LINT) — $BASE is untouched, logs in .runs/$LOGID-merge-*"
 fi
 
 # ── publish ──────────────────────────────────────────────────────────────────
@@ -133,7 +154,22 @@ if [[ "$PUSH_STATUS" == "1" ]]; then
   git -C "$MWT" push -q origin "HEAD:refs/heads/$BASE" \
     || die "push of $BASE failed — the merge is local only"
 fi
+# Move the local branch to what was just published, unless someone is standing
+# on it — in which case say so rather than leave a stale ref quietly behind.
+if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$BASE"; then
+  if git -C "$REPO_ROOT" worktree list --porcelain | grep -qx "branch refs/heads/$BASE"; then
+    warn "local $BASE is checked out — run: git pull --ff-only"
+  else
+    git -C "$REPO_ROOT" branch -f "$BASE" "$MERGE_SHA" >/dev/null 2>&1 \
+      || warn "could not move local $BASE to ${MERGE_SHA:0:8}"
+  fi
+fi
 log "$BASE is now ${MERGE_SHA:0:8}"
+
+if [[ "$MODE" == epic ]]; then
+  log "$ID merged into $BASE — nothing recorded: an epic is not a story, and this was a human's call"
+  exit 0
+fi
 
 # The sha goes in the story so a revert can be asked for by id. Recorded on the
 # integration branch, which is where all fleet state lives.

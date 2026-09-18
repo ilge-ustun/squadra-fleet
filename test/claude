@@ -25,8 +25,8 @@
 #          builder's "observed red" claim is false and the story must not pass
 #
 # It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
-# given as $FAKE_TRACE_DIR/claude-prompt-N, so a test can assert which prompt
-# the launcher rendered. Output is the one JSON object the launcher parses
+# given as $FAKE_TRACE_DIR/claude-prompt-N, and its argv as claude-args-N, so a
+# test can assert which prompt the launcher rendered and which model it chose. Output is the one JSON object the launcher parses
 # with jq (launch.sh: `.is_error`, `.result`).
 #
 set -euo pipefail
@@ -37,6 +37,7 @@ set -euo pipefail
 # exceeded the kernel's per-argument limit on 007's rerun) or, for older
 # callers, as the value after -p. A `-p` followed by another flag has no value.
 prompt=""
+ARGV=("$@")                           # before the loop below consumes them
 while (($#)); do
   case "$1" in
     -p) if [[ -n "${2:-}" && "${2:-}" != -* ]]; then prompt="$2"; shift 2; else shift; fi ;;
@@ -48,6 +49,9 @@ if [[ -z "$prompt" && ! -t 0 ]]; then prompt="$(cat)"; fi
 echo claude >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^claude$' "$FAKE_TRACE_DIR/calls")"
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
+# The argv too, one flag per line: which model the launcher chose is visible
+# nowhere else.
+printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
 
 case "$FAKE_BUILDER" in
   commit)   git commit -q --allow-empty -m "fake(builder): round $n" ;;

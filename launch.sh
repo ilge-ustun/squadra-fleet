@@ -63,6 +63,9 @@ LINT_CMD="${LINT_CMD:-npm run lint}"
 # works substitutes true/false here.
 SELF_TEST_CMD="${SELF_TEST_CMD:-bash fleet/test-lib.sh}"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
+# How the fleet reaches a human. One seam, so a test can substitute a recorder
+# and nothing here ever reaches the network.
+FLEET_NOTIFY_CMD="${FLEET_NOTIFY_CMD:-bash $REPO_ROOT/fleet/telegram.sh send}"
 REVIEW_ONLY="${REVIEW_ONLY:-0}"      # 1 = re-review the head, run no builder
 PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
@@ -114,13 +117,20 @@ set_story_field() {                   # set_story_field <id> <key> <value>
 # whenever .blocked/<id>.md did not exist. Add each path separately.
 commit_status() {                     # commit_status <id> <status>
   local id="$1" st="$2" p
+  # The Telegram bot writes .stories/<id>.md and commits in this same checkout
+  # on its own timer. Two writers, one index: the loser gets "Unable to create
+  # .git/index.lock", and a failed status commit is a die, so the loser is a
+  # dead round. Both take the same advisory lock — fleet/telegram.sh has the
+  # matching with_lock.
+  exec 9>"$REPO_ROOT/.git/fleet.lock"
+  flock -w "${FLEET_LOCK_WAIT:-120}" 9 || warn "waited for the fleet lock — going ahead"
   for p in ".stories/$id.md" ".review/$id.md" ".blocked/$id.md"; do
     [[ -f "$REPO_ROOT/$p" ]] && git -C "$REPO_ROOT" add "$p"
   done
   # Evidence directory: baseline results now, mutations later. A directory,
   # so guarded separately from the files above (same L-02 reasoning).
   [[ -d "$REPO_ROOT/.review/$id" ]] && git -C "$REPO_ROOT" add ".review/$id"
-  git -C "$REPO_ROOT" diff --cached --quiet && return 0
+  git -C "$REPO_ROOT" diff --cached --quiet && { flock -u 9; return 0; }
   # Nothing staged returned above, so a failure here is a real one: a hook, a
   # lock, a broken identity. Continuing would run the story on with its state
   # only in the working tree — invisible to status.sh, to the queue, and to a
@@ -129,6 +139,7 @@ commit_status() {                     # commit_status <id> <status>
   if [[ "$PUSH_STATUS" == "1" ]]; then
     git -C "$REPO_ROOT" push -q 2>/dev/null || warn "status push failed — queue not visible remotely"
   fi
+  flock -u 9
   return 0
 }
 
@@ -175,7 +186,20 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
   BASE_SELF=SKIPPED
   if grep -q '^fleet/' <<< "$CHANGED_PATHS"; then
     log "the round touched fleet/ — running the harness's own suite"
-    ( cd "$wt" && $SELF_TEST_CMD ) > "$ev/self-test.log" 2>&1 && BASE_SELF=GREEN || BASE_SELF=RED
+    # env -i, not the ambient environment. The suite drives launch.sh itself
+    # and its fixtures assume the launcher's DEFAULTS; anything this run was
+    # configured with would silently become the suite's configuration too.
+    # Found on the first real use, 18 Sep: the round was started with
+    # MAX_ROUNDS=1 and four cases that need the two-round ceiling failed, so
+    # a correct story was vetoed by a false RED (L-27).
+    #
+    # An allowlist rather than `env -u` per variable: a list of what to DROP
+    # has to be updated every time the launcher grows a seam, and the one
+    # time it is forgotten the failure is a false veto that looks exactly
+    # like a real one.
+    ( cd "$wt" && env -i \
+        PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
+        bash -c "$SELF_TEST_CMD" ) > "$ev/self-test.log" 2>&1 && BASE_SELF=GREEN || BASE_SELF=RED
   fi
 
   log "baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT | self $BASE_SELF"
@@ -349,9 +373,24 @@ run_probes() {                        # run_probes <wt> <evidence-dir> → PROBE
   done
 }
 
+# A notification can never change what happened: it cannot fail a run, and a
+# notifier that is unconfigured or unreachable is its own business.
+notify() { $FLEET_NOTIFY_CMD "$1" >/dev/null 2>&1 || true; }
+
 set_status() {                        # set_status <id> <status>
   set_story_field "$1" status "$2"
   commit_status "$1" "$2"
+  # Here rather than at each exit: there are five paths to needs_human today
+  # and the sixth would have been added without a notification. `done` is not
+  # announced here — merging is the queue's news, and saying it twice is how
+  # a channel stops being read.
+  case "$2" in
+    needs_human) notify "$1 needs_human — $(awk -F' — ' '/^computed:/ {r=$2} END{print r}' "$REPO_ROOT/.review/$1.md" 2>/dev/null | sed 's/[; ]*$//')
+why: /why $1" ;;
+    blocked)     notify "$1 is blocked and asked a question:
+$(head -c 600 "$REPO_ROOT/.blocked/$1.md" 2>/dev/null)
+answer with: /answer $1 <your answer>" ;;
+  esac
 }
 
 # ── worktree occupancy ───────────────────────────────────────────────────────
@@ -462,6 +501,15 @@ STORY_BASE="$(story_field "$STORY_ID" base)"
 STORY_BASE="${STORY_BASE:-$BASE_BRANCH}"
 [[ "$STORY_BASE" == "$BASE_BRANCH" ]] || log "base: $STORY_BASE (from the story)"
 
+# A story may also name the model that builds it. One line of CSS and a
+# service-worker rewrite were costing the same; this is the whole of the fix,
+# because story_field and the BUILDER_MODEL seam both already existed.
+STORY_MODEL="$(story_field "$STORY_ID" model)"
+if [[ -n "$STORY_MODEL" ]]; then
+  BUILDER_MODEL="$STORY_MODEL"
+  log "model: $BUILDER_MODEL (from the story)"
+fi
+
 BUILDER_WT="$REPO_ROOT/../wt-$STORY_ID"
 REVIEWER_WT="$REPO_ROOT/../wt-$STORY_ID-review"
 BRANCH="story/$STORY_ID"
@@ -544,6 +592,11 @@ while (( ROUND < ROUND_CEILING )); do
   ROUND_START_SHA="$(git -C "$BUILDER_WT" rev-parse HEAD)"
   EVIDENCE_DIR_PENDING="$REPO_ROOT/.review/$STORY_ID/round-$ROUND"
   mkdir -p "$EVIDENCE_DIR_PENDING"
+  # What the round costs. Nothing recorded it, so "is a second lane worth it"
+  # and "is a bigger model worth it here" had no evidence either way. SECONDS
+  # is bash's own counter; the agents' JSON carries more (turns, and whatever
+  # the CLI reports) and is now kept whole rather than reduced to .result.
+  T_ROUND=$SECONDS; T_BUILD=0; T_REVIEW=0; T_BASE=0; T_MUT=0
   BUILDER_HANDED_OVER=""
   
   if (( ROUND == ROUND_START + 1 )) && [[ -z "$REVIEW_TEXT" ]]; then
@@ -564,6 +617,7 @@ while (( ROUND < ROUND_CEILING )); do
     log "REVIEW_ONLY: skipping the builder"
   else
     log "builder: $BUILDER_MODEL"
+    T0=$SECONDS
     # Prompts go on stdin. A 134 KB round-2 prompt as one argv string exceeded
     # MAX_ARG_STRLEN (131072) on 007's rerun: claude never exec'd, output was
     # empty. stdin has no such limit, and for codex it is the intended mode.
@@ -572,6 +626,7 @@ while (( ROUND < ROUND_CEILING )); do
       --model "$BUILDER_MODEL" --max-turns "$MAX_TURNS" \
       --allowedTools "$ALLOWED_TOOLS" --output-format json 2>&1)"
     BUILD_RC=$?
+    T_BUILD=$(( SECONDS - T0 ))
     if (( BUILD_RC == 124 )); then
       set_status "$STORY_ID" needs_human
       die "round $ROUND: the builder exceeded AGENT_TIMEOUT (${AGENT_TIMEOUT}s) and was killed"
@@ -582,6 +637,11 @@ while (( ROUND < ROUND_CEILING )); do
     # has() tests for the key, not its truthiness.
     BUILD_ERR="$(echo "$BUILD_OUT" | jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end' 2>/dev/null)"
     BUILD_MSG="$(echo "$BUILD_OUT" | jq -r '.result // "no result field"' 2>/dev/null)"
+    # The whole object, not just the two fields the launcher reads. Whatever
+    # the CLI reports about cost and duration is in there, and a field that is
+    # thrown away cannot be asked about later.
+    printf '%s\n' "$BUILD_OUT" | jq . > "$EVIDENCE_DIR_PENDING/builder.json" 2>/dev/null \
+      || printf '%s\n' "$BUILD_OUT" > "$EVIDENCE_DIR_PENDING/builder.json"
 
     if [[ "$BUILD_ERR" == "parse-failed" ]]; then
       warn "builder output was not JSON — first 20 lines of raw output:"
@@ -647,8 +707,10 @@ while (( ROUND < ROUND_CEILING )); do
   # whether to run the harness's own suite, and check_scope to judge the deny
   # list. Two readings of the same diff could disagree; one cannot.
   CHANGED_PATHS="$(git -C "$BUILDER_WT" diff --name-only "$BASE_SHA..$HEAD_SHA")"
+  T0=$SECONDS
   run_baseline "$REVIEWER_WT" "$EVIDENCE_DIR"
   check_scope "$EVIDENCE_DIR"
+  T_BASE=$(( SECONDS - T0 ))
 
   REVIEW_PROMPT="$(render_prompt review.md)"
 
@@ -657,6 +719,7 @@ while (( ROUND < ROUND_CEILING )); do
   # start before it reads anything. Isolation comes from the detached worktree
   # and the unprivileged fleet user with no sudo — not from bwrap.
   log "reviewer: codex"
+  T0=$SECONDS
   # codex emits JSON Lines on stdout and notices on stderr — "Reading
   # additional input from stdin..." whenever stdin is not a TTY, i.e. every
   # unattended run. Merged with 2>&1, that one line made jq abort at line 1,
@@ -668,6 +731,7 @@ while (( ROUND < ROUND_CEILING )); do
   REVIEW_RAW="$(cd "$REVIEWER_WT" && printf '%s' "$REVIEW_PROMPT" \
     | timeout -k 30 "$AGENT_TIMEOUT" codex exec --json --sandbox danger-full-access 2> "$EVIDENCE_DIR/reviewer.stderr")"
   REVIEW_RC=$?
+  T_REVIEW=$(( SECONDS - T0 ))
   if (( REVIEW_RC == 124 )); then
     set_status "$STORY_ID" needs_human
     die "round $ROUND: the reviewer exceeded AGENT_TIMEOUT (${AGENT_TIMEOUT}s) and was killed"
@@ -707,8 +771,10 @@ while (( ROUND < ROUND_CEILING )); do
     cp -r "$REVIEWER_WT/.review-out/probes/." "$EVIDENCE_DIR/probes/"
   fi
 
+  T0=$SECONDS
   run_mutations "$REVIEWER_WT" "$EVIDENCE_DIR"
   run_probes "$REVIEWER_WT" "$EVIDENCE_DIR"
+  T_MUT=$(( SECONDS - T0 ))
   MUT_TABLE="$(printf '%s' "$MUT_ROWS" | awk 'NF { printf "%-4s %-13s %s\n", $1, $2, $3 }')"
   PROBE_TABLE="$(printf '%s' "$PROBE_ROWS" | awk 'NF { printf "%-13s %s\n", $2, $1 }')"
 
@@ -760,6 +826,8 @@ reviewed: $(date -Iseconds)
 ### Machine
 
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT | self $BASE_SELF
+timing:   builder ${T_BUILD}s | baseline ${T_BASE}s | reviewer ${T_REVIEW}s | mutations ${T_MUT}s | total $(( SECONDS - T_ROUND ))s
+model:    $BUILDER_MODEL
 acs:      $AC_IDS
 scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT

@@ -126,6 +126,7 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
       BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
       VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
       FAKE_MUTATIONS=patch FAKE_VITEST=marker SELF_TEST_CMD=true \
+      FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
       bash fleet/launch.sh "$id" ) > "$LOG" 2>&1
   RC=$?
@@ -1313,6 +1314,210 @@ case_71_auto_merge_can_be_turned_off() {
   assert_eq "$(epic_head)" "$before" "but nothing merged"
 }
 
+# Phase F3. A lesson is prose, and prose cannot fail. What CAN fail is a
+# lesson that claims an instrument it no longer has: rename a case, delete it,
+# drop it from CASES, and docs/fleet/lessons.md goes on telling the next agent
+# that the mistake is covered.
+#
+# This checks the working tree, not a fixture: it is about the files on disk,
+# and a fixture would test whatever was last committed instead.
+#
+# Red when a lesson names a case that does not exist, or one that exists but
+# is not in CASES and therefore never runs. Both observed, 18 Sep.
+case_72_lessons_name_real_cases() {
+  CASE="72 every lesson that claims an instrument still has it"
+  local lessons="$SRC/docs/fleet/lessons.md" lib="$SRC/fleet/test-lib.sh"
+  assert_file "$lessons" "the lessons file is where it is expected"
+  local names cases_block missing="" unrun="" n
+  cases_block="$(sed -n '/^CASES=(/,/)$/p' "$lib")"
+  names="$(grep -oE '^\*\*Enforced by:\*\* `[a-zA-Z0-9_]+`' "$lessons" | tr -d '`' | awk '{print $NF}')"
+  [[ -n "$names" ]] && ok || fail "no lesson declares an instrument — the check would be vacuous"
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    grep -qE "^$n\(\)" "$lib" || { missing+="$n "; continue; }
+    [[ "$n" == case_* ]] && ! grep -q "$n" <<< "$cases_block" && unrun+="$n "
+  done <<< "$names"
+  assert_eq "$missing" "" "lessons naming something that is not in test-lib"
+  assert_eq "$unrun"   "" "lessons naming a case that is not in CASES, so never runs"
+}
+
+# L-27, found by A1's first real use. The self-test drives launch.sh itself,
+# and its fixtures assume the launcher's DEFAULTS — so anything THIS run was
+# configured with becomes the suite's configuration too. Story 014's round was
+# started with MAX_ROUNDS=1 and four cases that need the two-round ceiling
+# failed, vetoing a story that was fine.
+#
+# SELF_TEST_CMD=env makes the child's environment the log, which is the only
+# way to assert on something a subprocess cannot report back.
+#
+# Red before the fix: self-test.log contains MAX_ROUNDS=1.
+case_73_self_test_env_is_clean() {
+  CASE="73 the self-test does not inherit the launcher's configuration"; fixture c73
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=fleet/prompts/rules.md \
+      FAKE_REVIEWER=PASS MAX_ROUNDS=1 SELF_TEST_CMD=env
+  local log="$REPO/.review/$STORY/round-1/baseline/self-test.log"
+  assert_file "$log" "the self-test ran"
+  assert_not_grep '^MAX_ROUNDS=' "$log" "the round ceiling did not leak"
+  assert_not_grep '^VITEST_CMD='  "$log" "nor the test command"
+  assert_not_grep '^BASE_BRANCH=' "$log" "nor the base branch"
+  assert_grep     '^PATH='        "$log" "but PATH survived, or nothing would run"
+  assert_grep     '^HOME='        "$log" "and HOME, or git would have no identity"
+}
+
+# Phase E4. Epic → develop has never happened in fourteen stories: only
+# story → epic and story → develop. An untested path is where the next
+# surprise lives, so it gets the same post-merge baseline and a case.
+#
+# It stays human-run. The queue calls merge.sh with a story id and nothing
+# else; nothing in the fleet calls --epic.
+case_74_merge_epic_into_integration() {
+  CASE="74 an epic merges into the integration branch, with the same baseline"; epic_story c74
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: the story is on the epic"
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+
+  MLOG="$FX/merge-epic.log"
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
+      bash fleet/merge.sh --epic epic/test ) > "$MLOG" 2>&1
+  local rc=$?
+  assert_eq "$rc" 0 "exit code"
+  [[ "$(git -C "$REPO" rev-parse origin/base)" != "$before" ]] && ok || fail "the integration branch moved"
+  git -C "$REPO" merge-base --is-ancestor origin/epic/test origin/base && ok \
+    || fail "the epic is an ancestor of it"
+
+  # Same guard as a story merge: a red post-merge baseline keeps it off.
+  CASE="74b a red baseline keeps an epic off the integration branch"; epic_story c74b
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  before="$(git -C "$REPO" rev-parse origin/base)"
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=false LINT_CMD=true \
+      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
+      bash fleet/merge.sh --epic epic/test ) > "$FX/merge-epic2.log" 2>&1
+  assert_eq "$?" 1 "exit code (die)"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
+}
+
+# Red when --epic accepts anything that is not an epic branch: the same
+# machinery pointed at main is the one thing this must never do.
+case_75_merge_epic_refuses_non_epic() {
+  CASE="75 --epic refuses a branch that is not an epic"; epic_story c75
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  local out; out="$( cd "$REPO" && env BASE_BRANCH=base bash fleet/merge.sh --epic base 2>&1 )"
+  assert_contains "$out" "epic/" "the message says what it will take"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "and nothing moved"
+}
+
+# Phase F1. Every story got the same builder at the same model: a one-line CSS
+# fix and a service-worker rewrite cost the same. `model:` in the frontmatter
+# is the smallest thing that changes that — story_field and the BUILDER_MODEL
+# seam both already exist.
+#
+# Red when the frontmatter is not consulted: the default model is used for a
+# story that asked for another.
+case_76_story_model() {
+  CASE="76 a story may name the model that builds it"; fixture c76
+  sed -i '2a model: fleet-test-model' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^fleet-test-model$' "$TRACE/claude-args-1" "the builder ran on the story's model"
+  assert_grep 'model: fleet-test-model' "$LOG" "and the run says so"
+
+  CASE="76b a story that names none gets the default"; fixture c76b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^claude-sonnet-4-6$' "$TRACE/claude-args-1" "the launcher's default model"
+}
+
+# Phase D1, the launcher's half. The queue notifies about merges; the launcher
+# notifies about the states that stop a story, because a story can stop
+# without a queue — a hand-run launcher left detached for an hour is exactly
+# when nobody is watching.
+#
+# The notification lives in set_status rather than at each exit: there are
+# five paths to needs_human today and the next one would be added without a
+# notification.
+#
+# Red when the notify call is removed from set_status.
+case_77_launcher_notifies_a_stop() {
+  CASE="77 the launcher says when a story stops"; fixture c77
+  cat > "$FX/notify.sh" <<'EON'
+printf '%s\n---\n' "$*" >> "$(dirname "$0")/notify.log"
+EON
+  : > "$FX/notify.log"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1 \
+      FLEET_NOTIFY_CMD="bash $FX/notify.sh"
+  assert_eq "$(field status)" needs_human "the story stopped"
+  assert_grep "$STORY" "$FX/notify.log" "the message names the story"
+  assert_grep 'needs_human' "$FX/notify.log" "and the state it stopped in"
+
+  CASE="77b a story that finishes is the queue's news, not the launcher's"; fixture c77b
+  cat > "$FX/notify.sh" <<'EON'
+printf '%s\n---\n' "$*" >> "$(dirname "$0")/notify.log"
+EON
+  : > "$FX/notify.log"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      FLEET_NOTIFY_CMD="bash $FX/notify.sh"
+  assert_eq "$(field status)" done "the story passed"
+  assert_eq "$(wc -c < "$FX/notify.log")" 0 "and the launcher said nothing — merging is the queue's to announce"
+}
+
+# Phase C1/C2. Nothing recorded what a round cost. "Is a second lane worth
+# it", "is a bigger model worth it for this story", "why did that take an
+# hour" were all unanswerable, and each would have been answered by numbers
+# the agents already return and the launcher was throwing away.
+#
+# Red when the raw builder object is not kept, or the timing line is dropped.
+case_78_round_cost_is_recorded() {
+  CASE="78 a round records what it cost"; fixture c78
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_file "$ev/builder.json" "the builder's own object is kept, not just its prose"
+  jq -e 'has("is_error")' >/dev/null 2>&1 < "$ev/builder.json" && ok \
+    || fail "and it is the JSON the agent returned"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/builder.json" "committed with the rest of the evidence"
+  assert_grep '^timing: ' "$REPO/.review/$STORY.md" "the machine block says what the round cost"
+  assert_grep 'builder [0-9]+s' "$REPO/.review/$STORY.md" "per phase, in seconds"
+  assert_grep 'total [0-9]+s' "$REPO/.review/$STORY.md" "and in total"
+}
+
+# Phase C4. The bot writes .stories/<id>.md and commits it in the main
+# checkout; the launcher commits there too, on its own schedule. Two writers,
+# one index. Without a lock the loser gets "Unable to create .git/index.lock"
+# — and since 18 Sep a failed status commit is a die, so the loser is a dead
+# round.
+#
+# The case makes the hazard deterministic rather than hoping to catch a race:
+# a background holder takes the fleet lock AND leaves a real .git/index.lock
+# behind it, exactly as a mid-commit git does. A writer that does not wait for
+# the fleet lock walks into the index lock and fails.
+#
+# Red without the lock: /promote finds index.lock and the story never changes.
+case_79_writers_do_not_collide() {
+  CASE="79 a second writer waits rather than walking into a held index"; fixture c79
+  sed -i '0,/^status:.*/s//status: draft/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "park the fixture story"
+
+  # The holder: take the fleet lock, plant an index.lock, hold both briefly.
+  ( exec 9>"$REPO/.git/fleet.lock"
+    flock 9
+    : > "$REPO/.git/index.lock"
+    sleep 3
+    rm -f "$REPO/.git/index.lock" ) &
+  local holder=$!
+  sleep 0.5
+
+  update 300 42 "/promote $STORY"
+  bot poll
+  wait "$holder" 2>/dev/null
+
+  assert_eq "$(field status)" ready "the promotion landed"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "promoted" "as a commit, having waited its turn"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -1340,7 +1545,11 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_63_bot_status case_64_bot_promote case_65_bot_offset_advances
        case_66_revert case_67_revert_needs_a_merge case_68_bot_revert
        case_69_queue_merges_a_pass case_70_queue_does_not_merge_a_fail
-       case_71_auto_merge_can_be_turned_off)
+       case_71_auto_merge_can_be_turned_off
+       case_72_lessons_name_real_cases case_73_self_test_env_is_clean
+       case_74_merge_epic_into_integration case_75_merge_epic_refuses_non_epic case_76_story_model
+       case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
+       case_79_writers_do_not_collide)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

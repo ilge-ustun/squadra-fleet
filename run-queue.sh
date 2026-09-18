@@ -117,14 +117,11 @@ undo: /revert $id"
         log "$id: PASS, not merged (AUTO_MERGE=0)"
         notify "$id computed PASS and is waiting for a human to merge it into $base"
       fi ;;
-    blocked)     warn "$id: blocked — a question is waiting in .blocked/$id.md"
-                 notify "$id is blocked and asked a question:
-$(head -c 600 "$REPO_ROOT/.blocked/$id.md" 2>/dev/null)
-answer with: /answer $id <your answer>" ;;
-    needs_human) warn "$id: needs_human — see .review/$id.md"
-                 notify "$id needs a human — verdict ${verdict:-?}
-${reasons:-see .review/$id.md}
-why: /why $id" ;;
+    # blocked and needs_human are announced by the launcher, in set_status:
+    # a story can stop without a queue, and saying it twice is how a channel
+    # stops being read.
+    blocked)     warn "$id: blocked — a question is waiting in .blocked/$id.md" ;;
+    needs_human) warn "$id: needs_human — see .review/$id.md" ;;
     *)           warn "$id: ended as '${status:-unknown}' (launcher exit $rc)"
                  notify "$id ended as '${status:-unknown}' (launcher exit $rc) — that is not a state the queue expects" ;;
   esac
