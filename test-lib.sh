@@ -828,6 +828,165 @@ case_42_resume_after_crash() {
     "work the builder had already done" "the work it had already done survived"
 }
 
+# AC1. Red when the refresh call is deleted from fleet/run-queue.sh: the
+# checkout never learns the story is ready and the queue reports nothing ready.
+# Also red when the refresh is replaced with `git pull --ff-only` (refused on
+# divergence) or with `git reset --hard` (pre-run HEAD is no longer ancestor).
+case_43_refresh_diverged() {
+  CASE="43 story promoted on origin runs even with local-only commits"
+  FX="$TMP/c43"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: draft
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  git -C "$REPO" add -A fleet .stories
+  git -C "$REPO" commit -qm "fixture: launcher + story $STORY (draft)"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout adds a commit touching a different file; story stays draft.
+  echo "local-only" > "$REPO/local-only.txt"
+  git -C "$REPO" add local-only.txt
+  git -C "$REPO" commit -qm "local: local-only file"
+  local pre_head; pre_head="$(git -C "$REPO" rev-parse HEAD)"
+
+  # Origin: promote story to ready via a second clone (simulates phone edit).
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  sed -i '0,/^status:.*/s//status: ready/' "$FX/origin2/.stories/$STORY.md"
+  git -C "$FX/origin2" add ".stories/$STORY.md"
+  git -C "$FX/origin2" commit -qm "phone: promote story to ready"
+  git -C "$FX/origin2" push -q origin base
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_eq "$(field status)" done "AC1: story reached done"
+  git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
+    && ok || fail "AC1: pre-run HEAD is not an ancestor of new HEAD"
+}
+
+# AC2. Red when the failure branch exits or dies instead of continuing (the
+# story is never run), or when the warning line is removed.
+case_44_refresh_fail() {
+  CASE="44 failed refresh does not stop the drain"; fixture c44
+
+  # Break the origin URL so fetch fails immediately.
+  git -C "$REPO" remote set-url origin "/no/such/path"
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  assert_eq "$(field status)" done "AC2: story reached done despite fetch failure"
+  assert_grep 'refresh failed' "$FX/queue.log" "AC2: queue log has refresh failed line"
+}
+
+# AC3. Red when fleet/run-queue.sh leaves a conflicted merge in place (abort
+# deleted), when -X theirs resolves it silently (no warning, conflict-file
+# gets origin's version), or when the uncommitted edit is lost.
+case_45_conflict_leaves_local_work() {
+  CASE="45 conflicting refresh leaves local work unchanged"
+  FX="$TMP/c45"; REPO="$FX/repo"; TRACE="$FX/trace"
+  mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  git clone -q --bare "$SRC" "$FX/origin.git"
+  git clone -q "$FX/origin.git" "$REPO"
+  git -C "$REPO" config user.name  fleet-test
+  git -C "$REPO" config user.email fleet-test@localhost
+  git -C "$REPO" checkout -q -b base
+
+  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
+  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
+  mkdir -p "$REPO/.stories"
+  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+---
+status: ready
+round: 0
+---
+
+# Story 900: fixture story
+
+**AC1 — the fixture has one criterion.** Goes red when removed.
+EOF
+  printf 'line: original\n'  > "$REPO/conflict-file.txt"
+  printf 'initial content\n' > "$REPO/clean.txt"
+  git -C "$REPO" add -A fleet .stories conflict-file.txt clean.txt
+  git -C "$REPO" commit -qm "fixture: launcher + story + files"
+  git -C "$REPO" push -q -u origin base
+
+  shadow_check "$REPO"
+
+  # Checkout: commit a change to conflict-file.txt; story stays ready.
+  printf 'line: checkout\n' > "$REPO/conflict-file.txt"
+  git -C "$REPO" add conflict-file.txt
+  git -C "$REPO" commit -qm "local: checkout version"
+  local pre_head; pre_head="$(git -C "$REPO" rev-parse HEAD)"
+
+  # Uncommitted edit to a tracked file that neither commit touches.
+  printf 'dirty\n' >> "$REPO/clean.txt"
+  local expected_clean; expected_clean="$(cat "$REPO/clean.txt")"
+
+  # Origin: conflict on the same line of conflict-file.txt.
+  git clone -q "$FX/origin.git" "$FX/origin2"
+  git -C "$FX/origin2" config user.name  fleet-test
+  git -C "$FX/origin2" config user.email fleet-test@localhost
+  git -C "$FX/origin2" checkout -q base
+  printf 'line: origin\n' > "$FX/origin2/conflict-file.txt"
+  git -C "$FX/origin2" add conflict-file.txt
+  git -C "$FX/origin2" commit -qm "origin: origin version"
+  git -C "$FX/origin2" push -q origin base
+
+  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
+      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
+      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+
+  git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
+    && ok || fail "AC3: pre-run HEAD is not an ancestor of new HEAD"
+  assert_eq "$(git -C "$REPO" show HEAD:conflict-file.txt)" "line: checkout" \
+    "AC3: committed conflict-file still has checkout version"
+  assert_no_file "$REPO/.git/MERGE_HEAD" "AC3: no merge left in progress"
+  [[ ! -d "$REPO/.git/rebase-merge" ]] && ok || fail "AC3: rebase-merge dir exists"
+  assert_not_grep '<<<<<<<' "$REPO/conflict-file.txt" "AC3: no conflict markers in worktree"
+  assert_eq "$(cat "$REPO/clean.txt")" "$expected_clean" \
+    "AC3: uncommitted edit is byte-identical"
+  assert_grep 'refresh failed' "$FX/queue.log" "AC3: queue log has refresh failed line"
+  assert_eq "$(field status)" done "AC3: story reached done"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
@@ -843,7 +1002,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_31_codex_stderr_notice case_32_huge_review_prompt
        case_33_story_amendment_reaches_builder case_34_review_only
        case_35_builder_tdd_mutation case_36_reviewer_probes
-       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash)
+       case_37_evidence_only_round case_38_story_base case_39_lint_story case_40_agent_timeout case_41_run_queue case_42_resume_after_crash
+       case_43_refresh_diverged case_44_refresh_fail case_45_conflict_leaves_local_work)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
