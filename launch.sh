@@ -57,11 +57,6 @@ INSTALL_CMD="${INSTALL_CMD:-npm ci}"   # overridable so fleet/test-lib.sh can sk
 VITEST_CMD="${VITEST_CMD:-npx vitest run}"   # baseline + mutation runner; test-lib points it at a fake
 BUILD_CMD="${BUILD_CMD:-npm run build}"
 LINT_CMD="${LINT_CMD:-npm run lint}"
-# The harness's own suite, run as part of the baseline when the round touched
-# fleet/ (L-26). A seam because fleet/test-lib.sh cannot run itself: its
-# nesting guard exits 3 inside a fixture, so the case that proves this branch
-# works substitutes true/false here.
-SELF_TEST_CMD="${SELF_TEST_CMD:-bash fleet/test-lib.sh}"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
 # How the fleet reaches a human. One seam, so a test can substitute a recorder
 # and nothing here ever reaches the network.
@@ -156,7 +151,7 @@ commit_status() {                     # commit_status <id> <status>
 # caught bug in the terminal (L-08). Green therefore requires tests to have
 # actually run: numTotalTests > 0 AND numFailedTests == 0.
 
-run_baseline() {                      # run_baseline <worktree> <evidence-dir> → BASE_TEST BASE_BUILD BASE_LINT BASE_SELF
+run_baseline() {                      # run_baseline <worktree> <evidence-dir> → BASE_TEST BASE_BUILD BASE_LINT
   local wt="$1" ev="$2/baseline" raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-baseline.json"
   mkdir -p "$ev"
   rm -f "$raw"
@@ -178,31 +173,7 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
   ( cd "$wt" && $BUILD_CMD ) 2>&1 | tail -n 200 > "$ev/build.log" && BASE_BUILD=GREEN || BASE_BUILD=RED
   ( cd "$wt" && $LINT_CMD  ) 2>&1 | tail -n 200 > "$ev/lint.log"  && BASE_LINT=GREEN  || BASE_LINT=RED
 
-  # Nothing above touches fleet/. A round that changes the harness is otherwise
-  # judged by three instruments that cannot see it — the judge is not the
-  # judged only because launch.sh is scope_deny'd, and test-lib.sh is not.
-  # SKIPPED, not GREEN: a check that did not run must not read as a check that
-  # passed.
-  BASE_SELF=SKIPPED
-  if grep -q '^fleet/' <<< "$CHANGED_PATHS"; then
-    log "the round touched fleet/ — running the harness's own suite"
-    # env -i, not the ambient environment. The suite drives launch.sh itself
-    # and its fixtures assume the launcher's DEFAULTS; anything this run was
-    # configured with would silently become the suite's configuration too.
-    # Found on the first real use, 18 Sep: the round was started with
-    # MAX_ROUNDS=1 and four cases that need the two-round ceiling failed, so
-    # a correct story was vetoed by a false RED (L-27).
-    #
-    # An allowlist rather than `env -u` per variable: a list of what to DROP
-    # has to be updated every time the launcher grows a seam, and the one
-    # time it is forgotten the failure is a false veto that looks exactly
-    # like a real one.
-    ( cd "$wt" && env -i \
-        PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
-        bash -c "$SELF_TEST_CMD" ) > "$ev/self-test.log" 2>&1 && BASE_SELF=GREEN || BASE_SELF=RED
-  fi
-
-  log "baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT | self $BASE_SELF"
+  log "baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT"
 }
 
 # ── mutation runner ──────────────────────────────────────────────────────────
@@ -787,8 +758,7 @@ while (( ROUND < ROUND_CEILING )); do
   #
   # The reviewer's line is one input. The machine may veto a PASS; it never
   # grants one, and it never touches SPEC (the story is wrong, not the build).
-  #   baseline   test, build, lint all green, and — when the round touched
-  #              fleet/ — the harness's own suite too
+  #   baseline   test, build, lint all green
   #   coverage   every AC in the story has at least one mutation
   #   D1         every mutation is RED — a survivor means the instrument is
   #              absent or the mutation is wrong, and either needs a human
@@ -797,7 +767,6 @@ while (( ROUND < ROUND_CEILING )); do
   [[ "$BASE_TEST"  == GREEN ]] || MACHINE_REASONS+="baseline test $BASE_TEST; "
   [[ "$BASE_BUILD" == GREEN ]] || MACHINE_REASONS+="baseline build $BASE_BUILD; "
   [[ "$BASE_LINT"  == GREEN ]] || MACHINE_REASONS+="baseline lint $BASE_LINT; "
-  [[ "$BASE_SELF" == GREEN || "$BASE_SELF" == SKIPPED ]] || MACHINE_REASONS+="baseline self $BASE_SELF; "
   [[ "$SCOPE" == CLEAN ]] || MACHINE_REASONS+="scope $SCOPE: ${SCOPE_HITS}; "
   for ac in $AC_IDS; do
     grep -q "^$ac " <<< "$MUT_ROWS" || MACHINE_REASONS+="$ac has no mutation; "
@@ -825,7 +794,7 @@ reviewed: $(date -Iseconds)
 
 ### Machine
 
-baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT | self $BASE_SELF
+baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
 timing:   builder ${T_BUILD}s | baseline ${T_BASE}s | reviewer ${T_REVIEW}s | mutations ${T_MUT}s | total $(( SECONDS - T_ROUND ))s
 builder:  $BUILDER_MODEL
 acs:      $AC_IDS

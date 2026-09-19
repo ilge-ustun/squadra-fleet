@@ -401,7 +401,11 @@ the same builder that weakens a case could weaken the case that guards it.
 Nothing here makes the harness self-verifying — it makes a harness change
 visible to the same instrument every other change already faces.
 
-**Enforced by:** `case_46_baseline_self_test`
+**19 Sep 2026:** the harness is its own repository now and is never a fleet
+target, so no round's diff can contain a harness file and the self-test branch
+was removed — a check that cannot fire is absent, not weak. Prevention is
+`bash test-lib.sh` by hand before every commit in the fleet repo (CLAUDE.md
+there). No case enforces this any more.
 
 ### L-27 — a self-test inherits the configuration of the run that calls it
 
@@ -428,5 +432,8 @@ the environment is clean by making the child's environment the log
 (`SELF_TEST_CMD=env`), which is the only way to assert on something a
 subprocess cannot report back.
 
-**Enforced by:** `case_73_self_test_env_is_clean`
+**19 Sep 2026:** the launcher no longer runs the suite (see L-26), so the
+`env -i` moved into `test-lib.sh` itself, which re-executes under a clean
+environment before any fixture is built: a developer shell with `MAX_ROUNDS=1`
+exported would otherwise reproduce this exactly.
 
