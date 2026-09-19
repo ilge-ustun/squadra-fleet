@@ -285,8 +285,9 @@ check_scope() {                       # check_scope <evidence-dir> → SCOPE SCO
 # requiring "at least one" is a check that cannot go red, since a vacuous probe
 # satisfies it, so zero probes is not a finding.
 #
-# A probe must land inside vitest's include glob or it collects no tests; it is
-# copied into src/__tests__/ under a fleet- prefix, run, then removed.
+# A probe must land inside the test runner's include glob or it collects no
+# tests; where that is comes from the target (PROBE_DIR in .fleet/config). It
+# is copied there under a fleet- prefix, run, then removed.
 
 run_probes() {                        # run_probes <wt> <evidence-dir> → PROBE_ROWS
   local wt="$1" pdir="$2/probes" p name dest cls raw
@@ -296,7 +297,8 @@ run_probes() {                        # run_probes <wt> <evidence-dir> → PROBE
   for p in "$pdir"/*.test.tsx "$pdir"/*.test.ts; do
     [[ -e "$p" ]] || continue
     name="$(basename "$p")"
-    dest="src/__tests__/fleet-probe-$name"
+    [[ -d "$wt/$PROBE_DIR" ]] || die "probe runner: PROBE_DIR $PROBE_DIR does not exist in the worktree — a probe copied there would silently never run"
+    dest="$PROBE_DIR/fleet-probe-$name"
     raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-probe-$name"
 
     [[ -z "$(porcelain "$wt")" ]] || die "probe runner: tree dirty before $name"
