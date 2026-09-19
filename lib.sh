@@ -46,6 +46,17 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
   [[ -n "$REPO_ROOT" ]] || die "$f sets no REPO_PATH"
   [[ "$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" == "$(readlink -f "$REPO_ROOT" 2>/dev/null)" ]] \
     || die "REPO_PATH $REPO_ROOT (repo '$name') is not the top of a git checkout"
+  # Worktrees are siblings of the target (../wt-<id>), and story ids are
+  # per-repo, so two targets under one parent directory would share them.
+  # The registry is the only place that can see both.
+  local other opath parent
+  parent="$(dirname "$(readlink -f "$REPO_ROOT")")"
+  for other in "$FLEET_REGISTRY_DIR"/*.env; do
+    [[ -e "$other" && "$other" != "$f" ]] || continue
+    opath="$( . "$other" >/dev/null 2>&1 && printf '%s' "${REPO_PATH:-}" )"
+    [[ -n "$opath" && "$(dirname "$(readlink -f "$opath")")" == "$parent" ]] \
+      && die "repos '$name' and '$(basename "$other" .env)' sit in the same parent directory ($parent) — their ../wt-<id> worktrees would collide"
+  done
   [[ -f "$REPO_ROOT/.fleet/config" ]] \
     || die "$REPO_ROOT has no .fleet/config — the target must say how it is built and tested"
   # File provides defaults, environment wins: save what the caller set, source,

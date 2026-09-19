@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# run-queue.sh <repo> [--max N]
+# run-queue.sh <repo>|--all [--max N]
 #
 #   run-queue.sh khaita                  drain the queue of the repo `khaita`
 #   run-queue.sh khaita --max 3          at most three stories
+#   run-queue.sh --all                   every registered repo, one after another
 #
 # Runs every `ready` story in turn until the queue is empty. This is the piece
 # that makes the fleet a fleet: until now a human launched each story, watched
@@ -27,13 +28,29 @@ set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
 LOG_TAG=queue
-TARGET="${1:-}"; [[ -n "$TARGET" ]] || die "usage: run-queue.sh <repo> [--max N]"; shift
+TARGET="${1:-}"; [[ -n "$TARGET" ]] || die "usage: run-queue.sh <repo>|--all [--max N]"; shift
 MAX="${MAX:-20}"
 # The launcher decides; the queue merges. A hand-run launch.sh never changes a
 # branch — that separation is what keeps a debugging session from landing
 # something. AUTO_MERGE=0 turns it off without turning the fleet off.
 AUTO_MERGE="${AUTO_MERGE:-1}"
 [[ "${1:-}" == "--max" ]] && MAX="${2:?--max needs a number}"
+
+# --all walks the registry and re-runs this script once per repo: a fresh
+# process each time, so no configuration, counter or die crosses from one
+# repo to the next, and --max stays a per-repo ceiling.
+if [[ "$TARGET" == --all ]]; then
+  found=0
+  for f in "$FLEET_REGISTRY_DIR"/*.env; do
+    [[ -e "$f" ]] || break
+    found=1; name="$(basename "$f" .env)"
+    log "repo: $name"
+    bash "$FLEET_HOME/run-queue.sh" "$name" "$@"
+  done
+  (( found )) || die "no repos registered in $FLEET_REGISTRY_DIR"
+  exit 0
+fi
+
 load_repo "$TARGET"
 
 # A notification is never allowed to change what happened: it cannot fail the

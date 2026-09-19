@@ -186,11 +186,11 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
       bash "$FLEET/launch.sh" t "$id" ) > "$LOG" 2>&1
   RC=$?
 }
-queue() {                             # queue [VAR=value …] → $FX/queue.log QRC
+queue() {                             # queue [VAR=value …] → $FX/queue.log QRC   (QUEUE_TARGET=--all for every repo)
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
-      bash "$FLEET/run-queue.sh" t ) > "$FX/queue.log" 2>&1
+      bash "$FLEET/run-queue.sh" "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
   QRC=$?
 }
 status_run() {                        # status_run [args…] → stdout
@@ -198,6 +198,9 @@ status_run() {                        # status_run [args…] → stdout
 }
 tracked() { git -C "$REPO" ls-tree -r HEAD --name-only; }
 
+frontmatter() {                       # frontmatter <file> <key>
+  awk -v k="$2" '/^---$/{d++; next} d==1 && $0 ~ "^"k":" {sub("^"k":[[:space:]]*",""); print; exit}' "$1"
+}
 field() {                             # field <key> → frontmatter value of the fixture story
   awk -v k="$1" '
     NR==1 && $0!="---" { exit }
@@ -1654,12 +1657,14 @@ case_81_existing_merge_preserved() {
 case_82_load_repo() {
   CASE="82 load_repo: registry, config, env over file"
   local d="$TMP/c82" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/lib.sh}" out rc
-  mkdir -p "$d/repos" "$d/target/.fleet" "$d/target2"
-  git init -q "$d/target"; git init -q "$d/target2"
-  printf 'REPO_PATH=%s\n' "$d/target"  > "$d/repos/t.env"
-  printf 'REPO_PATH=%s\n' "$d/target2" > "$d/repos/noconf.env"
-  printf 'REPO_PATH=%s\n' "$d/nowhere" > "$d/repos/gone.env"
-  cat > "$d/target/.fleet/config" <<'EOF'
+  # Each target in its own parent directory: siblings would share ../wt-<id>
+  # and load_repo refuses them (case 89).
+  mkdir -p "$d/repos" "$d/a/target/.fleet" "$d/b/target2"
+  git init -q "$d/a/target"; git init -q "$d/b/target2"
+  printf 'REPO_PATH=%s\n' "$d/a/target"  > "$d/repos/t.env"
+  printf 'REPO_PATH=%s\n' "$d/b/target2" > "$d/repos/noconf.env"
+  printf 'REPO_PATH=%s\n' "$d/c/nowhere" > "$d/repos/gone.env"
+  cat > "$d/a/target/.fleet/config" <<'EOF'
 BASE_BRANCH=base
 INSTALL_CMD='true'
 VITEST_CMD='fake vitest'
@@ -1676,7 +1681,7 @@ EOF
   }
   probe t
   assert_eq "$rc" 0 "a registered repo with a config loads"
-  assert_contains "$out" "$d/target|base|fake vitest|2|extra.env" "path, config values and the split seed list"
+  assert_contains "$out" "$d/a/target|base|fake vitest|2|extra.env" "path, config values and the split seed list"
 
   probe nope;   assert_eq "$rc" 1 "an unregistered name dies";   assert_contains "$out" "unknown repo 'nope'" "and says so"
   probe '../t'; assert_eq "$rc" 1 "a path is not a repo name";   assert_contains "$out" "not a repo name" "and says so"
@@ -1685,11 +1690,56 @@ EOF
 
   probe t BASE_BRANCH=fromenv VITEST_CMD='from env'
   assert_eq "$rc" 0 "still loads with overrides"
-  assert_contains "$out" "$d/target|fromenv|from env|" "a variable in the environment wins over the file"
+  assert_contains "$out" "$d/a/target|fromenv|from env|" "a variable in the environment wins over the file"
 
-  sed -i '/^PROBE_DIR=/d' "$d/target/.fleet/config"
+  sed -i '/^PROBE_DIR=/d' "$d/a/target/.fleet/config"
   probe t; assert_eq "$rc" 1 "a missing required key dies"; assert_contains "$out" "PROBE_DIR" "and names it"
   probe t PROBE_DIR=probes; assert_eq "$rc" 0 "unless the environment supplies it"
+}
+
+# One fleet, many repos. `--all` walks the registry and drains each repo in
+# turn, in a fresh process per repo so nothing — config, counters, a die —
+# crosses from one to the next.
+#
+# Red when --all is not understood ("not a repo name"), or when the walk
+# stops at the first repo.
+case_87_queue_all_repos() {
+  CASE="87 run-queue.sh --all drains every registered repo"; fixture c87
+  # A second target, in its own directory, with its own origin and story 901.
+  local U="$FX/two/repo-u"
+  mkdir -p "$FX/two"
+  cp -r "$FX/origin.git" "$FX/two/origin-u.git"
+  git clone -q "$FX/two/origin-u.git" "$U"
+  git -C "$U" config user.name fleet-test; git -C "$U" config user.email fleet-test@localhost
+  sed -i "s/Story $STORY/Story 901/" "$U/.stories/$STORY.md"
+  git -C "$U" mv ".stories/$STORY.md" .stories/901.md
+  git -C "$U" commit -qam "fixture: story 901"
+  git -C "$U" push -q origin base
+  printf 'FLEET_TEST=1\n' > "$U/.env.local"
+  printf 'REPO_PATH=%s\n' "$U" > "$FLEET/repos/u.env"
+
+  QUEUE_TARGET=--all queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "exit code"
+  assert_eq "$(field status)" done "repo t: story $STORY reached a verdict"
+  assert_eq "$(frontmatter "$U/.stories/901.md" status)" done "repo u: story 901 reached a verdict"
+  assert_eq "$(calls claude)" 2 "one builder run per repo"
+  assert_grep 'repo: t' "$FX/queue.log" "the walk names each repo"
+  assert_grep 'repo: u' "$FX/queue.log" "…and the next one"
+}
+
+# Two targets under one parent directory would share ../wt-<id>: story 014
+# of one is story 014 of the other, as far as the worktree path is concerned.
+# The registry is the only place that can see both, so load_repo refuses.
+#
+# Red when the check is deleted: the second entry loads without complaint.
+case_89_shared_parent_dir_refused() {
+  CASE="89 two registered repos in one parent directory are refused"; fixture c89
+  git clone -q "$FX/origin.git" "$FX/repo-v"          # a sibling of repo/, same parent
+  printf 'REPO_PATH=%s\n' "$FX/repo-v" > "$FLEET/repos/v.env"
+  local out; out="$( cd "$FX" && bash "$FLEET/status.sh" t 2>&1 )"
+  assert_eq "$?" 1 "load_repo dies"
+  assert_contains "$out" "same parent directory" "and says why"
+  assert_contains "$out" "v" "naming the other entry"
 }
 
 # L-27. The launcher no longer runs this suite, but a developer's shell can
@@ -1746,7 +1796,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
        case_79_writers_do_not_collide case_80_status_epics
        case_81_existing_merge_preserved case_82_load_repo
-       case_88_suite_env_is_clean)
+       case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
