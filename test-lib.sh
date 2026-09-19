@@ -382,7 +382,7 @@ case_16_reviewer_dirty_tree() {
   assert_eq "$RC" 1 "exit code (die)"
   assert_eq "$(field status)" needs_human "story status"
   assert_grep 'left the tree dirty' "$LOG" "reason in output"
-  assert_grep 'fleet/prompts/rules.md' "$LOG" "names the dirty path"
+  assert_grep 'src/marker.txt' "$LOG" "names the dirty path"
 }
 
 # Phase 1.3. Red when the copy-out after codex is deleted: the mutation
@@ -463,16 +463,16 @@ scope_case() {                        # scope_case <name> <label> <deny-globs|->
   local name="$1" label="$2" deny="$3" status="$4" scope="$5"
   CASE="$label"; fixture "$name"
   [[ "$deny" == - ]] || set_deny "$deny"
-  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=fleet/prompts/rules.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=src/marker.txt FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_eq "$(field status)" "$status" "story status"
   assert_grep "^scope: +$scope" "$REPO/.review/$STORY.md" "scope line in the Machine block"
   assert_contains "$(tracked)" ".review/$STORY/round-1/scope.txt" "scope evidence committed"
-  assert_grep 'fleet/prompts/rules.md' "$REPO/.review/$STORY/round-1/scope.txt" "changed path recorded"
+  assert_grep 'src/marker.txt' "$REPO/.review/$STORY/round-1/scope.txt" "changed path recorded"
 }
-case_28_scope_violation() { scope_case c28 "28 denied file changed → VIOLATION vetoes PASS (nested glob)" 'fleet/*' needs_human 'VIOLATION fleet/prompts/rules.md'
+case_28_scope_violation() { scope_case c28 "28 denied file changed → VIOLATION vetoes PASS (nested glob)" 'src/*' needs_human 'VIOLATION src/marker.txt'
                             assert_grep '^computed: FAIL — .*scope VIOLATION' "$REPO/.review/$STORY.md" "reason enumerated"; }
 case_29_scope_undeclared() { scope_case c29 "29 no scope_deny → CLEAN, nothing forbidden" - done 'CLEAN'; }
-case_30_scope_elsewhere()  { scope_case c30 "30 deny names other files → CLEAN"           'src/* docs/*' done 'CLEAN'; }
+case_30_scope_elsewhere()  { scope_case c30 "30 deny names other files → CLEAN"           'lib/* docs/*' done 'CLEAN'; }
 
 # Found on the first real run (007, round 1). codex prints "Reading
 # additional input from stdin..." to stderr when stdin is not a TTY — every

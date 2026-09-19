@@ -13,7 +13,7 @@
 #            suite message "Transform failed …"                       (L-08)
 #
 #   FAKE_VITEST=pass | fail | notests
-#   FAKE_VITEST=marker          fail iff fleet/prompts/rules.md contains FLEET_MUTANT_MARKER
+#   FAKE_VITEST=marker          fail iff src/marker.txt contains FLEET_MUTANT_MARKER
 #                               (Phase 1.4: the fake mutation patch appends that line there)
 #   FAKE_VITEST=marker-notests  pass unmutated; once the marker exists, report zero
 #                               tests (a mutation that breaks compilation — L-08)
@@ -44,7 +44,7 @@ esac
 if [[ "$mode" == marker || "$mode" == marker-notests ]]; then
   # Only the file the fake patch targets. A tree-wide grep matched the patch
   # file itself and this script's own source, so every pre-run was PRE_RED.
-  if grep -q FLEET_MUTANT_MARKER fleet/prompts/rules.md 2>/dev/null; then
+  if grep -q FLEET_MUTANT_MARKER src/marker.txt 2>/dev/null; then
     [[ "$mode" == marker ]] && mode=fail || mode=notests
   else
     mode=pass

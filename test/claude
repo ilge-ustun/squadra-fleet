@@ -70,14 +70,14 @@ esac
 case "${FAKE_BUILDER_MUTATIONS:-none}" in
   none) : ;;
   red)   mkdir -p .review-out/mutations
-         printf '\nFLEET_MUTANT_MARKER\n' >> fleet/prompts/rules.md
-         git diff -- fleet/prompts/rules.md > .review-out/mutations/AC1-tdd-observed-red.patch
-         git checkout -q -- fleet/prompts/rules.md
+         printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
+         git diff -- src/marker.txt > .review-out/mutations/AC1-tdd-observed-red.patch
+         git checkout -q -- src/marker.txt
          printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
   green) mkdir -p .review-out/mutations
-         printf '\n# a comment the suite cannot see\n' >> fleet/prompts/rules.md
-         git diff -- fleet/prompts/rules.md > .review-out/mutations/AC1-tdd-observed-red.patch
-         git checkout -q -- fleet/prompts/rules.md
+         printf '\n# a comment the suite cannot see\n' >> src/marker.txt
+         git diff -- src/marker.txt > .review-out/mutations/AC1-tdd-observed-red.patch
+         git checkout -q -- src/marker.txt
          printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
   *) echo "fleet/test/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
 esac

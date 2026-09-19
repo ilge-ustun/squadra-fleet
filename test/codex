@@ -17,7 +17,7 @@
 #
 #   none      nothing written
 #   patch     .review-out/mutations/AC1-marker.patch + AC1-marker.test
-#             The patch appends FLEET_MUTANT_MARKER to fleet/prompts/rules.md;
+#             The patch appends FLEET_MUTANT_MARKER to src/marker.txt;
 #             fleet/test/vitest in `marker` mode fails iff that line exists.
 #             The tree is left clean (patch generated, then reverted).
 #   cmd       same patch, but AC1-marker.cmd instead of .test
@@ -50,12 +50,12 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
 marker_patch() {                      # marker_patch <ac> <ext> [keep] — write the mutation files
   local ac="$1" ext="$2" keep="${3:-}" out=.review-out/mutations
   mkdir -p "$out"
-  printf '\nFLEET_MUTANT_MARKER\n' >> fleet/prompts/rules.md
-  git diff -- fleet/prompts/rules.md > "$out/$ac-marker.patch"
-  [[ -n "$keep" ]] || git checkout -q -- fleet/prompts/rules.md
+  printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
+  git diff -- src/marker.txt > "$out/$ac-marker.patch"
+  [[ -n "$keep" ]] || git checkout -q -- src/marker.txt
   case "$ext" in
     test) printf 'fake.test.tsx\n' > "$out/$ac-marker.test" ;;
-    cmd)  printf 'grep -q FLEET_MUTANT_MARKER fleet/prompts/rules.md && exit 1 || exit 0\n' > "$out/$ac-marker.cmd" ;;
+    cmd)  printf 'grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n' > "$out/$ac-marker.cmd" ;;
   esac
 }
 
