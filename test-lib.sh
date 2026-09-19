@@ -1668,6 +1668,52 @@ case_81_existing_merge_preserved() {
 
 # ── run ──────────────────────────────────────────────────────────────────────
 
+# lib.sh, sourced alone. load_repo is where the registry meets the target's
+# config, and every refusal here is one a bot command or a typo can reach.
+#
+# Red without lib.sh, and red again when any refusal or the env-over-file
+# rule is deleted.
+case_82_load_repo() {
+  CASE="82 load_repo: registry, config, env over file"
+  local d="$TMP/c82" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/lib.sh}" out rc
+  mkdir -p "$d/repos" "$d/target/.fleet" "$d/target2"
+  git init -q "$d/target"; git init -q "$d/target2"
+  printf 'REPO_PATH=%s\n' "$d/target"  > "$d/repos/t.env"
+  printf 'REPO_PATH=%s\n' "$d/target2" > "$d/repos/noconf.env"
+  printf 'REPO_PATH=%s\n' "$d/nowhere" > "$d/repos/gone.env"
+  cat > "$d/target/.fleet/config" <<'EOF'
+BASE_BRANCH=base
+INSTALL_CMD='true'
+VITEST_CMD='fake vitest'
+BUILD_CMD=true
+LINT_CMD=true
+SEED_FILES='.env.local extra.env'
+PROBE_DIR=src
+EOF
+  probe() {                           # probe <repo-name> [VAR=value …] → out rc
+    local name="$1"; shift
+    out="$( env -i PATH="$PATH" HOME="$HOME" "$@" FLEET_REGISTRY_DIR="$d/repos" \
+            bash -c 'source "$1" && load_repo "$2" && printf "%s|%s|%s|%s|%s\n" "$REPO_ROOT" "$BASE_BRANCH" "$VITEST_CMD" "${#SEED_FILES_ARR[@]}" "${SEED_FILES_ARR[1]}"' \
+            _ "$lib" "$name" 2>&1 )"; rc=$?
+  }
+  probe t
+  assert_eq "$rc" 0 "a registered repo with a config loads"
+  assert_contains "$out" "$d/target|base|fake vitest|2|extra.env" "path, config values and the split seed list"
+
+  probe nope;   assert_eq "$rc" 1 "an unregistered name dies";   assert_contains "$out" "unknown repo 'nope'" "and says so"
+  probe '../t'; assert_eq "$rc" 1 "a path is not a repo name";   assert_contains "$out" "not a repo name" "and says so"
+  probe gone;   assert_eq "$rc" 1 "a REPO_PATH that is not a git checkout dies"
+  probe noconf; assert_eq "$rc" 1 "a target without .fleet/config dies"; assert_contains "$out" ".fleet/config" "and names the file"
+
+  probe t BASE_BRANCH=fromenv VITEST_CMD='from env'
+  assert_eq "$rc" 0 "still loads with overrides"
+  assert_contains "$out" "$d/target|fromenv|from env|" "a variable in the environment wins over the file"
+
+  sed -i '/^PROBE_DIR=/d' "$d/target/.fleet/config"
+  probe t; assert_eq "$rc" 1 "a missing required key dies"; assert_contains "$out" "PROBE_DIR" "and names it"
+  probe t PROBE_DIR=probes; assert_eq "$rc" 0 "unless the environment supplies it"
+}
+
 # L-27. The launcher no longer runs this suite, but a developer's shell can
 # still export MAX_ROUNDS=1 and reproduce it exactly: cases 4, 5, 9 and 27
 # need the two-round ceiling and would fail looking like real findings. The
@@ -1721,7 +1767,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_75_merge_epic_refuses_non_epic case_76_story_model
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
        case_79_writers_do_not_collide case_80_status_epics
-       case_81_existing_merge_preserved case_88_suite_env_is_clean)
+       case_81_existing_merge_preserved case_82_load_repo
+       case_88_suite_env_is_clean)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
