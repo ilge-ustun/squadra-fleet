@@ -16,7 +16,7 @@ Entries marked *by discipline* are a work queue, not a record.
 
 ## Carried over from the 14 Sep handoff
 
-**Enforced by:** on a lesson names the `fleet/test-lib.sh` case or function
+**Enforced by:** on a lesson names the `test-lib.sh` case or function
 that fails if the lesson is un-learned. A lesson without the field is making no
 such claim — it is advice, and says so by its absence. `case_72` checks that
 every name here still exists, so a lesson cannot go on claiming an instrument
@@ -138,7 +138,7 @@ stating the number.
 `docs/fleet/004-diagnosis.md` still asserting the refuted lease theory.
 
 ### L-12 — a harness fix living only in a working copy
-The L-05 fix sat uncommitted in `fleet/launch.sh` for a day. One
+The L-05 fix sat uncommitted in `launch.sh` for a day. One
 `git checkout .` from losing it, with no record it had ever been solved.
 **Lesson:** the state design is "durability lives in git". The launcher is
 the file most likely to violate it, because it is edited by hand under
@@ -155,14 +155,14 @@ is recorded nowhere. If a prompt change moves the verdict into frontmatter
 or emits one per round, the grep silently misses, `REVIEW_TEXT` stays
 empty, and L-05 returns *looking fixed*.
 **Prevention:** by discipline. Strongest argument yet for moving prompts to
-`fleet/prompts/*.md` — the coupling becomes reviewable in one diff.
+`prompts/*.md` — the coupling becomes reviewable in one diff.
 
 ---
 
 ## Found while building the verdict runner (17 Sep, evening)
 
 ### L-14 — a fake that does not shadow the real binary is the real binary
-`fleet/test-lib.sh`'s first run named its stand-ins `fake-claude` and
+`test-lib.sh`'s first run named its stand-ins `fake-claude` and
 `fake-codex`. The launcher calls `claude` and `codex` by bare name, so the
 *real* Claude Code started with the fixture story, ran the test script
 itself, and recursed three deep on real quota before being killed by
@@ -185,7 +185,7 @@ verdict computation only if it computes something.
 **Prevention:** by construction — the reviewer hands mutations to the
 harness as files; the harness applies, runs, classifies, and vetoes a PASS
 on any surviving mutation, any uncovered AC, or a red baseline
-(`fleet/prompts/README.md`, "The verdict contract").
+(`prompts/README.md`, "The verdict contract").
 
 ### L-16 — evidence lived in /tmp, at a path the reviewer chose each run
 Four stories, four naming schemes. `.review/004.md` round 1 cites five
@@ -216,7 +216,7 @@ path that will be taken when least expected.
 **Prevention:** by construction — stderr captured as evidence
 (`reviewer.stderr`), never merged; extraction skips non-JSON lines and takes
 only `agent_message` items; an empty extraction is recorded, not papered
-over. `fleet/test/codex` emits the notice on every run.
+over. `test/codex` emits the notice on every run.
 
 **Enforced by:** `case_31_codex_stderr_notice`
 
@@ -233,7 +233,7 @@ symptom — empty output, blank `is_error` — looked like the builder said
 nothing, when the builder was never started.
 **Prevention:** by construction — prompts go to both agents on stdin
 (`printf '%s' … | claude -p`, `… | codex exec`), which is also codex's
-intended mode and removes the L-17 notice at its root. `fleet/test-lib.sh`
+intended mode and removes the L-17 notice at its root. `test-lib.sh`
 case 32 grows a review past the limit on a rerun and asserts the builder
 still receives it.
 
@@ -253,7 +253,7 @@ nobody reads. State that is "in git" is only in the branch it is in.
 **Prevention:** by construction — `sync_story` copies the base story into
 the builder worktree and commits it there as the launcher's own commit
 before the round's start SHA (so it is never the builder's work), which
-the reviewer's detached tree inherits. `fleet/test-lib.sh` case 33.
+the reviewer's detached tree inherits. `test-lib.sh` case 33.
 
 ## Found by running two stories back to back (18 Sep)
 
@@ -299,7 +299,7 @@ cost a full builder round and put unrelated changes in the branch.
 **Lesson:** `needs_human` exists so a human can change the story. The harness
 must then be able to re-judge the same head against the new story.
 **Prevention:** by construction — `REVIEW_ONLY=1` skips the builder and the
-postcondition, and nothing else; `fleet/test-lib.sh` case 34. Used on 008
+postcondition, and nothing else; `test-lib.sh` case 34. Used on 008
 round 3, which is the run that passed.
 
 ## Found by story 010 — the first production-code story after Phase 3
@@ -337,7 +337,7 @@ produce anything the harness can judge", and commits had been the only
 possible answer.
 **Prevention:** by construction — the check also stands down when the builder
 handed evidence over, which the runner judges exactly as the reviewer judges
-commits. Nothing at all is still a die; `fleet/test-lib.sh` case 2 is
+commits. Nothing at all is still a die; `test-lib.sh` case 2 is
 unchanged and case 37 covers the new path.
 
 **Enforced by:** `case_37_evidence_only_round`
@@ -375,14 +375,14 @@ at the strength you intend to instrument, no stronger. A stronger claim is not
 a safer one — it is more surface for a mutation to land on, and every extra
 inch of it must be tested or it becomes a finding. "Byte-identical" invited a
 byte-level probe the test never meant to cover.
-**Prevention:** by discipline, with a nudge — `fleet/lint-story.sh` warns on an
+**Prevention:** by discipline, with a nudge — `lint-story.sh` warns on an
 unquantified every/all/any but cannot judge whether a claim exceeds its
 instrument. The writing prompt now says it; nothing enforces it.
 
 ### L-26 — the harness verifies the app, not itself
 The baseline is `npm test`, `npm run build`, `npm run lint`. All three exercise
-the application. **Nothing in the baseline touches `fleet/`.** So story 014 —
-which changed `fleet/run-queue.sh` and `fleet/test-lib.sh` — passed a green
+the application. **Nothing in the baseline touches ``.** So story 014 —
+which changed `run-queue.sh` and `test-lib.sh` — passed a green
 baseline that proved nothing about it, and its only real verification was the
 reviewer's mutations plus a human running `test-lib` by hand afterwards.
 Worse, `test-lib.sh` itself was writable by the builder: a quietly weakened
@@ -392,8 +392,8 @@ the diff was purely additive — but nothing prevented it.
 `launch.sh` was protected by `scope_deny`, so the judge was never the judged;
 that part was right. The baseline was the hole.
 **Prevention:** closed by construction, 18 Sep. `run_baseline` runs
-`SELF_TEST_CMD` (default `bash fleet/test-lib.sh`) whenever the round's changed
-paths include `fleet/`, and a RED result vetoes like any other baseline
+`SELF_TEST_CMD` (default `bash test-lib.sh`) whenever the round's changed
+paths include ``, and a RED result vetoes like any other baseline
 failure. It reports SKIPPED rather than GREEN when it does not run: a check
 that did not run must not read as a check that passed. Cases 46 and 47.
 **What it still does not cover:** the suite is only as good as its cases, and
@@ -411,7 +411,7 @@ there). No case enforces this any more.
 
 Story 014's round three was started with `MAX_ROUNDS=1`, because it needed
 exactly one more round. The baseline's new self-test step ran
-`bash fleet/test-lib.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
+`bash test-lib.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
 the environment, so the suite's own fixtures inherited it. Cases 4, 5, 9 and
 27 exist to check what happens across *two* rounds; with the ceiling at one
 they failed. 230 passed, 14 failed, and the machine vetoed a story whose

@@ -671,7 +671,7 @@ case_37_evidence_only_round() {
 
 # Epics. A story declares the branch it is cut from, so one queue can serve
 # several epics at once (epic/offline-pwa, epic/search, …) while the fleet's
-# own state — .stories, .review, fleet/, docs/fleet — stays on the
+# own state — .stories, .review — stays on the
 # integration branch the launcher is checked out on. BASE_BRANCH remains the
 # default for a story that names none. Red when the story's base: is ignored
 # and the worktree is cut from BASE_BRANCH instead.
@@ -964,7 +964,7 @@ reset_run() {                         # reset_run <args…> → RLOG RRC
   RRC=$?
 }
 
-# Red without fleet/reset.sh, and red again if any one of the four steps is
+# Red without reset.sh, and red again if any one of the four steps is
 # dropped from it.
 case_52_reset() {
   CASE="52 reset clears a story back to the queue"; fixture c52
@@ -1072,7 +1072,7 @@ merge_epic() {                        # merge_epic <log> [VAR=value…] → exit
 
 epic_head() { git -C "$REPO" rev-parse "origin/epic/test"; }
 
-# Red without fleet/merge.sh, and red again if the push or the frontmatter
+# Red without merge.sh, and red again if the push or the frontmatter
 # record is dropped: a merge nobody can see, or one that cannot be reverted.
 case_56_merge() {
   CASE="56 a computed PASS merges into its epic"; epic_story c56
@@ -1126,7 +1126,7 @@ case_59_merge_refuses_integration_branch() {
 }
 
 # Phase D. The bot is both halves of the control plane: how the fleet reaches
-# a human and how the human reaches back. fleet/test/curl shadows curl, so no
+# a human and how the human reaches back. test/curl shadows curl, so no
 # case here touches the network.
 
 bot() {                               # bot <verb> [args…] → BLOG BRC
@@ -1525,7 +1525,7 @@ case_80_status_epics() {
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
 }
 
-# AC1. Red when the refresh call is deleted from fleet/run-queue.sh: the
+# AC1. Red when the refresh call is deleted from run-queue.sh: the
 # checkout never learns the story is ready and the queue reports nothing ready.
 # Also red when the refresh is replaced with `git pull --ff-only` (refused on
 # divergence) or with `git reset --hard` (pre-run HEAD is no longer ancestor).
@@ -1573,7 +1573,7 @@ case_44_refresh_fail() {
     && ok || fail "AC2: 'refresh failed' line does not say 'continuing on local state'"
 }
 
-# AC3. Red when fleet/run-queue.sh leaves a conflicted merge in place (abort
+# AC3. Red when run-queue.sh leaves a conflicted merge in place (abort
 # deleted), when -X theirs resolves it silently (no warning, conflict-file
 # gets origin's version), or when the uncommitted edit is lost.
 case_45_conflict_leaves_local_work() {
@@ -1621,7 +1621,7 @@ case_45_conflict_leaves_local_work() {
   assert_eq "$(field status)" done "AC3: story reached done"
 }
 
-# P1 guard. Red when the MERGE_HEAD guard is removed from fleet/run-queue.sh:
+# P1 guard. Red when the MERGE_HEAD guard is removed from run-queue.sh:
 # the in-progress merge is aborted and the staged resolution is lost.
 # Uses --max 0 so commit_status never runs and MERGE_HEAD stays set.
 case_81_existing_merge_preserved() {
