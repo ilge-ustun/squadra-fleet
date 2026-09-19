@@ -10,7 +10,7 @@ Rules that override anything you infer:
                            round ends on, so a patch written earlier will not
                            apply and proves nothing. Never hand-author one.
     ACn-tdd-<slug>.test    ONE line: the vitest selector that must then go red,
-                           e.g.  src/__tests__/foo.test.ts -t "AC1"
+                           e.g.  path/to/foo.test.ts -t "AC1"
   The harness applies each patch in a clean tree and runs the selector. A patch
   whose selector stays green means the test never proved what you said it
   proved, and the story fails whatever your summary claims. Leave the tree
@@ -18,7 +18,7 @@ Rules that override anything you infer:
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
 - One task, one commit.
-- Do not run deploy commands, firebase commands, or anything that writes to Firestore.
+{{REPO_RULES}}
 - If a decision is needed that the story does not answer, write .blocked/{{STORY_ID}}.md
   with the question, each option and its cost, and your recommendation. Then stop.
   Do not guess.

@@ -20,11 +20,17 @@ render_prompt() {
   out="${out//\{\{HEAD_SHA\}\}/${HEAD_SHA:-}}"
   out="${out//\{\{BASE_SHA\}\}/${BASE_SHA:-}}"
   out="${out//\{\{ROUND\}\}/${ROUND:-}}"
+  # The target's facts (lib.sh: load_repo). REPO_RULES_TEXT may be empty — a
+  # target need not add rules — so it is substituted but not guarded below.
+  out="${out//\{\{REPO_RULES\}\}/${REPO_RULES_TEXT:-}}"
+  out="${out//\{\{VITEST_CMD\}\}/${VITEST_CMD:-}}"
+  out="${out//\{\{BUILD_CMD\}\}/${BUILD_CMD:-}}"
+  out="${out//\{\{LINT_CMD\}\}/${LINT_CMD:-}}"
 
   # A placeholder the file uses but whose variable is empty substitutes to
   # nothing and reaches the agent as a gap, not an error. Name it.
   local p v
-  for p in STORY_ID RULES REVIEW_TEXT STORY_TEXT INTENT STORY_BASE HEAD_SHA BASE_SHA ROUND; do
+  for p in STORY_ID RULES REVIEW_TEXT STORY_TEXT INTENT STORY_BASE HEAD_SHA BASE_SHA ROUND VITEST_CMD BUILD_CMD LINT_CMD; do
     [[ "$src" == *"{{$p}}"* ]] || continue
     v="${!p:-}"
     [[ -n "$v" ]] || die "$1 uses {{$p}} but $p is empty"

@@ -367,6 +367,21 @@ case_10_render_prompt() {
             source "$render"; render_prompt b.md ) 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "unknown placeholder does not die"
   assert_contains "$out" "unsubstituted in b.md: {{NOPE}}" "unknown placeholder is named"
+
+  # The target's optional rules may be empty; the target's commands may not.
+  printf 'rules {{REPO_RULES}} end\n' > "$pd/c.md"
+  printf 'run {{VITEST_CMD}}\n'       > "$pd/d.md"
+  out="$( ( PROMPTS_DIR="$pd"; REPO_RULES_TEXT=""
+            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
+            source "$render"; render_prompt c.md ) 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "an empty REPO_RULES is legal"
+  assert_not_contains "$out" "unsubstituted" "and is substituted, not left as a gap"
+  assert_contains "$out" "rules  end" "to nothing"
+  out="$( ( PROMPTS_DIR="$pd"; VITEST_CMD=""
+            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
+            source "$render"; render_prompt d.md ) 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "an empty VITEST_CMD dies"
+  assert_contains "$out" "d.md uses {{VITEST_CMD}} but VITEST_CMD is empty" "and is named"
 }
 
 # Phase 1.1. Red when the AC-extraction block before the builder is deleted:
@@ -1759,6 +1774,32 @@ case_86_probe_dir() {
   assert_grep 'nowhere' "$LOG" "naming the directory"
 }
 
+# The prompts used to name khaita's stack: "Run: npm test, npm run build,
+# npm run lint" while the harness ran $VITEST_CMD/$BUILD_CMD/$LINT_CMD, and a
+# "no firebase" rule for every target. The commands now come from the
+# target's config, and a target may add its own rules through REPO_RULES.
+#
+# Red while review.md says npm (84), while rules.md has no {{REPO_RULES}}
+# (84b), and when render_prompt starts refusing an empty REPO_RULES (84c).
+case_84_prompts_carry_the_targets_facts() {
+  CASE="84 the reviewer is told the target's commands, not npm's"; fixture c84
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep "Run: $FLEET/test/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
+  assert_not_grep 'npm test' "$TRACE/codex-prompt-1" "and not khaita's"
+
+  CASE="84b REPO_RULES reaches the builder through the rules"; fixture c84b
+  printf -- '- Never touch the SENTINEL_RULE_9f3 subsystem.\n' > "$REPO/.fleet/rules.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 REPO_RULES=.fleet/rules.md
+  assert_grep 'SENTINEL_RULE_9f3' "$TRACE/claude-prompt-1" "the target's rule is in the builder prompt"
+  assert_not_grep 'firebase' "$TRACE/claude-prompt-1" "khaita's rule is not"
+
+  CASE="84c a target without REPO_RULES renders without a gap"; fixture c84c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "the round completes"
+  assert_not_grep '{{REPO_RULES}}' "$TRACE/claude-prompt-1" "no leftover placeholder"
+  assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
+}
+
 # One fleet, many repos. `--all` walks the registry and drains each repo in
 # turn, in a fresh process per repo so nothing — config, counters, a die —
 # crosses from one to the next.
@@ -1858,7 +1899,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
        case_79_writers_do_not_collide case_80_status_epics
        case_81_existing_merge_preserved case_82_load_repo
-       case_83_scope_fleet_config case_85_seed_files_from_config case_86_probe_dir
+       case_83_scope_fleet_config case_84_prompts_carry_the_targets_facts
+       case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused)
 
 for c in "${CASES[@]}"; do

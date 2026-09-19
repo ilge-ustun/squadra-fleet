@@ -509,6 +509,15 @@ log "base ${BASE_SHA:0:8}"
 # Embedding closes both: nothing to sync, nothing to conflict.
 STORY_TEXT="$(cat "$STORY_FILE")"
 
+# A target may add rules of its own — khaita's "no firebase commands" — as a
+# markdown snippet named by REPO_RULES in its .fleet/config, rendered into
+# rules.md as {{REPO_RULES}}. Read from the checkout, not the worktree: the
+# rules are the target's, not the branch's. Empty is legal; unreadable is not.
+REPO_RULES_TEXT=""
+if [[ -n "${REPO_RULES:-}" ]]; then
+  REPO_RULES_TEXT="$(cat "$REPO_ROOT/$REPO_RULES")" || die "REPO_RULES $REPO_RULES is not readable in $REPO_ROOT"
+fi
+
 RULES="$(render_prompt rules.md)"
 
 # ── review rounds ────────────────────────────────────────────────────────────

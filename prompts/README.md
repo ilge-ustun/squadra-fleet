@@ -1,7 +1,7 @@
 # Prompts
 
 Bodies for the builder and reviewer, rendered by `render_prompt()` in
-`fleet/render.sh` and sourced by `launch.sh`.
+`render.sh` and sourced by `launch.sh`.
 
 Values are referenced as `{{NAME}}`, never `$NAME`, so these files are inert
 text: nothing expands by accident and a prompt file cannot inject shell.
@@ -41,7 +41,7 @@ other:
 1. `launch.sh` greps `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$` on the
    reviewer's text — on **any** line, not only the last, although `review.md`
    asks for the last. Recorded here rather than tightened; a change needs a
-   `fleet/test-lib.sh` case first.
+   `test-lib.sh` case first.
 2. it writes `verdict: <computed>` — lowercase — as line 3 of `.review/<id>.md`
 3. on restart, `launch.sh` greps `^verdict: (FAIL|UNPARSEABLE|SPEC)` there to
    decide whether the builder resumes from the findings
@@ -88,5 +88,5 @@ nothing, or a shell command in a `.test` file), `PATCH_INVALID`,
 Round 2's `{{REVIEW_TEXT}}` is the review file so far — Machine blocks and
 prose — the same content a restart reloads from disk. One path.
 
-`fleet/test-lib.sh` exercises all of this with fake agents; every case names
+`test-lib.sh` exercises all of this with fake agents; every case names
 the `launch.sh` block whose deletion turns it red.

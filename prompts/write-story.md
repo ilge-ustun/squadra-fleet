@@ -16,9 +16,9 @@ on. Read the code before you write a word about it.
 The request above is a report, not a diagnosis. Find the code it refers to and
 confirm the symptom is real **in the files as they are now**. If it is already
 fixed, or the cause is something else, say so in the story rather than writing
-a spec for a problem that does not exist — a previous story in this repo
-(`004`) was written on a premise that had stopped being true and cost two
-agent rounds before anyone noticed.
+a spec for a problem that does not exist — stories in this fleet have been
+written on a premise that had stopped being true, and each cost agent rounds
+before anyone noticed.
 
 If what you find is materially different from what was asked for, write the
 story about what is actually there and state the discrepancy plainly under
@@ -34,7 +34,7 @@ Out of scope. Frontmatter: `status: draft` (always — a human promotes it to
 ## The four things that have actually cost this fleet rounds
 
 **1. An unbounded domain.** Every acceptance criterion must range over a set
-you name. "Every stub in the worker global" cost story 008 two rounds, because
+you name. "Every stub in the worker global" cost a story two rounds, because
 the reviewer correctly read it literally and probed handlers the story never
 meant to cover. Write "every stub the fetch, install and activate handlers
 call" instead. An unquantified *every*, *all* or *any* is a scope declaration
@@ -76,7 +76,7 @@ story for it.
   question under Evidence, so the human answers it before the story is
   promoted.
 - Keep it narrow. A story with five criteria spanning a whole file took eight
-  rounds here; one with two bounded criteria passed first time.
+  rounds; one with two bounded criteria passed first time.
 
 Write the file. Do not implement anything, do not touch any other file, and
 do not commit.
