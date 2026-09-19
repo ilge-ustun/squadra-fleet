@@ -1,6 +1,6 @@
 [Unit]
-Description=Khaita fleet — read and answer Telegram commands
-Documentation=file:///home/fleet/work/khaita/khaita-app/fleet/systemd/README.md
+Description=fleet — read and answer Telegram commands
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
 After=network-online.target
 
 [Service]
@@ -9,14 +9,14 @@ Type=oneshot
 # oneshot again: while a poll is running the timer's next firing is skipped
 # rather than queued, so two pollers can never read the same update.
 
-WorkingDirectory=/home/fleet/work/khaita/khaita-app
+WorkingDirectory=/home/fleet/work/fleet
 
 # jq, git and curl are all this needs; claude and codex are not on the path of
 # a poll. Kept identical to fleet-queue.service so there is one PATH to fix.
 Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/fleet
 
-ExecStart=/bin/bash /home/fleet/work/khaita/khaita-app/fleet/telegram.sh poll
+ExecStart=/bin/bash /home/fleet/work/fleet/telegram.sh poll
 
 # A poll is one HTTPS request and a handful of git commands. If it has not
 # finished in two minutes something is wrong, and the next firing will retry.

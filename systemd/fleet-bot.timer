@@ -1,6 +1,6 @@
 [Unit]
-Description=Khaita fleet — look for Telegram commands every minute
-Documentation=file:///home/fleet/work/khaita/khaita-app/fleet/systemd/README.md
+Description=fleet — look for Telegram commands every minute
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
 
 [Timer]
 # A minute is the delay between typing /status on a phone and getting the
