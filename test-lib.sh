@@ -1697,6 +1697,68 @@ EOF
   probe t PROBE_DIR=probes; assert_eq "$rc" 0 "unless the environment supplies it"
 }
 
+# The harness sources <target>/.fleet/config. A builder that can change it on
+# a story branch can change what the harness runs, so it is denied whether or
+# not the story names it — the mirror image of the always-allowed .blocked/.
+# And nothing of the harness's own is allow-listed any more: docs/fleet/ was a
+# khaita convention, not a rule.
+#
+# Red when the .fleet/ check is deleted (83) or the docs/fleet allowance is
+# restored (83b).
+case_83_scope_fleet_config() {
+  CASE="83 .fleet/* is denied whatever the story says"; fixture c83
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=.fleet/config FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep '^scope: +VIOLATION \.fleet/config' "$REPO/.review/$STORY.md" "the config is named"
+
+  CASE="83b docs/fleet/<id>-*.md is an ordinary path now"; fixture c83b
+  mkdir -p "$REPO/docs/fleet"; printf 'notes\n' > "$REPO/docs/fleet/$STORY-notes.md"
+  git -C "$REPO" add docs; git -C "$REPO" commit -qm "fixture: a docs file"; git -C "$REPO" push -q origin base
+  set_deny 'docs/*'
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH="docs/fleet/$STORY-notes.md" FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep "^scope: +VIOLATION docs/fleet/$STORY-notes.md" "$REPO/.review/$STORY.md" "no allowance for a docs path"
+}
+
+# Which files a fresh worktree must be given is the target's knowledge
+# (khaita: .env.local, or the app talks to projects/undefined — story 002),
+# so it comes from .fleet/config, and a target may have none.
+#
+# Red while SEED_FILES is a hardcoded array in the launcher: extra.env is
+# never looked for (85), and .env.local is demanded of a target that has no
+# seed files at all (85b).
+case_85_seed_files_from_config() {
+  CASE="85 the seed list is the target's, not the harness's"; fixture c85
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 SEED_FILES='.env.local extra.env'
+  assert_eq "$RC" 1 "a seed file the target names and does not have stops the run"
+  assert_grep 'extra.env is missing' "$LOG" "and it is named"
+
+  CASE="85b an empty seed list is legal"; fixture c85b
+  rm -f "$REPO/.env.local"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 SEED_FILES=
+  assert_eq "$(field status)" done "nothing to seed, nothing to miss"
+}
+
+# A probe must land inside the target's test include glob or it collects no
+# tests; where that is (khaita: src/__tests__) is the target's knowledge.
+#
+# Red while the destination is hardcoded (86), and when the launcher copies
+# into a directory that is not there — cp fails, nothing notices, the probe
+# silently never runs (86b).
+case_86_probe_dir() {
+  CASE="86 a probe lands in the target's PROBE_DIR"; fixture c86
+  mkdir -p "$REPO/lib"; printf 'x\n' > "$REPO/lib/.keep"
+  git -C "$REPO" add lib; git -C "$REPO" commit -qm "fixture: lib/"; git -C "$REPO" push -q origin base
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1 PROBE_DIR=lib
+  assert_eq "$(field status)" done "precondition: the round completes"
+  assert_grep 'vitest lib/fleet-probe-probe-green.test.tsx' "$TRACE/calls" "the selector is under PROBE_DIR"
+
+  CASE="86b a PROBE_DIR the worktree does not have stops the run"; fixture c86b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1 PROBE_DIR=nowhere
+  assert_eq "$RC" 1 "die"
+  assert_grep 'nowhere' "$LOG" "naming the directory"
+}
+
 # One fleet, many repos. `--all` walks the registry and drains each repo in
 # turn, in a fresh process per repo so nothing — config, counters, a die —
 # crosses from one to the next.
@@ -1796,6 +1858,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
        case_79_writers_do_not_collide case_80_status_epics
        case_81_existing_merge_preserved case_82_load_repo
+       case_83_scope_fleet_config case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused)
 
 for c in "${CASES[@]}"; do

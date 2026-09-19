@@ -249,7 +249,8 @@ run_mutations() {                     # run_mutations <wt> <evidence-dir> → MU
 # builder's correct move when it needs a denied file is .blocked/, which
 # build-round2.md already says and this now enforces. Two paths the rules
 # themselves require are always allowed, so a broad deny cannot punish a
-# builder for following RULES.
+# builder for following RULES — and one is always denied: the harness sources
+# .fleet/config, so a builder that could change it could change what runs.
 
 check_scope() {                       # check_scope <evidence-dir> → SCOPE SCOPE_HITS
   local ev="$1" deny changed f g   # changed: CHANGED_PATHS, computed once before the baseline
@@ -262,15 +263,14 @@ check_scope() {                       # check_scope <evidence-dir> → SCOPE SCO
   # right-hand side is a pattern, not a path.
   set -f; read -ra globs <<< "$deny"; set +f
   SCOPE_HITS=""
-  if (( ${#globs[@]} )); then
-    while read -r f; do
-      [[ -n "$f" ]] || continue
-      [[ "$f" == ".blocked/$STORY_ID.md" || "$f" == ".stories/$STORY_ID.md" || "$f" == docs/fleet/$STORY_ID-*.md ]] && continue
-      for g in "${globs[@]}"; do
-        [[ "$f" == $g ]] && { SCOPE_HITS+="$f "; break; }
-      done
-    done <<< "$changed"
-  fi
+  while read -r f; do
+    [[ -n "$f" ]] || continue
+    [[ "$f" == ".blocked/$STORY_ID.md" || "$f" == ".stories/$STORY_ID.md" ]] && continue
+    [[ "$f" == .fleet/* ]] && { SCOPE_HITS+="$f "; continue; }
+    for g in "${globs[@]}"; do
+      [[ "$f" == $g ]] && { SCOPE_HITS+="$f "; break; }
+    done
+  done <<< "$changed"
   [[ -n "$SCOPE_HITS" ]] && SCOPE=VIOLATION || SCOPE=CLEAN
   {
     echo "deny:    ${deny:-<none>}"
