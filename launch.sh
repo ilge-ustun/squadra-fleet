@@ -67,11 +67,6 @@ ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
 REVIEW_ONLY="${REVIEW_ONLY:-0}"      # 1 = re-review the head, run no builder
 
-# Untracked runtime config a fresh worktree does not inherit.
-# Story 002: without .env.local everything builds and tests green while the app
-# talks to projects/undefined. No instrument in the suite catches that.
-SEED_FILES=(.env.local)
-
 # render_prompt() — needs die/warn and PROMPTS_DIR from lib.sh.
 source "$FLEET_HOME/render.sh" || die "cannot source render.sh"
 
@@ -378,9 +373,13 @@ next_ready() {
   echo ""
 }
 
+# Untracked runtime config a fresh worktree does not inherit — which files is
+# the target's knowledge, SEED_FILES in its .fleet/config. Story 002: without
+# .env.local khaita builds and tests green while talking to projects/undefined,
+# and no instrument in its suite catches that.
 seed_env() {
   local target="$1" f
-  for f in "${SEED_FILES[@]}"; do
+  for f in "${SEED_FILES_ARR[@]}"; do
     if [[ -f "$REPO_ROOT/$f" ]]; then
       cp "$REPO_ROOT/$f" "$target/$f"
     else

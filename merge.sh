@@ -33,9 +33,8 @@ set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
 [[ $# -ge 2 ]] || die "usage: merge.sh <repo> <id> | <repo> --epic <epic/name>"
-load_repo "$1"; shift          # REPO_ROOT, BASE_BRANCH and the commands come from the target
+load_repo "$1"; shift          # REPO_ROOT, BASE_BRANCH, the commands and SEED_FILES come from the target
 PUSH_STATUS="${PUSH_STATUS:-1}"
-SEED_FILES=(.env.local)
 
 MODE=story; ID="${1:-}"
 if [[ "$ID" == --epic ]]; then
@@ -116,7 +115,7 @@ fi
 # collects zero tests is not green (L-08). Duplicated rather than sourced —
 # launch.sh runs its main body on source — and it is the same eleven lines.
 
-for f in "${SEED_FILES[@]}"; do
+for f in "${SEED_FILES_ARR[@]}"; do
   [[ -f "$REPO_ROOT/$f" ]] && cp "$REPO_ROOT/$f" "$MWT/$f"
 done
 mkdir -p "$REPO_ROOT/.runs"
