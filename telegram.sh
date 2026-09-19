@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# fleet/telegram.sh send "<text>"
-# fleet/telegram.sh poll
+# telegram.sh send "<text>"
+# telegram.sh poll
 #
 # The fleet's way of reaching a human, and the human's way of reaching back.
 #
@@ -10,10 +10,9 @@
 # the systemd timer that already polls the story queue: no inbound port, no
 # certificate, nothing new to secure.
 #
-# Configuration lives in .env.fleet at the repo root — NOT in .env.local.
-# .env.local is in the launcher's SEED_FILES and is copied into every builder
-# and reviewer worktree, so a token there is a token handed to every agent.
-# .env.fleet is gitignored by the existing .env* rule and is read only here.
+# Configuration lives in .env.fleet at the FLEET repo root (gitignored there),
+# never in a target: a target's seed files are copied into every builder and
+# reviewer worktree, so a token there is a token handed to every agent.
 #
 #   TELEGRAM_BOT_TOKEN=123456:AA…      from @BotFather
 #   TELEGRAM_CHAT_ID=987654321         your own numeric id
@@ -29,17 +28,14 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-OFFSET_FILE="$REPO_ROOT/.bot-offset"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+LOG_TAG=bot
+OFFSET_FILE="$FLEET_HOME/.bot-offset"
 QUEUE_START_CMD="${QUEUE_START_CMD:-systemctl --user start fleet-queue.service}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-20}"
 
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> [bot] %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! [bot] %s%s\n'  "$YLW" "$1" "$RST"; }
-
-if [[ -z "${TELEGRAM_BOT_TOKEN:-}" && -f "$REPO_ROOT/.env.fleet" ]]; then
-  set -a; . "$REPO_ROOT/.env.fleet"; set +a
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" && -f "$FLEET_HOME/.env.fleet" ]]; then
+  set -a; . "$FLEET_HOME/.env.fleet"; set +a
 fi
 
 configured() { [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; }
@@ -59,16 +55,17 @@ send() {                              # send <text>
 
 # ── in ───────────────────────────────────────────────────────────────────────
 #
-# Commands are a fixed set with no grammar: the first word selects a handler
-# and each handler parses its own arguments. No part of a message ever reaches
-# a shell. A story id must look like one before it is used as a path.
+# Commands are a fixed set with no grammar: the first word selects a handler,
+# the second names the repo (load_repo refuses anything that is not a plain
+# name), and each handler parses its own arguments. No part of a message ever
+# reaches a shell. A story id must look like one before it is used as a path.
 
 story_ok() { [[ "$1" =~ ^[0-9]{3}$ && -f "$REPO_ROOT/.stories/$1.md" ]]; }
 
 # The launcher commits in this same checkout on its own schedule. Two writers,
 # one index: the loser gets "Unable to create .git/index.lock", and since a
 # failed status commit is a die, the loser is a dead round. Every writer takes
-# the same advisory lock first — fleet/launch.sh does the same in
+# the same advisory lock first — launch.sh does the same in
 # commit_status.
 with_lock() {                         # with_lock <command…>
   exec 9>"$REPO_ROOT/.git/fleet.lock"
@@ -79,7 +76,7 @@ with_lock() {                         # with_lock <command…>
   return $rc
 }
 
-cmd_status() { ( cd "$REPO_ROOT" && bash fleet/status.sh ) | sed 's/\x1b\[[0-9;]*m//g'; }
+cmd_status() { bash "$FLEET_HOME/status.sh" "$REPO_NAME" | sed 's/\x1b\[[0-9;]*m//g'; }
 
 cmd_why() {                           # cmd_why <id>
   local id="$1"
@@ -121,7 +118,7 @@ cmd_revert() {                        # cmd_revert <id>
   local id="$1"
   story_ok "$id" || { echo "no such story: $id"; return; }
   # The script owns every refusal; this only reports what it said.
-  if ( cd "$REPO_ROOT" && bash fleet/revert.sh "$id" ) 2>&1 | sed 's/\x1b\[[0-9;]*m//g'; then
+  if bash "$FLEET_HOME/revert.sh" "$REPO_NAME" "$id" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'; then
     echo "$id reverted"
   else
     echo "$id was not reverted — see the output above"
@@ -133,16 +130,23 @@ cmd_run() {
 }
 
 dispatch() {                          # dispatch <text> → reply on stdout
-  local text="$1" verb arg rest
-  read -r verb arg rest <<< "$text"
+  local text="$1" verb repo arg rest
+  read -r verb repo arg rest <<< "$text"
+  case "$verb" in
+    /run) cmd_run; return ;;
+    /status|/why|/promote|/answer|/revert) : ;;
+    *) printf '%s\n' "/status <repo>  /why <repo> <id>  /promote <repo> <id>  /answer <repo> <id> <text>  /revert <repo> <id>  /run"; return ;;
+  esac
+  # dispatch runs inside a command substitution, so a die here — an unknown
+  # repo, a name that is not a name — ends only this command and its message
+  # is the reply. The poll loop never dies.
+  load_repo "${repo:-}"
   case "$verb" in
     /status)  cmd_status ;;
     /why)     cmd_why "${arg:-}" ;;
     /promote) with_lock cmd_promote "${arg:-}" ;;
-    /answer)  [[ -n "${rest:-}" ]] && with_lock cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <id> <text>" ;;
+    /answer)  [[ -n "${rest:-}" ]] && with_lock cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <repo> <id> <text>" ;;
     /revert)  with_lock cmd_revert "${arg:-}" ;;
-    /run)     cmd_run ;;
-    *)        printf '%s\n' "/status  /why <id>  /promote <id>  /answer <id> <text>  /revert <id>  /run" ;;
   esac
 }
 
@@ -175,13 +179,13 @@ poll() {
       continue
     fi
     log "command: ${text%%$'\n'*}"
-    reply="$(dispatch "$text")"
+    reply="$(dispatch "$text" 2>&1)"
     send "${reply:-(no output)}"
   done
 }
 
 case "${1:-}" in
-  send) shift; [[ $# -ge 1 ]] || { echo "usage: fleet/telegram.sh send <text>" >&2; exit 2; }; send "$*" ;;
+  send) shift; [[ $# -ge 1 ]] || { echo "usage: telegram.sh send <text>" >&2; exit 2; }; send "$*" ;;
   poll) poll ;;
-  *)    echo "usage: fleet/telegram.sh {send <text>|poll}" >&2; exit 2 ;;
+  *)    echo "usage: telegram.sh {send <text>|poll}" >&2; exit 2 ;;
 esac

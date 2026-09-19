@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# fleet/write-story.sh <story-id> "<what you want>" [--base epic/<name>]
+# write-story.sh <repo> <story-id> "<what you want>" [--base epic/<name>]
 #
-#   ./fleet/write-story.sh 011 "the dark-theme toggle shows a sun, should be a moon" --base epic/ui-polish
+#   write-story.sh khaita 011 "the dark-theme toggle shows a sun, should be a moon" --base epic/ui-polish
 #
 # Turns an intent into a story the fleet can act on. One agent, read-only over
 # the epic's code, writes .stories/<id>.md at `status: draft`; the story is
@@ -20,23 +20,19 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+USAGE='usage: write-story.sh <repo> <story-id> "<what you want>" [--base epic/<name>]'
+[[ $# -ge 1 ]] || die "$USAGE"
+load_repo "$1"; shift
 STORY_MODEL="${STORY_MODEL:-claude-opus-5}"   # the highest-judgment job in the loop
 MAX_TURNS="${MAX_TURNS:-60}"
 ALLOWED_TOOLS="Read,Grep,Glob,Bash,Write"
-PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
-die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
-
-source "$REPO_ROOT/fleet/render.sh" || die "cannot source fleet/render.sh"
+source "$FLEET_HOME/render.sh" || die "cannot source render.sh"
 command -v claude >/dev/null || die "claude not on PATH"
 
 STORY_ID="${1:-}"; INTENT="${2:-}"
-[[ -n "$STORY_ID" && -n "$INTENT" ]] || die "usage: fleet/write-story.sh <story-id> \"<what you want>\" [--base epic/<name>]"
+[[ -n "$STORY_ID" && -n "$INTENT" ]] || die "$USAGE"
 [[ "$STORY_ID" =~ ^[0-9A-Za-z_-]+$ ]] || die "story id '$STORY_ID' is not a plain identifier"
 
 STORY_BASE="$BASE_BRANCH"
@@ -85,9 +81,9 @@ echo "$MSG"
 echo
 
 log "linting"
-if bash "$REPO_ROOT/fleet/lint-story.sh" "$STORY_ID"; then
+if bash "$FLEET_HOME/lint-story.sh" "$REPO_NAME" "$STORY_ID"; then
   echo
-  log "draft ready — read it, then set status: ready and run ./fleet/launch.sh $STORY_ID"
+  log "draft ready — read it, then set status: ready and run launch.sh $REPO_NAME $STORY_ID"
 else
   echo
   warn "the draft has errors above. Fix them or rewrite before promoting it."

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# fleet/reset.sh <id> [--force] [--draft]
+# reset.sh <repo> <id> [--force] [--draft]
 #
-#   ./fleet/reset.sh 012            put story 012 back in the queue
-#   ./fleet/reset.sh 012 --force    …even though its branch holds work
-#   ./fleet/reset.sh 012 --draft    …but parked, not queued
+#   reset.sh khaita 012            put story 012 of the repo `khaita` back in the queue
+#   reset.sh khaita 012 --force    …even though its branch holds work
+#   reset.sh khaita 012 --draft    …but parked, not queued
 #
 # Clearing a story used to be four steps done by hand: remove the worktree,
 # delete the branch, edit the frontmatter, delete the review. Four steps at
@@ -25,14 +25,10 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+[[ $# -ge 1 ]] || die "usage: reset.sh <repo> <id> [--force] [--draft]"
+load_repo "$1"; shift
 PUSH_STATUS="${PUSH_STATUS:-1}"
-
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
-die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
 
 ID=""; FORCE=0; NEW_STATUS=ready
 while (($#)); do
@@ -43,35 +39,14 @@ while (($#)); do
     *)       [[ -z "$ID" ]] || die "one story at a time"; ID="$1"; shift ;;
   esac
 done
-[[ -n "$ID" ]] || die "usage: fleet/reset.sh <id> [--force] [--draft]"
+[[ -n "$ID" ]] || die "usage: reset.sh <repo> <id> [--force] [--draft]"
 
 STORY_FILE="$REPO_ROOT/.stories/$ID.md"
 [[ -f "$STORY_FILE" ]] || die "no such story: .stories/$ID.md"
 
-story_field() {                       # story_field <key> — same reader as the launcher's
-  awk -v k="$1" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$STORY_FILE"
-}
-
-# L-04: a dead launcher does not stop the work it started, and `in_progress`
-# in the frontmatter can be a stale orphan. The only trustworthy answer is
-# what is actually running in the worktree.
-procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
-  local wt p cwd
-  wt="$(readlink -f "$1" 2>/dev/null)" || return 0
-  [[ -n "$wt" ]] || return 0
-  for p in /proc/[0-9]*; do
-    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
-    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && basename "$p"
-  done
-}
-
 WT="$REPO_ROOT/../wt-$ID"
 BRANCH="story/$ID"
-STORY_BASE="$(story_field base)"; STORY_BASE="${STORY_BASE:-$BASE_BRANCH}"
+STORY_BASE="$(story_field "$ID" base)"; STORY_BASE="${STORY_BASE:-$BASE_BRANCH}"
 
 # ── refusals ─────────────────────────────────────────────────────────────────
 

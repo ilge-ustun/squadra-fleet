@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# fleet/merge.sh <id>          a story into its epic   — the queue calls this
-# fleet/merge.sh --epic <name> an epic into the integration branch — a human
-#                              calls this, and nothing in the fleet does
+# merge.sh <repo> <id>          a story into its epic   — the queue calls this
+# merge.sh <repo> --epic <name> an epic into the integration branch — a human
+#                               calls this, and nothing in the fleet does
 #
 # Merge a story into its epic branch, but only if the machine already said so
 # and only if the merged result still holds up.
@@ -31,28 +31,20 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+[[ $# -ge 2 ]] || die "usage: merge.sh <repo> <id> | <repo> --epic <epic/name>"
+load_repo "$1"; shift          # REPO_ROOT, BASE_BRANCH and the commands come from the target
 PUSH_STATUS="${PUSH_STATUS:-1}"
-INSTALL_CMD="${INSTALL_CMD:-npm ci}"
-VITEST_CMD="${VITEST_CMD:-npx vitest run}"
-BUILD_CMD="${BUILD_CMD:-npm run build}"
-LINT_CMD="${LINT_CMD:-npm run lint}"
 SEED_FILES=(.env.local)
-
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
-die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
 
 MODE=story; ID="${1:-}"
 if [[ "$ID" == --epic ]]; then
   MODE=epic; ID="${2:-}"
-  [[ -n "$ID" ]] || die "usage: fleet/merge.sh --epic <epic/name>"
+  [[ -n "$ID" ]] || die "usage: merge.sh <repo> --epic <epic/name>"
   # The one thing this must never do is point the same machinery at main.
   [[ "$ID" == epic/* ]] || die "--epic takes an epic/... branch, not '$ID'"
 else
-  [[ -n "$ID" ]] || die "usage: fleet/merge.sh <id> | --epic <epic/name>"
+  [[ -n "$ID" ]] || die "usage: merge.sh <repo> <id> | <repo> --epic <epic/name>"
   [[ -f "$REPO_ROOT/.stories/$ID.md" ]] || die "no such story: .stories/$ID.md"
 fi
 LOGID="${ID//\//-}"
@@ -75,7 +67,7 @@ if [[ "$MODE" == epic ]]; then
     && { log "$BRANCH is already in $BASE"; exit 0; }
 else
 
-S="$(cd "$REPO_ROOT" && BASE_BRANCH="$BASE_BRANCH" bash fleet/status.sh --json "$ID")" \
+S="$(bash "$FLEET_HOME/status.sh" "$REPO_NAME" --json "$ID")" \
   || die "could not read the story's state"
 jq -e 'length == 1' >/dev/null <<< "$S" || die "status.sh did not report exactly one story for $ID"
 
@@ -120,7 +112,7 @@ fi
 
 # ── the baseline that earns this ─────────────────────────────────────────────
 #
-# Same rule as the launcher's run_baseline (fleet/launch.sh): a suite that
+# Same rule as the launcher's run_baseline (launch.sh): a suite that
 # collects zero tests is not green (L-08). Duplicated rather than sourced —
 # launch.sh runs its main body on source — and it is the same eleven lines.
 
@@ -190,4 +182,4 @@ else
   [[ "$PUSH_STATUS" == "1" ]] && { git -C "$REPO_ROOT" push -q 2>/dev/null || warn "push failed — the record is local only"; }
 fi
 
-log "$ID merged into $BASE — revert with: fleet/revert.sh $ID"
+log "$ID merged into $BASE — revert with: revert.sh $REPO_NAME $ID"

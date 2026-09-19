@@ -60,3 +60,51 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
   [[ -v SEED_FILES ]] || die ".fleet/config for '$name' sets no SEED_FILES (SEED_FILES= is allowed)"
   read -ra SEED_FILES_ARR <<< "${SEED_FILES:-}"
 }
+
+# ── story frontmatter ────────────────────────────────────────────────────────
+#
+# One reader, used by every script; the writer is the launcher's and the
+# bot's. A story's frontmatter is the fleet's state — there is no state file.
+
+frontmatter_field() {                 # frontmatter_field <file> <key>
+  [[ -f "$1" ]] || { echo ""; return; }
+  awk -v k="$2" '
+    NR==1 && $0!="---" { exit }
+    /^---$/ { if (++d==2) exit; next }
+    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
+  ' "$1"
+}
+
+story_field() {                       # story_field <id> <key>
+  frontmatter_field "$REPO_ROOT/.stories/$1.md" "$2"
+}
+
+set_story_field() {                   # set_story_field <id> <key> <value>
+  local id="$1" k="$2" v="$3" f="$REPO_ROOT/.stories/$1.md"
+  if head -1 "$f" | grep -q '^---$'; then
+    if story_field "$id" "$k" | grep -q .; then
+      sed -i "0,/^$k:.*/s//$k: $v/" "$f"
+    else
+      sed -i "1a $k: $v" "$f"
+    fi
+  else
+    printf -- '---\n%s: %s\n---\n\n%s\n' "$k" "$v" "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+}
+
+# ── liveness ─────────────────────────────────────────────────────────────────
+#
+# L-04: a dead launcher does not stop the work it started, and `in_progress`
+# in the frontmatter can be a stale orphan. The only trustworthy answer is
+# what is actually running in the worktree — found by cwd, because the
+# worktree path appears nowhere in the agents' command lines.
+
+procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
+  local wt p cwd
+  wt="$(readlink -f "$1" 2>/dev/null)" || return 0
+  [[ -n "$wt" ]] || return 0
+  for p in /proc/[0-9]*; do
+    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
+    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && basename "$p"
+  done
+}

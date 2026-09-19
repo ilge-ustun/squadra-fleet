@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# fleet/lint-story.sh <story-id|path> [--strict]
+# lint-story.sh <repo> <story-id|path> [--strict]
 #
 # Mechanical checks on a story, before any agent spends quota on it. No model,
 # no network, no git writes. Errors exit 1; warnings print and exit 0 unless
@@ -23,15 +23,17 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+[[ $# -ge 2 ]] || die "usage: lint-story.sh <repo> <story-id|path> [--strict]"
+load_repo "$1"; shift          # citations resolve against the target, REPO_ROOT
 STRICT=0
-ARG="${1:?usage: fleet/lint-story.sh <story-id|path> [--strict]}"
+ARG="$1"
 [[ "${2:-}" == "--strict" ]] && STRICT=1
 
 if [[ -f "$ARG" ]]; then STORY_FILE="$ARG"; else STORY_FILE="$REPO_ROOT/.stories/$ARG.md"; fi
 [[ -f "$STORY_FILE" ]] || { echo "lint-story: no such story: $ARG" >&2; exit 1; }
 
-RED=$'\033[31m'; YLW=$'\033[33m'; GRN=$'\033[32m'; RST=$'\033[0m'
+# These count, so they replace lib.sh's warn deliberately.
 ERRORS=0; WARNINGS=0
 err()  { printf '%sERROR%s   %s\n' "$RED" "$RST" "$1" >&2; ERRORS=$((ERRORS + 1)); }
 warn() { printf '%swarning%s %s\n' "$YLW" "$RST" "$1"; WARNINGS=$((WARNINGS + 1)); }
@@ -39,13 +41,7 @@ warn() { printf '%swarning%s %s\n' "$YLW" "$RST" "$1"; WARNINGS=$((WARNINGS + 1)
 body() {                              # the story minus its frontmatter
   awk 'NR==1 && $0!="---" {p=1} /^---$/ {d++; next} d>=2 || p' "$STORY_FILE"
 }
-field() {                             # field <key> — same parser the launcher uses
-  awk -v k="$1" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$STORY_FILE"
-}
+field() { frontmatter_field "$STORY_FILE" "$1"; }   # field <key> — the reader every script uses
 
 # ── frontmatter ──────────────────────────────────────────────────────────────
 

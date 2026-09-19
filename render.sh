@@ -1,6 +1,6 @@
 # Prompt rendering. Sourced by launch.sh.
 #
-# Prompt bodies live in fleet/prompts/*.md and reference values as {{NAME}},
+# Prompt bodies live in prompts/*.md and reference values as {{NAME}},
 # not $NAME, so the files are inert text: nothing expands by accident and a
 # prompt file cannot inject shell.
 #

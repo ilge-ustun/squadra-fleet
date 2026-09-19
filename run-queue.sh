@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# fleet/run-queue.sh [--max N]
+# run-queue.sh <repo> [--max N]
 #
-#   ./fleet/run-queue.sh                 drain the queue
-#   ./fleet/run-queue.sh --max 3         at most three stories
+#   run-queue.sh khaita                  drain the queue of the repo `khaita`
+#   run-queue.sh khaita --max 3          at most three stories
 #
 # Runs every `ready` story in turn until the queue is empty. This is the piece
 # that makes the fleet a fleet: until now a human launched each story, watched
@@ -21,39 +21,24 @@
 #                    the harness, not with that round. Stop and say so.
 #
 # Run it detached, never as a child of an interactive session:
-#   setsid nohup ./fleet/run-queue.sh > queue.log 2>&1 < /dev/null &
+#   setsid nohup bash run-queue.sh khaita > queue.log 2>&1 < /dev/null &
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+LOG_TAG=queue
+TARGET="${1:-}"; [[ -n "$TARGET" ]] || die "usage: run-queue.sh <repo> [--max N]"; shift
 MAX="${MAX:-20}"
 # The launcher decides; the queue merges. A hand-run launch.sh never changes a
 # branch — that separation is what keeps a debugging session from landing
 # something. AUTO_MERGE=0 turns it off without turning the fleet off.
 AUTO_MERGE="${AUTO_MERGE:-1}"
-# Every message the fleet sends goes through this one seam, so tests can
-# substitute a recorder and nothing here ever reaches the network.
-FLEET_NOTIFY_CMD="${FLEET_NOTIFY_CMD:-bash $REPO_ROOT/fleet/telegram.sh send}"
 [[ "${1:-}" == "--max" ]] && MAX="${2:?--max needs a number}"
-
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
-log()  { printf '%s==> [queue] %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! [queue] %s%s\n'  "$YLW" "$1" "$RST"; }
+load_repo "$TARGET"
 
 # A notification is never allowed to change what happened: it cannot fail the
 # drain, and its own failure is the notifier's business, not the queue's.
 notify() { $FLEET_NOTIFY_CMD "$1" >/dev/null 2>&1 || true; }
-
-story_field() {                       # story_field <id> <key>
-  local f="$REPO_ROOT/.stories/$1.md"
-  [[ -f "$f" ]] || { echo ""; return; }
-  awk -v k="$2" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$f"
-}
 
 next_ready() {                        # the same choice launch.sh makes
   local f id
@@ -76,21 +61,21 @@ next_ready() {                        # the same choice launch.sh makes
 #
 refresh_from_origin() {
   local upstream gitdir
-  upstream="$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null)" || {
+  upstream="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref "@{u}" 2>/dev/null)" || {
     warn "refresh failed: no upstream configured, continuing on local state"
     return
   }
-  gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || gitdir=".git"
+  gitdir="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir 2>/dev/null)" || gitdir="$REPO_ROOT/.git"
   if [[ -f "$gitdir/MERGE_HEAD" || -d "$gitdir/rebase-merge" ]]; then
     warn "refresh skipped: a merge/rebase is already in progress, continuing on local state"
     return
   fi
-  if ! git fetch origin 2>/dev/null; then
+  if ! git -C "$REPO_ROOT" fetch origin 2>/dev/null; then
     warn "refresh failed: fetch from origin failed, continuing on local state"
     return
   fi
-  if ! git merge --no-edit "$upstream" 2>/dev/null; then
-    git merge --abort 2>/dev/null || true
+  if ! git -C "$REPO_ROOT" merge --no-edit "$upstream" 2>/dev/null; then
+    git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
     warn "refresh failed: merge conflict with $upstream, continuing on local state"
     return
   fi
@@ -102,7 +87,7 @@ refresh_from_origin() {
 # story sat there for ever. Reap first — launch.sh owns that logic and knows
 # to check the worktree for live processes before declaring anything an orphan.
 log "reaping orphans from any interrupted run"
-bash "$REPO_ROOT/fleet/launch.sh" --reap
+bash "$FLEET_HOME/launch.sh" "$REPO_NAME" --reap
 
 log "refreshing from origin before scan"
 refresh_from_origin
@@ -125,7 +110,7 @@ while (( n < MAX )); do
   PREV="$id"; n=$((n + 1))
 
   log "story $id ($n of at most $MAX)"
-  bash "$REPO_ROOT/fleet/launch.sh" "$id"
+  bash "$FLEET_HOME/launch.sh" "$REPO_NAME" "$id"
   rc=$?
 
   status="$(story_field "$id" status)"
@@ -141,9 +126,9 @@ while (( n < MAX )); do
       # Only a COMPUTED PASS merges. merge.sh checks this again and refuses on
       # its own; asking here keeps a FAIL from even reaching it.
       if [[ "$verdict" == PASS && "$AUTO_MERGE" == "1" ]]; then
-        if bash "$REPO_ROOT/fleet/merge.sh" "$id"; then
-          notify "$id merged → $base (computed PASS)
-undo: /revert $id"
+        if bash "$FLEET_HOME/merge.sh" "$REPO_NAME" "$id"; then
+          notify "$REPO_NAME/$id merged → $base (computed PASS)
+undo: /revert $REPO_NAME $id"
         else
           warn "$id passed but did not merge"
           notify "$id computed PASS but did not merge into $base — see the queue log"
@@ -172,4 +157,4 @@ else
   printf '  %s\n' "${RAN[@]}"
 fi
 echo
-bash "$REPO_ROOT/fleet/status.sh"
+bash "$FLEET_HOME/status.sh" "$REPO_NAME"

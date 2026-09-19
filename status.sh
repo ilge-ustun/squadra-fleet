@@ -1,43 +1,32 @@
 #!/usr/bin/env bash
 #
-# fleet/status.sh [story-id]
+# status.sh <repo> [--json|--epics] [story-id]
 #
 # What the fleet is doing and what it decided. Read-only: safe to run while a
 # launcher is working, and safe to run from a phone over ssh.
 #
-#   ./fleet/status.sh          every story
-#   ./fleet/status.sh 007      one story, with the latest round's machine block
-#   ./fleet/status.sh --json   the same values as JSON, for the bot and merge.sh
-#   ./fleet/status.sh --epics  one line per epic — what a human decides to merge
+#   status.sh khaita           every story of the repo `khaita`
+#   status.sh khaita 007       one story, with the latest round's machine block
+#   status.sh khaita --json    the same values as JSON, for the bot and merge.sh
+#   status.sh khaita --epics   one line per epic — what a human decides to merge
 #
 # The verdict shown is the COMPUTED one (`verdict:` line 3 of .review/<id>.md),
-# not the reviewer's — see fleet/prompts/README.md, "The verdict contract".
+# not the reviewer's — see prompts/README.md, "The verdict contract".
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+[[ $# -ge 1 ]] || die "usage: status.sh <repo> [--json|--epics] [story-id]"
+load_repo "$1"; shift
 JSON=0; EPICS=0; ONE=""
 while (($#)); do
   case "$1" in
     --json)  JSON=1; shift ;;
     --epics) EPICS=1; shift ;;
-    -*)      echo "usage: fleet/status.sh [--json|--epics] [story-id]" >&2; exit 2 ;;
+    -*)      echo "usage: status.sh <repo> [--json|--epics] [story-id]" >&2; exit 2 ;;
     *)       ONE="$1"; shift ;;
   esac
 done
-
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
-
-story_field() {                       # story_field <id> <key>
-  local f="$REPO_ROOT/.stories/$1.md"
-  [[ -f "$f" ]] || { echo ""; return; }
-  awk -v k="$2" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$f"
-}
 
 colour_for() {                        # colour_for <status>
   case "$1" in
@@ -49,18 +38,8 @@ colour_for() {                        # colour_for <status>
 }
 
 # A story is "live" if something is actually running in its worktree — the
-# only trustworthy answer (L-04: a dead launcher does not stop the work, and
-# in_progress in the frontmatter can be a stale orphan).
-live_in() {                           # live_in <worktree> → 0 if a process is there
-  local wt p cwd
-  wt="$(readlink -f "$1" 2>/dev/null)" || return 1
-  [[ -n "$wt" ]] || return 1
-  for p in /proc/[0-9]*; do
-    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
-    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && return 0
-  done
-  return 1
-}
+# only trustworthy answer (L-04; procs_in_worktree in lib.sh).
+live_in() { [[ -n "$(procs_in_worktree "$1")" ]]; }   # live_in <worktree> → 0 if a process is there
 
 # There is no state file, deliberately: the frontmatter is authoritative and a
 # second copy would need keeping in sync with it. --json is the same walk,

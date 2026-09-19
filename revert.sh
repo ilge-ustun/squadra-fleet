@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# fleet/revert.sh <id>
+# revert.sh <repo> <id>
 #
-# Undo the merge fleet/merge.sh made, by id rather than by sha. This is the
+# Undo the merge merge.sh made, by id rather than by sha. This is the
 # other half of auto-merge: the fleet is allowed to change an epic branch
 # without asking because undoing it is one word on a phone.
 #
@@ -18,31 +18,19 @@
 #
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+[[ $# -ge 2 ]] || die "usage: revert.sh <repo> <id>"
+load_repo "$1"; shift
 PUSH_STATUS="${PUSH_STATUS:-1}"
 
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
-die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
-
 ID="${1:-}"
-[[ -n "$ID" ]] || die "usage: fleet/revert.sh <id>"
+[[ -n "$ID" ]] || die "usage: revert.sh <repo> <id>"
 STORY_FILE="$REPO_ROOT/.stories/$ID.md"
 [[ -f "$STORY_FILE" ]] || die "no such story: .stories/$ID.md"
 
-story_field() {                       # story_field <key>
-  awk -v k="$1" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$STORY_FILE"
-}
-
-SHA="$(story_field merged)"
+SHA="$(story_field "$ID" merged)"
 [[ -n "$SHA" ]] || die "$ID has no recorded merge — nothing to revert"
-BASE="$(story_field base)"; BASE="${BASE:-$BASE_BRANCH}"
+BASE="$(story_field "$ID" base)"; BASE="${BASE:-$BASE_BRANCH}"
 case "$BASE" in
   "$BASE_BRANCH"|main|master) die "$ID is based on $BASE — that branch is a human's, here too" ;;
 esac

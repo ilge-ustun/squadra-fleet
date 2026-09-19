@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# fleet/launch.sh [story-id]
+# launch.sh <repo> [story-id|--reap]
 #
 # Phase 4b + verdict runner: queue, orphan recovery, review round ceiling,
 # harness-run baseline and mutations, computed verdict.
 #
-#   ./fleet/launch.sh          take the next ready story
-#   ./fleet/launch.sh 004      run one specific story
+#   launch.sh khaita           take the next ready story of the repo `khaita`
+#   launch.sh khaita 004       run one specific story
+#   launch.sh khaita --reap    reap orphans and exit
+#
+# The repo is a name in repos/ (lib.sh: load_repo); how it is built and tested
+# comes from its own .fleet/config. Nothing here assumes the cwd.
 #
 # STATE lives in git. Each story file carries frontmatter:
 #
@@ -28,21 +32,28 @@
 # Status changes are committed and pushed so the queue is visible from a phone.
 # .runs/<id>.json is machine-local (gitignored).
 #
-# PROMPTS live in fleet/prompts/*.md, rendered by fleet/render.sh.
+# PROMPTS live in prompts/*.md, rendered by render.sh.
 #
 # VERDICT is computed here, not read from the reviewer. The reviewer proposes
 # mutations as files; this script runs the baseline, applies each mutation in
 # a clean tree, classifies, and vetoes a PASS on any surviving mutation, any
 # uncovered AC, or a red baseline. Evidence goes to .review/<id>/round-N/ and
-# is committed. See fleet/prompts/README.md, "The verdict contract".
-# fleet/test-lib.sh exercises every path with fake agents.
+# is committed. See prompts/README.md, "The verdict contract".
+# test-lib.sh exercises every path with fake agents.
 #
 set -uo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_BRANCH="${BASE_BRANCH:-develop}"   # integration branch; a story may name an epic with base:
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+
+# The target is named, never assumed from the cwd. load_repo brings REPO_ROOT
+# and the target's own BASE_BRANCH (the integration branch; a story may name
+# an epic with base:), INSTALL_CMD, VITEST_CMD, BUILD_CMD, LINT_CMD,
+# SEED_FILES and PROBE_DIR from <target>/.fleet/config.
+[[ $# -ge 1 ]] || die "usage: launch.sh <repo> [story-id|--reap]"
+load_repo "$1"; shift
+
 BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
 # Wall clock per agent call. MAX_TURNS bounds the builder's turns, nothing
@@ -53,59 +64,23 @@ MAX_TURNS="${MAX_TURNS:-60}"
 AGENT_TIMEOUT="${AGENT_TIMEOUT:-1800}"
 MAX_ROUNDS="${MAX_ROUNDS:-2}"        # escalation ceiling
 ALLOWED_TOOLS="Read,Write,Edit,Grep,Glob,Bash"
-INSTALL_CMD="${INSTALL_CMD:-npm ci}"   # overridable so fleet/test-lib.sh can skip the install
-VITEST_CMD="${VITEST_CMD:-npx vitest run}"   # baseline + mutation runner; test-lib points it at a fake
-BUILD_CMD="${BUILD_CMD:-npm run build}"
-LINT_CMD="${LINT_CMD:-npm run lint}"
 PUSH_STATUS="${PUSH_STATUS:-1}"      # PUSH_STATUS=0 to work offline
-# How the fleet reaches a human. One seam, so a test can substitute a recorder
-# and nothing here ever reaches the network.
-FLEET_NOTIFY_CMD="${FLEET_NOTIFY_CMD:-bash $REPO_ROOT/fleet/telegram.sh send}"
 REVIEW_ONLY="${REVIEW_ONLY:-0}"      # 1 = re-review the head, run no builder
-PROMPTS_DIR="$REPO_ROOT/fleet/prompts"
 
 # Untracked runtime config a fresh worktree does not inherit.
 # Story 002: without .env.local everything builds and tests green while the app
 # talks to projects/undefined. No instrument in the suite catches that.
 SEED_FILES=(.env.local)
 
-RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
-log()  { printf '%s==> %s%s\n' "$GRN" "$1" "$RST"; }
-warn() { printf '%s!! %s%s\n'  "$YLW" "$1" "$RST"; }
-die()  { printf '%sXX %s%s\n'  "$RED" "$1" "$RST" >&2; exit 1; }
-
-# render_prompt() — needs die/warn above, and PROMPTS_DIR from config.
-source "$REPO_ROOT/fleet/render.sh" || die "cannot source fleet/render.sh"
+# render_prompt() — needs die/warn and PROMPTS_DIR from lib.sh.
+source "$FLEET_HOME/render.sh" || die "cannot source render.sh"
 
 command -v claude >/dev/null || die "claude not on PATH"
 command -v codex  >/dev/null || die "codex not on PATH"
 command -v jq     >/dev/null || die "jq not on PATH"
 mkdir -p "$REPO_ROOT/.stories" "$REPO_ROOT/.review" "$REPO_ROOT/.runs" "$REPO_ROOT/.blocked"
 
-# ── frontmatter ──────────────────────────────────────────────────────────────
-
-story_field() {                       # story_field <id> <key>
-  local f="$REPO_ROOT/.stories/$1.md"
-  [[ -f "$f" ]] || { echo ""; return; }
-  awk -v k="$2" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$f"
-}
-
-set_story_field() {                   # set_story_field <id> <key> <value>
-  local id="$1" k="$2" v="$3" f="$REPO_ROOT/.stories/$1.md"
-  if head -1 "$f" | grep -q '^---$'; then
-    if story_field "$id" "$k" | grep -q .; then
-      sed -i "0,/^$k:.*/s//$k: $v/" "$f"
-    else
-      sed -i "1a $k: $v" "$f"
-    fi
-  else
-    printf -- '---\n%s: %s\n---\n\n%s\n' "$k" "$v" "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
-  fi
-}
+# ── status ───────────────────────────────────────────────────────────────────
 
 # git add fails ENTIRELY if any one pathspec is missing — it stages nothing and
 # exits 128. Adding all three at once silently dropped every status commit
@@ -115,7 +90,7 @@ commit_status() {                     # commit_status <id> <status>
   # The Telegram bot writes .stories/<id>.md and commits in this same checkout
   # on its own timer. Two writers, one index: the loser gets "Unable to create
   # .git/index.lock", and a failed status commit is a die, so the loser is a
-  # dead round. Both take the same advisory lock — fleet/telegram.sh has the
+  # dead round. Both take the same advisory lock — telegram.sh has the
   # matching with_lock.
   exec 9>"$REPO_ROOT/.git/fleet.lock"
   flock -w "${FLEET_LOCK_WAIT:-120}" 9 || warn "waited for the fleet lock — going ahead"
@@ -282,7 +257,7 @@ check_scope() {                       # check_scope <evidence-dir> → SCOPE SCO
   deny="$(story_field "$STORY_ID" scope_deny)"
   changed="$CHANGED_PATHS"
   # Split the deny list with pathname expansion OFF: a bare `for g in $deny`
-  # expands `fleet/*` against the launcher's cwd and the glob never reaches
+  # expands `src/*` against the launcher's cwd and the glob never reaches
   # the comparison. Found by test-lib case 28. Inside [[ ]] the unquoted
   # right-hand side is a pattern, not a path.
   set -f; read -ra globs <<< "$deny"; set +f
@@ -370,17 +345,7 @@ answer with: /answer $1 <your answer>" ;;
 # with `cd $WT && claude ...`, so the path never appears in any child's argv —
 # only in its cwd. Verified: pgrep found nothing, /proc scan found the process.
 # Killing the launcher leaves claude and its children alive, so a dead launcher
-# pid is not evidence that work stopped.
-
-procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
-  local wt p cwd
-  wt="$(readlink -f "$1" 2>/dev/null)" || return 0
-  [[ -n "$wt" ]] || return 0
-  for p in /proc/[0-9]*; do
-    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
-    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && basename "$p"
-  done
-}
+# pid is not evidence that work stopped (procs_in_worktree, lib.sh).
 
 reap_orphans() {
   local f id wt pids
@@ -433,7 +398,7 @@ seed_env() {
 reap_orphans
 
 # Reaping is what makes a crash recoverable: a story left `in_progress` by a
-# power cut is invisible to any scan for `ready`. fleet/run-queue.sh calls this
+# power cut is invisible to any scan for `ready`. run-queue.sh calls this
 # once before it looks at the queue, because otherwise it would report the
 # queue empty while a stranded story sat there for ever.
 [[ "${1:-}" == "--reap" ]] && exit 0
@@ -465,9 +430,9 @@ if [[ -z "${AC_IDS// /}" ]]; then
 fi
 
 # Epics. A story may name the branch it is cut from, so one queue can serve
-# several epics (epic/offline-pwa, epic/search, …) while the fleet's own state
-# — .stories, .review, fleet/, docs/fleet — stays on the integration branch
-# this checkout is on. BASE_BRANCH is the default for a story that names none.
+# several epics (epic/offline-pwa, epic/search, …) while the fleet's state in
+# the target — .stories, .review — stays on its integration branch.
+# BASE_BRANCH is the default for a story that names none.
 STORY_BASE="$(story_field "$STORY_ID" base)"
 STORY_BASE="${STORY_BASE:-$BASE_BRANCH}"
 [[ "$STORY_BASE" == "$BASE_BRANCH" ]] || log "base: $STORY_BASE (from the story)"

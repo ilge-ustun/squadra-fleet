@@ -7,13 +7,17 @@
 #
 # No network, no npm, no models. Each case gets a fresh fixture:
 #
-#   $TMP/<case>/origin.git   a bare repo — the launcher's `origin`
+#   $TMP/<case>/fleet        THIS working tree, copied — the fleet under test is
+#                            the one on disk, not the one at HEAD — with a
+#                            registry of one entry, `t`, pointing at repo/
+#   $TMP/<case>/origin.git   a bare repo — the target's `origin`
 #   $TMP/<case>/repo         a synthetic target on branch `base`: src/marker.txt
-#                            (the file the fakes mutate), one fixture story,
-#                            a .stories/TEMPLATE.md, and THIS working tree's
-#                            fleet copied in and committed, so the launcher
-#                            under test is the one on disk, not the one at HEAD
+#                            (the file the fakes mutate), .fleet/config naming
+#                            the fakes, one fixture story, a .stories/TEMPLATE.md
 #   $TMP/<case>/trace        what the fakes recorded
+#
+# Every script is run from $TMP/<case>, never from inside the target: a script
+# that still depends on its cwd being the repo fails here.
 #
 # test/{claude,codex,npm} are put first on PATH; launch.sh resolves
 # `claude` and `codex` by bare name (`command -v`, and the calls at the
@@ -82,21 +86,33 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 # ── fixture ──────────────────────────────────────────────────────────────────
 
-shadow_check() {                      # shadow_check <fixture-repo> — die unless the fakes are what resolves
-  local repo="$1" name got
+shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
+  local fleet="$1" name got
   for name in claude codex npm curl; do
-    got="$(PATH="$repo/fleet/test:$PATH" command -v "$name")"
-    if [[ "$got" != "$repo/fleet/test/$name" ]]; then
+    got="$(PATH="$fleet/test:$PATH" command -v "$name")"
+    if [[ "$got" != "$fleet/test/$name" ]]; then
       echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
       exit 3
     fi
   done
 }
 
-fixture() {                           # fixture <case-name> [story-status] → FX REPO TRACE
-  FX="$TMP/$1"; REPO="$FX/repo"; TRACE="$FX/trace"
+fixture() {                           # fixture <case-name> [story-status] → FX FLEET REPO TRACE
+  FX="$TMP/$1"; FLEET="$FX/fleet"; REPO="$FX/repo"; TRACE="$FX/trace"
   local status="${2:-ready}"
   mkdir -p "$TRACE"; : > "$TRACE/calls"
+
+  # The fleet under test: this working tree, minus its git metadata, its real
+  # registry (a typo'd name in a case must never reach a real checkout) and
+  # anything machine-local. One registry entry, t, names the target below.
+  mkdir -p "$FLEET"
+  cp -r "$FLEET_HOME/." "$FLEET"
+  rm -rf "$FLEET/.git" "$FLEET/repos" "$FLEET/.env.fleet" "$FLEET/.bot-offset"
+  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$FLEET/launch.sh"
+  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
+  [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
+  mkdir -p "$FLEET/repos"
+  printf 'REPO_PATH=%s\n' "$REPO" > "$FLEET/repos/t.env"
 
   # A synthetic target, not a clone of anything real: a bare origin, a working
   # clone on `base`, a marker file for the fakes to mutate, and the fleet.
@@ -107,8 +123,19 @@ fixture() {                           # fixture <case-name> [story-status] → F
   git -C "$REPO" config user.email fleet-test@localhost
   git -C "$REPO" remote add origin "$FX/origin.git"
 
-  mkdir -p "$REPO/src" "$REPO/.stories"
+  mkdir -p "$REPO/src" "$REPO/.stories" "$REPO/.fleet"
   printf 'the fake agents mutate this file\n' > "$REPO/src/marker.txt"
+  # The target says how it is built and tested; here, with the fakes. A case
+  # overrides a value by putting it in the environment (BUILD_CMD=false).
+  cat > "$REPO/.fleet/config" <<EOF
+BASE_BRANCH=base
+INSTALL_CMD=true
+VITEST_CMD=$FLEET/test/vitest
+BUILD_CMD=true
+LINT_CMD=true
+SEED_FILES=.env.local
+PROBE_DIR=src
+EOF
   printf '# fixture target\n' > "$REPO/README.md"
   # .env.local is untracked in production because the target ignores .env*;
   # without this line seed_env would dirty every reviewer worktree.
@@ -134,35 +161,40 @@ round: 0
 **AC1 — the fixture has one criterion.** Goes red when removed.
 EOF
 
-  mkdir -p "$REPO/fleet"
-  cp -r "$FLEET_HOME/." "$REPO/fleet"
-  rm -rf "$REPO/fleet/.git" "$REPO/fleet/repos" "$REPO/fleet/.env.fleet" "$REPO/fleet/.bot-offset"
-  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$REPO/fleet/launch.sh"
-  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$REPO/fleet/render.sh"
-
   # SEED_FILES=(.env.local) and the launcher dies without it. Untracked here
   # too, so the fixture matches production rather than papering over it.
   printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
   git -C "$REPO" add -A
-  git -C "$REPO" commit -qm "fixture: target + launcher under test + story $STORY"
+  git -C "$REPO" commit -qm "fixture: target + story $STORY"
   git -C "$REPO" push -q -u origin base
 
-  shadow_check "$REPO"
+  shadow_check "$FLEET"
 }
 
-# env takes the last assignment, so a case's own VAR=value in "$@" wins over
-# the defaults here.
+# One helper per script. Each runs from $FX, not the target, with the fakes
+# first on PATH. The target's commands come from its .fleet/config; a case
+# that needs one changed puts it in "$@", and env takes the last assignment,
+# so the case's VAR=value wins over the defaults here — and, inside the
+# script, over the config file.
+FAKES() { printf '%s' "$FLEET/test:$PATH"; }
 run() {                               # run <story-id> [VAR=value …] → LOG RC
   local id="$1"; shift
   LOG="$FX/launch.log"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FLEET_NOTIFY_CMD=true \
+  ( cd "$FX" && env PATH="$(FAKES)" \
+      PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
-      bash fleet/launch.sh "$id" ) > "$LOG" 2>&1
+      bash "$FLEET/launch.sh" t "$id" ) > "$LOG" 2>&1
   RC=$?
+}
+queue() {                             # queue [VAR=value …] → $FX/queue.log QRC
+  ( cd "$FX" && env PATH="$(FAKES)" \
+      PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      bash "$FLEET/run-queue.sh" t ) > "$FX/queue.log" 2>&1
+  QRC=$?
+}
+status_run() {                        # status_run [args…] → stdout
+  ( cd "$FX" && bash "$FLEET/status.sh" t "$@" )
 }
 tracked() { git -C "$REPO" ls-tree -r HEAD --name-only; }
 
@@ -647,12 +679,12 @@ case_38_story_base() {
 # requirement on citations is dropped, which is how the first version of that
 # check behaved: 20 false positives across the real stories, zero findings.
 case_39_lint_story() {
-  CASE="39 lint-story: shape and citations"
-  local d="$TMP/lint"; mkdir -p "$d"
-  local lint="$FLEET_HOME/lint-story.sh" out rc
+  CASE="39 lint-story: shape and citations"; fixture c39
+  local d="$FX/lint"; mkdir -p "$d"
+  local out rc
 
   write_story() { printf '%s' "$2" > "$d/$1.md"; }
-  lint() { out="$(cd "$FLEET_HOME" && bash "$lint" "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
+  lint() { out="$(cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
 
   write_story good '---
 status: ready
@@ -660,7 +692,7 @@ round: 0
 scope_deny: src/x/*
 ---
 # Story: fine
-It cites `prompts/rules.md` and `prompts/rules.md:1`.
+It cites `src/marker.txt` and `src/marker.txt:1`.
 ## Acceptance criteria
 **AC1 — one bounded claim.** Goes red when removed.
 ## Known weakness
@@ -711,7 +743,7 @@ status: ready
 round: 0
 ---
 # Story: out of range
-See `prompts/rules.md:99999`.
+See `src/marker.txt:99999`.
 ## Acceptance criteria
 **AC1 — a claim.** Goes red when removed.
 '
@@ -809,14 +841,8 @@ case_41_run_queue() {
     sed "s/Story $STORY/Story $extra/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/$extra.md"
   done
   # 901 will fail its round; the queue must carry on to 902 regardless
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
-  local qrc=$?
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local qrc=$QRC
 
   assert_eq "$qrc" 0 "the runner exits cleanly"
   assert_grep 'queue empty' "$FX/queue.log" "it stopped because nothing was ready"
@@ -835,13 +861,7 @@ round: 0
 ---
 # Story 900: no criteria the launcher can see
 EOS
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=901 \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FAKE_STORY_ID=901 FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
 
   assert_grep 'no acceptance criteria' "$FX/queue.log" "900 was rejected"
   assert_eq "$(awk -v k=status '/^---$/{d++; next} d==1 && $0 ~ "^"k":" {sub("^"k":[[:space:]]*",""); print; exit}' "$REPO/.stories/901.md")" done "901 still ran and finished"
@@ -860,13 +880,7 @@ case_42_resume_after_crash() {
     || git -C "$FX/wt-$STORY" commit -q --allow-empty -m "work the builder had already done"
   sed -i '0,/^status:.*/s//status: in_progress/' "$REPO/.stories/$STORY.md"
 
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
 
   assert_grep 'orphan' "$FX/queue.log" "the stranded story was recognised as an orphan"
   assert_eq "$(field status)" done "and carried through to a verdict"
@@ -928,8 +942,7 @@ case_50_status_commit_failure() {
 # refuses to do.
 reset_run() {                         # reset_run <args…> → RLOG RRC
   RLOG="$FX/reset.log"
-  ( cd "$REPO" && env BASE_BRANCH=base PUSH_STATUS=1 \
-      bash fleet/reset.sh "$@" ) > "$RLOG" 2>&1
+  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/reset.sh" t "$@" ) > "$RLOG" 2>&1
   RRC=$?
 }
 
@@ -994,7 +1007,7 @@ case_54_reset_refuses_unmerged() {
 case_55_status_json() {
   CASE="55 status.sh --json is machine-readable"; fixture c55
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
-  local out; out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --json )"
+  local out; out="$( status_run --json )"
   jq -e . >/dev/null 2>&1 <<< "$out" && ok || fail "output parses as JSON"
   assert_eq "$(jq -r '.[0].id'      <<< "$out")" "$STORY" "id"
   assert_eq "$(jq -r '.[0].status'  <<< "$out")" done     "status"
@@ -1003,10 +1016,10 @@ case_55_status_json() {
   assert_eq "$(jq -r '.[0].base'    <<< "$out")" base     "the epic it belongs to"
   assert_eq "$(jq -r '.[0].merged'  <<< "$out")" false    "not merged into it yet"
   # One story, still an array: a caller should not need two parsers.
-  local one; one="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --json "$STORY" )"
+  local one; one="$( status_run --json "$STORY" )"
   assert_eq "$(jq -r 'length' <<< "$one")" 1 "a single story is an array of one"
   # The table must still be the default — status.sh is read by people too.
-  local table; table="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh )"
+  local table; table="$( status_run )"
   assert_contains "$table" "ID" "the human table is still the default"
 }
 
@@ -1027,14 +1040,16 @@ epic_story() {                        # epic_story <case-name> — a story on an
   sed -i '2a base: epic/test' "$REPO/.stories/$STORY.md"
 }
 
-merge_run() {                         # merge_run <args…> → MLOG MRC
+merge_run() {                         # merge_run [VAR=value…] → MLOG MRC
   MLOG="$FX/merge.log"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      "$@" bash fleet/merge.sh "$STORY" ) > "$MLOG" 2>&1
+  ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
+      "$@" bash "$FLEET/merge.sh" t "$STORY" ) > "$MLOG" 2>&1
   MRC=$?
+}
+merge_epic() {                        # merge_epic <log> [VAR=value…] → exit code
+  local log="$1"; shift
+  ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
+      "$@" bash "$FLEET/merge.sh" t --epic epic/test ) > "$log" 2>&1
 }
 
 epic_head() { git -C "$REPO" rev-parse "origin/epic/test"; }
@@ -1098,12 +1113,12 @@ case_59_merge_refuses_integration_branch() {
 
 bot() {                               # bot <verb> [args…] → BLOG BRC
   BLOG="$FX/bot.log"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
+  ( cd "$FX" && env PATH="$(FAKES)" \
       FAKE_TRACE_DIR="$TRACE" \
       TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 \
       FAKE_TELEGRAM_UPDATES="${FAKE_TELEGRAM_UPDATES:-}" \
       QUEUE_START_CMD=true \
-      bash fleet/telegram.sh "$@" ) > "$BLOG" 2>&1
+      bash "$FLEET/telegram.sh" "$@" ) > "$BLOG" 2>&1
   BRC=$?
 }
 
@@ -1133,8 +1148,8 @@ case_60_bot_send() {
 case_61_bot_unconfigured_is_not_fatal() {
   CASE="61 an unconfigured bot does not stop anything"; fixture c61
   BLOG="$FX/bot.log"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" FAKE_TRACE_DIR="$TRACE" \
-      bash fleet/telegram.sh send "anyone there" ) > "$BLOG" 2>&1
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      bash "$FLEET/telegram.sh" send "anyone there" ) > "$BLOG" 2>&1
   assert_eq "$?" 0 "exit code is still 0"
   assert_grep 'not configured' "$BLOG" "and it says why"
   assert_eq "$(sent)" 0 "nothing was sent"
@@ -1146,7 +1161,7 @@ case_61_bot_unconfigured_is_not_fatal() {
 # Red when the from.id comparison is deleted: a stranger can promote a story.
 case_62_bot_ignores_strangers() {
   CASE="62 a message from anyone else changes nothing"; fixture c62
-  update 100 999 "/promote $STORY"
+  update 100 999 "/promote t $STORY"
   bot poll
   assert_eq "$BRC" 0 "exit code"
   assert_eq "$(sent)" 0 "no reply — not even a refusal"
@@ -1158,7 +1173,7 @@ case_62_bot_ignores_strangers() {
 case_63_bot_status() {
   CASE="63 /status answers with the table"; fixture c63
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
-  update 101 42 "/status"
+  update 101 42 "/status t"
   bot poll
   assert_eq "$(sent)" 1 "one reply"
   assert_contains "$(sent_text)" "$STORY" "naming the story"
@@ -1172,7 +1187,7 @@ case_64_bot_promote() {
   CASE="64 /promote puts a story back in the queue"; fixture c64
   sed -i '0,/^status:.*/s//status: draft/' "$REPO/.stories/$STORY.md"
   git -C "$REPO" commit -qam "park the fixture story"
-  update 102 42 "/promote $STORY"
+  update 102 42 "/promote t $STORY"
   bot poll
   assert_eq "$(field status)" ready "status changed"
   assert_contains "$(git -C "$REPO" log -1 --format=%s)" "promoted" "and committed, which is what the queue reads"
@@ -1184,9 +1199,9 @@ case_64_bot_promote() {
 # deleted.
 case_65_bot_offset_advances() {
   CASE="65 an update is acted on once"; fixture c65
-  update 500 42 "/status"
+  update 500 42 "/status t"
   bot poll
-  assert_eq "$(cat "$REPO/.bot-offset" 2>/dev/null)" 501 "offset is one past the last update"
+  assert_eq "$(cat "$FLEET/.bot-offset" 2>/dev/null)" 501 "offset is one past the last update"
   assert_grep 'offset=0' "$TRACE/curl-calls" "the first poll started from 0"
   bot poll
   assert_grep 'offset=501' "$TRACE/curl-calls" "the second asked only for what follows"
@@ -1197,8 +1212,7 @@ case_65_bot_offset_advances() {
 
 revert_run() {                        # revert_run → RVLOG RVRC
   RVLOG="$FX/revert.log"
-  ( cd "$REPO" && env BASE_BRANCH=base PUSH_STATUS=1 \
-      bash fleet/revert.sh "$STORY" ) > "$RVLOG" 2>&1
+  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/revert.sh" t "$STORY" ) > "$RVLOG" 2>&1
   RVRC=$?
 }
 
@@ -1246,7 +1260,7 @@ case_68_bot_revert() {
   local before_tree; before_tree="$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")"
   merge_run
   assert_eq "$MRC" 0 "precondition: merged"
-  update 200 42 "/revert $STORY"
+  update 200 42 "/revert t $STORY"
   bot poll
   assert_eq "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" "$before_tree" "the epic is back"
   assert_contains "$(sent_text)" "reverted" "and the human is told"
@@ -1261,14 +1275,8 @@ queue_run() {                         # queue_run [VAR=value…] → $FX/queue.l
   cat > "$FX/notify.sh" <<'EON'
 printf '%s\n---\n' "$*" >> "$(dirname "$0")/notify.log"
 EON
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FLEET_NOTIFY_CMD="bash $FX/notify.sh" \
-      FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      "$@" bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FLEET_NOTIFY_CMD="bash $FX/notify.sh" \
+      FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1 "$@"
 }
 
 # Red when the merge call is removed from the queue: the story reaches PASS and
@@ -1281,7 +1289,7 @@ case_69_queue_merges_a_pass() {
   [[ "$(git -C "$REPO" rev-parse "origin/epic/test^{tree}")" != "$before_tree" ]] \
     && ok || fail "the epic has the story's change"
   assert_grep "merged" "$FX/notify.log" "the human is told it merged"
-  assert_grep "/revert $STORY" "$FX/notify.log" "and told the exact way to undo it"
+  assert_grep "/revert t $STORY" "$FX/notify.log" "and told the exact way to undo it"
 }
 
 # A FAIL must never merge, however the queue is feeling. Red when the verdict
@@ -1347,11 +1355,7 @@ case_74_merge_epic_into_integration() {
   local before; before="$(git -C "$REPO" rev-parse origin/base)"
 
   MLOG="$FX/merge-epic.log"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      bash fleet/merge.sh --epic epic/test ) > "$MLOG" 2>&1
+  merge_epic "$MLOG"
   local rc=$?
   assert_eq "$rc" 0 "exit code"
   [[ "$(git -C "$REPO" rev-parse origin/base)" != "$before" ]] && ok || fail "the integration branch moved"
@@ -1363,11 +1367,7 @@ case_74_merge_epic_into_integration() {
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
   merge_run
   before="$(git -C "$REPO" rev-parse origin/base)"
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=false LINT_CMD=true \
-      FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      bash fleet/merge.sh --epic epic/test ) > "$FX/merge-epic2.log" 2>&1
+  merge_epic "$FX/merge-epic2.log" BUILD_CMD=false
   assert_eq "$?" 1 "exit code (die)"
   assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
 }
@@ -1377,7 +1377,7 @@ case_74_merge_epic_into_integration() {
 case_75_merge_epic_refuses_non_epic() {
   CASE="75 --epic refuses a branch that is not an epic"; epic_story c75
   local before; before="$(git -C "$REPO" rev-parse origin/base)"
-  local out; out="$( cd "$REPO" && env BASE_BRANCH=base bash fleet/merge.sh --epic base 2>&1 )"
+  local out; out="$( cd "$FX" && bash "$FLEET/merge.sh" t --epic base 2>&1 )"
   assert_contains "$out" "epic/" "the message says what it will take"
   assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "and nothing moved"
 }
@@ -1483,7 +1483,7 @@ case_79_writers_do_not_collide() {
   local holder=$!
   sleep 0.5
 
-  update 300 42 "/promote $STORY"
+  update 300 42 "/promote t $STORY"
   bot poll
   wait "$holder" 2>/dev/null
 
@@ -1497,12 +1497,12 @@ case_79_writers_do_not_collide() {
 case_80_status_epics() {
   CASE="80 status.sh --epics says where each epic stands"; epic_story c80
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  local out; out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --epics )"
+  local out; out="$( status_run --epics )"
   assert_contains "$out" "epic/test" "the epic is listed"
   assert_contains "$out" "1 story" "with how many stories belong to it"
   assert_contains "$out" "0 merged" "and how many of them have landed on it"
   merge_run
-  out="$( cd "$REPO" && BASE_BRANCH=base bash fleet/status.sh --epics )"
+  out="$( status_run --epics )"
   assert_contains "$out" "1 merged" "which changes when one does"
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
 }
@@ -1531,13 +1531,7 @@ case_43_refresh_diverged() {
   git -C "$FX/origin2" commit -qm "phone: promote story to ready"
   git -C "$FX/origin2" push -q origin base
 
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
 
   assert_eq "$(field status)" done "AC1: story reached done"
   git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
@@ -1552,13 +1546,7 @@ case_44_refresh_fail() {
   # Break the origin URL so fetch fails immediately.
   git -C "$REPO" remote set-url origin "/no/such/path"
 
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
 
   assert_eq "$(field status)" done "AC2: story reached done despite fetch failure"
   local rfl; rfl="$(grep 'refresh failed' "$FX/queue.log" | head -1)"
@@ -1599,13 +1587,7 @@ case_45_conflict_leaves_local_work() {
   git -C "$FX/origin2" commit -qm "origin: origin version"
   git -C "$FX/origin2" push -q origin base
 
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_MUTATIONS=patch FAKE_VITEST=marker \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
-      bash fleet/run-queue.sh ) > "$FX/queue.log" 2>&1
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
 
   git -C "$REPO" merge-base --is-ancestor "$pre_head" HEAD \
     && ok || fail "AC3: pre-run HEAD is not an ancestor of new HEAD"
@@ -1654,11 +1636,7 @@ case_81_existing_merge_preserved() {
   git -C "$REPO" add conflict-file.txt
   # MERGE_HEAD now set; the resolution is staged but not committed.
 
-  ( cd "$REPO" && env PATH="$REPO/fleet/test:$PATH" \
-      BASE_BRANCH=base INSTALL_CMD=true PUSH_STATUS=1 \
-      VITEST_CMD="$REPO/fleet/test/vitest" BUILD_CMD=true LINT_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      bash fleet/run-queue.sh --max 0 ) > "$FX/queue.log" 2>&1
+  queue MAX=0
 
   assert_file "$REPO/.git/MERGE_HEAD" "AC81: MERGE_HEAD not aborted by refresh"
   assert_eq "$(git -C "$REPO" show :conflict-file.txt)" \
