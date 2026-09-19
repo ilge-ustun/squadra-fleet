@@ -43,6 +43,21 @@ if [[ -n "${FAKE_TRACE_DIR:-}" ]]; then
   exit 3
 fi
 
+# A clean environment, always (L-27). The fixtures assume the scripts'
+# DEFAULTS; whatever the calling shell has exported — MAX_ROUNDS=1 from a
+# hand-run round, say — would silently become the suite's configuration and
+# turn correct cases into failures that look like findings. An allowlist,
+# not a drop-list: a drop-list must grow with every new seam and the once it
+# is forgotten the symptom is indistinguishable from a real failure. The
+# three override seams are the red-observation mechanism and must survive.
+if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
+  exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
+       FLEET_LAUNCH_OVERRIDE="${FLEET_LAUNCH_OVERRIDE:-}" \
+       FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
+       FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
+       FLEET_TEST_CLEAN=1 bash "$0" "$@"
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLEET_HOME="$HERE"                    # the fleet under test is this working tree
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fleet-test.XXXXXX")"
@@ -1653,6 +1668,25 @@ case_81_existing_merge_preserved() {
 
 # ── run ──────────────────────────────────────────────────────────────────────
 
+# L-27. The launcher no longer runs this suite, but a developer's shell can
+# still export MAX_ROUNDS=1 and reproduce it exactly: cases 4, 5, 9 and 27
+# need the two-round ceiling and would fail looking like real findings. The
+# suite therefore re-executes itself under env -i with a short allowlist
+# before any fixture is built. This case is the suite looking at its own
+# environment — the only vantage point from which the leak is visible.
+#
+# Red when the re-exec at the top is deleted: MAX_ROUNDS=1 bash test-lib.sh 88
+case_88_suite_env_is_clean() {
+  CASE="88 the suite runs under a clean environment"
+  local leaked="" v
+  for v in MAX_ROUNDS BASE_BRANCH VITEST_CMD BUILD_CMD LINT_CMD INSTALL_CMD PUSH_STATUS AGENT_TIMEOUT; do
+    [[ -v "$v" ]] && leaked+="$v "
+  done
+  assert_eq "$leaked" "" "launcher seams leaked into the suite's environment"
+  [[ -n "${PATH:-}" ]] && ok || fail "PATH survived, or nothing would run"
+  [[ -n "${HOME:-}" ]] && ok || fail "HOME survived, or git would have no identity"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -1687,7 +1721,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_75_merge_epic_refuses_non_epic case_76_story_model
        case_77_launcher_notifies_a_stop case_78_round_cost_is_recorded
        case_79_writers_do_not_collide case_80_status_epics
-       case_81_existing_merge_preserved)
+       case_81_existing_merge_preserved case_88_suite_env_is_clean)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

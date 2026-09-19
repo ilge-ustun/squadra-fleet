@@ -437,3 +437,5 @@ subprocess cannot report back.
 environment before any fixture is built: a developer shell with `MAX_ROUNDS=1`
 exported would otherwise reproduce this exactly.
 
+**Enforced by:** `case_88_suite_env_is_clean`
+
