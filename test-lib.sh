@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #
-# fleet/test-lib.sh — tests for fleet/launch.sh, with fake agents.
+# test-lib.sh — tests for launch.sh and the other scripts, with fake agents.
 #
-#   bash fleet/test-lib.sh              run every case
-#   bash fleet/test-lib.sh blocked      run cases whose name contains "blocked"
+#   bash test-lib.sh              run every case
+#   bash test-lib.sh blocked      run cases whose name contains "blocked"
 #
 # No network, no npm, no models. Each case gets a fresh fixture:
 #
-#   $TMP/<case>/origin.git   bare local clone of this repo — the launcher's `origin`
-#   $TMP/<case>/repo         working clone on branch `base`, with
-#                            - THIS working tree's fleet/ copied in and committed,
-#                              so the launcher under test is the one on disk,
-#                              not the one at HEAD
-#                            - .stories/ and .review/ emptied, one fixture story
+#   $TMP/<case>/origin.git   a bare repo — the launcher's `origin`
+#   $TMP/<case>/repo         a synthetic target on branch `base`: src/marker.txt
+#                            (the file the fakes mutate), one fixture story,
+#                            a .stories/TEMPLATE.md, and THIS working tree's
+#                            fleet copied in and committed, so the launcher
+#                            under test is the one on disk, not the one at HEAD
 #   $TMP/<case>/trace        what the fakes recorded
 #
-# fleet/test/{claude,codex,npm} are put first on PATH; launch.sh resolves
+# test/{claude,codex,npm} are put first on PATH; launch.sh resolves
 # `claude` and `codex` by bare name (`command -v`, and the calls at the
 # builder and reviewer steps), so no launcher change is needed for the
 # substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of repo/,
@@ -24,7 +24,7 @@
 # Observing red. Most cases characterise behaviour launch.sh already has, so
 # "see it fail first" means: run the case against a copy of launch.sh with
 # the named block deleted. FLEET_LAUNCH_OVERRIDE=<file> substitutes that
-# copy into the fixture; the real fleet/launch.sh is never modified.
+# copy into the fixture; the real launch.sh is never modified.
 # FLEET_RENDER_OVERRIDE does the same for render.sh. Each case's comment
 # names the block whose deletion turns it red.
 #
@@ -44,7 +44,7 @@ if [[ -n "${FAKE_TRACE_DIR:-}" ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC="$(git -C "$HERE" rev-parse --show-toplevel)"
+FLEET_HOME="$HERE"                    # the fleet under test is this working tree
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fleet-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -78,24 +78,39 @@ shadow_check() {                      # shadow_check <fixture-repo> — die unle
   done
 }
 
-fixture() {                           # fixture <case-name> → FX REPO TRACE
+fixture() {                           # fixture <case-name> [story-status] → FX REPO TRACE
   FX="$TMP/$1"; REPO="$FX/repo"; TRACE="$FX/trace"
+  local status="${2:-ready}"
   mkdir -p "$TRACE"; : > "$TRACE/calls"
 
-  git clone -q --bare "$SRC" "$FX/origin.git"
-  git clone -q "$FX/origin.git" "$REPO"
+  # A synthetic target, not a clone of anything real: a bare origin, a working
+  # clone on `base`, a marker file for the fakes to mutate, and the fleet.
+  git init -q --bare "$FX/origin.git"
+  git -C "$FX/origin.git" symbolic-ref HEAD refs/heads/base   # a clone of it checks out base, quietly
+  git init -q -b base "$REPO"
   git -C "$REPO" config user.name  fleet-test
   git -C "$REPO" config user.email fleet-test@localhost
-  git -C "$REPO" checkout -q -b base
+  git -C "$REPO" remote add origin "$FX/origin.git"
 
-  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
-  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$REPO/fleet/launch.sh"
-  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$REPO/fleet/render.sh"
-  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
-  mkdir -p "$REPO/.stories"
-  cat > "$REPO/.stories/$STORY.md" <<'EOF'
+  mkdir -p "$REPO/src" "$REPO/.stories"
+  printf 'the fake agents mutate this file\n' > "$REPO/src/marker.txt"
+  printf '# fixture target\n' > "$REPO/README.md"
+  # .env.local is untracked in production because the target ignores .env*;
+  # without this line seed_env would dirty every reviewer worktree.
+  printf '.env.local\n.runs/\n.review-out/\n' > "$REPO/.gitignore"
+  cat > "$REPO/.stories/TEMPLATE.md" <<'EOF'
 ---
-status: ready
+status: draft
+round: 0
+---
+
+# Story NNN: title
+
+**AC1 — one bounded claim.** Goes red when removed.
+EOF
+  cat > "$REPO/.stories/$STORY.md" <<EOF
+---
+status: $status
 round: 0
 ---
 
@@ -103,12 +118,18 @@ round: 0
 
 **AC1 — the fixture has one criterion.** Goes red when removed.
 EOF
-  # SEED_FILES=(.env.local) and the launcher now dies without it. Production
-  # has one; a bare clone does not, because it is gitignored. Untracked here
+
+  mkdir -p "$REPO/fleet"
+  cp -r "$FLEET_HOME/." "$REPO/fleet"
+  rm -rf "$REPO/fleet/.git" "$REPO/fleet/repos" "$REPO/fleet/.env.fleet" "$REPO/fleet/.bot-offset"
+  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$REPO/fleet/launch.sh"
+  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$REPO/fleet/render.sh"
+
+  # SEED_FILES=(.env.local) and the launcher dies without it. Untracked here
   # too, so the fixture matches production rather than papering over it.
   printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
-  git -C "$REPO" add -A fleet .stories
-  git -C "$REPO" commit -qm "fixture: launcher under test + story $STORY"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "fixture: target + launcher under test + story $STORY"
   git -C "$REPO" push -q -u origin base
 
   shadow_check "$REPO"
@@ -283,7 +304,7 @@ case_9_spec() {
 # deleted (a prompt with a gap reaches the agent) or the leftover warning is.
 case_10_render_prompt() {
   CASE="10 render_prompt guards"
-  local pd="$TMP/prompts" render="${FLEET_RENDER_OVERRIDE:-$SRC/fleet/render.sh}" out rc
+  local pd="$TMP/prompts" render="${FLEET_RENDER_OVERRIDE:-$FLEET_HOME/render.sh}" out rc
   mkdir -p "$pd"
   printf 'id {{STORY_ID}}\n' > "$pd/a.md"
   printf 'x {{NOPE}}\n'      > "$pd/b.md"
@@ -502,9 +523,6 @@ case_33_story_amendment_reaches_builder() {
   assert_grep 'amended after the branch was cut' "$TRACE/codex-prompt-2" "reviewer prompt carries it too"
   assert_grep '^acs: .*AC2' "$REPO/.review/$STORY.md" "verdict computed against the amended AC set"
   assert_grep 'commits this round: 1' "$REPO/.review/$STORY.md" "no sync commit inflating the count"
-  # Only commits this run made — the fixture clones the real repo, whose
-  # history genuinely contains "spec synced" commits from stories 007-010.
-  assert_not_grep 'spec synced' <(git -C "$FX/wt-$STORY" log --format=%s origin/base..HEAD) "no fleet state committed to the story branch"
 }
 
 # REVIEW_ONLY: re-review the branch head without a builder round. The case a
@@ -612,17 +630,17 @@ case_38_story_base() {
   assert_grep 'EPIC_MARKER.txt' <(git -C "$REPO" show "origin/epic/test:EPIC_MARKER.txt" >/dev/null 2>&1 && echo EPIC_MARKER.txt) "epic base untouched by the run"
 }
 
-# fleet/lint-story.sh — mechanical, no fixture and no launcher needed.
+# lint-story.sh — mechanical, no fixture and no launcher needed.
 # Red when a check is removed; the false-positive guard is red when the "/"
 # requirement on citations is dropped, which is how the first version of that
 # check behaved: 20 false positives across the real stories, zero findings.
 case_39_lint_story() {
   CASE="39 lint-story: shape and citations"
   local d="$TMP/lint"; mkdir -p "$d"
-  local lint="$SRC/fleet/lint-story.sh" out rc
+  local lint="$FLEET_HOME/lint-story.sh" out rc
 
   write_story() { printf '%s' "$2" > "$d/$1.md"; }
-  lint() { out="$(cd "$SRC" && bash "$lint" "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
+  lint() { out="$(cd "$FLEET_HOME" && bash "$lint" "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
 
   write_story good '---
 status: ready
@@ -630,7 +648,7 @@ round: 0
 scope_deny: src/x/*
 ---
 # Story: fine
-It cites `fleet/lint-story.sh` and `fleet/launch.sh:1`.
+It cites `prompts/rules.md` and `prompts/rules.md:1`.
 ## Acceptance criteria
 **AC1 — one bounded claim.** Goes red when removed.
 ## Known weakness
@@ -657,7 +675,7 @@ status: ready
 round: 0
 ---
 # Story: rotted
-See `docs/fleet/does-not-exist.md` for the diagnosis.
+See `docs/does-not-exist.md` for the diagnosis.
 ## Acceptance criteria
 **AC1 — a claim.** Goes red when removed.
 '
@@ -669,7 +687,7 @@ status: ready
 round: 0
 ---
 # Story: rotted with a line number
-See `docs/fleet/does-not-exist.md:12` for the diagnosis.
+See `docs/does-not-exist.md:12` for the diagnosis.
 ## Acceptance criteria
 **AC1 — a claim.** Goes red when removed.
 '
@@ -681,7 +699,7 @@ status: ready
 round: 0
 ---
 # Story: out of range
-See `fleet/lint-story.sh:99999`.
+See `prompts/rules.md:99999`.
 ## Acceptance criteria
 **AC1 — a claim.** Goes red when removed.
 '
@@ -1316,7 +1334,7 @@ case_71_auto_merge_can_be_turned_off() {
 
 # Phase F3. A lesson is prose, and prose cannot fail. What CAN fail is a
 # lesson that claims an instrument it no longer has: rename a case, delete it,
-# drop it from CASES, and docs/fleet/lessons.md goes on telling the next agent
+# drop it from CASES, and docs/lessons.md goes on telling the next agent
 # that the mistake is covered.
 #
 # This checks the working tree, not a fixture: it is about the files on disk,
@@ -1326,7 +1344,7 @@ case_71_auto_merge_can_be_turned_off() {
 # is not in CASES and therefore never runs. Both observed, 18 Sep.
 case_72_lessons_name_real_cases() {
   CASE="72 every lesson that claims an instrument still has it"
-  local lessons="$SRC/docs/fleet/lessons.md" lib="$SRC/fleet/test-lib.sh"
+  local lessons="$FLEET_HOME/docs/lessons.md" lib="$FLEET_HOME/test-lib.sh"
   assert_file "$lessons" "the lessons file is where it is expected"
   local names cases_block missing="" unrun="" n
   cases_block="$(sed -n '/^CASES=(/,/)$/p' "$lib")"
@@ -1544,38 +1562,7 @@ case_80_status_epics() {
 # divergence) or with `git reset --hard` (pre-run HEAD is no longer ancestor).
 case_43_refresh_diverged() {
   CASE="43 story promoted on origin runs even with local-only commits"
-  FX="$TMP/c43"; REPO="$FX/repo"; TRACE="$FX/trace"
-  mkdir -p "$TRACE"; : > "$TRACE/calls"
-
-  git clone -q --bare "$SRC" "$FX/origin.git"
-  git clone -q "$FX/origin.git" "$REPO"
-  git -C "$REPO" config user.name  fleet-test
-  git -C "$REPO" config user.email fleet-test@localhost
-  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
-  # build their fixture by hand rather than through fixture(), so they have
-  # to seed it themselves — found when story 014 merged into the branch that
-  # made the missing-seed warning a die.
-  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
-  git -C "$REPO" checkout -q -b base
-
-  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
-  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
-  mkdir -p "$REPO/.stories"
-  cat > "$REPO/.stories/$STORY.md" <<'EOF'
----
-status: draft
-round: 0
----
-
-# Story 900: fixture story
-
-**AC1 — the fixture has one criterion.** Goes red when removed.
-EOF
-  git -C "$REPO" add -A fleet .stories
-  git -C "$REPO" commit -qm "fixture: launcher + story $STORY (draft)"
-  git -C "$REPO" push -q -u origin base
-
-  shadow_check "$REPO"
+  fixture c43 draft
 
   # Checkout adds a commit touching a different file; story stays draft.
   echo "local-only" > "$REPO/local-only.txt"
@@ -1634,40 +1621,12 @@ case_44_refresh_fail() {
 # gets origin's version), or when the uncommitted edit is lost.
 case_45_conflict_leaves_local_work() {
   CASE="45 conflicting refresh leaves local work unchanged"
-  FX="$TMP/c45"; REPO="$FX/repo"; TRACE="$FX/trace"
-  mkdir -p "$TRACE"; : > "$TRACE/calls"
-
-  git clone -q --bare "$SRC" "$FX/origin.git"
-  git clone -q "$FX/origin.git" "$REPO"
-  git -C "$REPO" config user.name  fleet-test
-  git -C "$REPO" config user.email fleet-test@localhost
-  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
-  # build their fixture by hand rather than through fixture(), so they have
-  # to seed it themselves — found when story 014 merged into the branch that
-  # made the missing-seed warning a die.
-  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
-  git -C "$REPO" checkout -q -b base
-
-  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
-  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
-  mkdir -p "$REPO/.stories"
-  cat > "$REPO/.stories/$STORY.md" <<'EOF'
----
-status: ready
-round: 0
----
-
-# Story 900: fixture story
-
-**AC1 — the fixture has one criterion.** Goes red when removed.
-EOF
+  fixture c45
   printf 'line: original\n'  > "$REPO/conflict-file.txt"
   printf 'initial content\n' > "$REPO/clean.txt"
-  git -C "$REPO" add -A fleet .stories conflict-file.txt clean.txt
-  git -C "$REPO" commit -qm "fixture: launcher + story + files"
-  git -C "$REPO" push -q -u origin base
-
-  shadow_check "$REPO"
+  git -C "$REPO" add conflict-file.txt clean.txt
+  git -C "$REPO" commit -qm "fixture: files"
+  git -C "$REPO" push -q origin base
 
   # Checkout: commit a change to conflict-file.txt; story stays ready.
   printf 'line: checkout\n' > "$REPO/conflict-file.txt"
@@ -1716,39 +1675,11 @@ EOF
 # Uses --max 0 so commit_status never runs and MERGE_HEAD stays set.
 case_81_existing_merge_preserved() {
   CASE="81 an in-progress merge resolution is not discarded by the refresh"
-  FX="$TMP/c81"; REPO="$FX/repo"; TRACE="$FX/trace"
-  mkdir -p "$TRACE"; : > "$TRACE/calls"
-
-  git clone -q --bare "$SRC" "$FX/origin.git"
-  git clone -q "$FX/origin.git" "$REPO"
-  git -C "$REPO" config user.name  fleet-test
-  git -C "$REPO" config user.email fleet-test@localhost
-  # SEED_FILES=(.env.local) and the launcher dies without it. These cases
-  # build their fixture by hand rather than through fixture(), so they have
-  # to seed it themselves — found when story 014 merged into the branch that
-  # made the missing-seed warning a die.
-  printf 'FLEET_TEST=1\n' > "$REPO/.env.local"
-  git -C "$REPO" checkout -q -b base
-
-  rm -rf "$REPO/fleet"; cp -r "$SRC/fleet" "$REPO/fleet"
-  git -C "$REPO" rm -rq --ignore-unmatch .stories .review
-  mkdir -p "$REPO/.stories"
-  cat > "$REPO/.stories/$STORY.md" <<'EOF'
----
-status: ready
-round: 0
----
-
-# Story 900: fixture story
-
-**AC1 — the fixture has one criterion.** Goes red when removed.
-EOF
+  fixture c81
   printf 'line: original\n' > "$REPO/conflict-file.txt"
-  git -C "$REPO" add -A fleet .stories conflict-file.txt
-  git -C "$REPO" commit -qm "fixture: launcher + story + files"
-  git -C "$REPO" push -q -u origin base
-
-  shadow_check "$REPO"
+  git -C "$REPO" add conflict-file.txt
+  git -C "$REPO" commit -qm "fixture: files"
+  git -C "$REPO" push -q origin base
 
   # Checkout: local commit that conflicts with origin.
   printf 'line: checkout\n' > "$REPO/conflict-file.txt"
