@@ -61,9 +61,51 @@ Every merge runs the suite, build and lint on the **merged** result in a
 throwaway worktree and pushes only if that is green (`MERGE_MODE=direct`).
 A repo can instead ask for a request on its host (`MERGE_MODE=pr`, below).
 
-`status.sh` shows a story's landing state, derived on every run: `awaiting
-merge` (PASS, nobody merged), `on epic` (merged into an epic not yet in the
-integration branch), `landed`, or its frontmatter status as is.
+### What STATUS means
+
+`status.sh` shows a **landing state**, derived from git and the computed
+verdict on every run and never stored. The frontmatter `status:` is the
+launcher's word (`draft ready in_progress blocked needs_human done`); the
+landing state says what became of a `done` story's code:
+
+| shown | meaning | what it needs |
+|---|---|---|
+| `draft` `ready` `in_progress` `blocked` `needs_human` | the frontmatter status, as is | the pipeline, or a human (`/promote`, `/answer`) |
+| `awaiting merge` | `done`, computed PASS, branch still there, nobody merged it | a human: `merge.sh <id> --land` or `/merge <repo> <id>` |
+| `on epic` | `done` and merged into its epic, which is not yet in the integration branch | the epic to land: `/merge <repo> epic/<name>` |
+| `landed` | `done` and its code is in the integration branch — its branch, or the `merged:` sha in its frontmatter, is an ancestor of it | nothing |
+| `done` | `done` and none of the above: a FAIL nobody merged, **or** a story merged by hand whose branch is gone and whose `merged:` sha was never recorded — git has nothing to check | nothing, or a `merged: <sha>` line in the story if you want it to read `landed` |
+
+The machine claims only what it can prove: a story whose code is in the
+integration branch but whose evidence was deleted reads `done`, not
+`landed`.
+
+## Watching it
+
+Every view below is read-only and safe while a round is running.
+
+```bash
+cd ~/work/fleet
+bash status.sh khaita                  # the epics, then every story — landing state, round, verdict
+bash status.sh khaita 013              # one story, with its latest round's Machine block
+journalctl --user -u fleet-queue -f    # the queue's drains, live (Ctrl-C to leave)
+journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
+```
+
+A story's row says `RUNNING` while something is live in its worktree.
+The raw output of that round is in the target, machine-local and
+gitignored, one flat directory named by story and round:
+
+```bash
+ls -t ~/work/khaita/khaita-app/.runs/ | grep ^013 | head       # newest first
+tail -f ~/work/khaita/khaita-app/.runs/013-round1-*.log        # a mutation being run
+```
+
+What the round *decided* is committed: `.review/013.md` (the computed
+verdict on line 3, a `### Machine` block per round) and
+`.review/013/round-N/` (baseline, scope, every mutation and probe, the
+builder's and reviewer's own words). From the phone, `/status <repo>` is
+the first command above and `/why <repo> <id>` is the Machine block.
 
 ## Commands
 
