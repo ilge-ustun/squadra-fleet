@@ -10,9 +10,9 @@
 #   status.sh khaita --json    the same values as JSON, for the bot and merge.sh
 #   status.sh khaita --epics   only the epic block — what a human decides to merge
 #   status.sh khaita --bot     the phone form: a <pre> block wraps at ~40
-#                              columns there, so no table — a short state line
-#                              and the title under it, newest story first; no
-#                              colour; the merge hint spelled as the bot command
+#                              columns there, so no table — per story: id and
+#                              title, then base | state | round | verdict,
+#                              between rules; newest first; no colour
 #
 # The verdict shown is the COMPUTED one (`verdict:` line 3 of .review/<id>.md),
 # not the reviewer's — see prompts/README.md, "The verdict contract".
@@ -235,15 +235,19 @@ done
 
 if (( JSON == 1 )); then printf '%s' "$JSON_ROWS" | jq -s .; exit 0; fi
 
-# The phone: one short line that never wraps, the title under it, and what
-# would have been NOTES on a third. Newest first — the current work is what
-# the screen shows before any scrolling.
+# The phone, the shape the user asked for on 20 Sep: a rule, then per story
+# the id and title (wrapping is harmless there), one line with the base,
+# the state, the round and the verdict, what would have been NOTES, and a
+# rule. Newest first — the current work is what the screen shows before
+# any scrolling.
 if (( BOT == 1 )); then
+  (( ${#R_ID[@]} )) && echo "-------"
   for (( i = ${#R_ID[@]} - 1; i >= 0; i-- )); do
     r="${R_ROUND[$i]}"; [[ "$r" =~ ^[0-9]+$ ]] && r="R$r"
-    printf '%s  %s  %s  %s  → %s\n     %s\n' \
-      "${R_ID[$i]}" "${R_LAND[$i]}" "$r" "${R_VERDICT[$i]}" "${R_INTO[$i]}" "${R_TITLE[$i]}"
-    [[ -n "${R_NOTES[$i]}" ]] && printf '     ! %s\n' "${R_NOTES[$i]}"
+    printf '%s %s\n→ %s | %s | %s | %s\n' \
+      "${R_ID[$i]}" "${R_TITLE[$i]}" "${R_INTO[$i]}" "${R_LAND[$i]}" "$r" "${R_VERDICT[$i]}"
+    [[ -n "${R_NOTES[$i]}" ]] && printf '! %s\n' "${R_NOTES[$i]}"
+    echo "-------"
   done
   [[ -n "$DETAIL" ]] && { echo; printf '%s\n' "$DETAIL"; }
   exit 0
