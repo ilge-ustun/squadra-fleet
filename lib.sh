@@ -24,7 +24,7 @@ PROMPTS_DIR="$FLEET_HOME/prompts"
 # and nothing here ever reaches the network.
 FLEET_NOTIFY_CMD="${FLEET_NOTIFY_CMD:-bash $FLEET_HOME/telegram.sh send}"
 
-FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES"
+FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD"
 FLEET_REPO_REQUIRED="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD PROBE_DIR"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
@@ -70,6 +70,15 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
   # SEED_FILES may legitimately be empty; it must still be stated.
   [[ -v SEED_FILES ]] || die ".fleet/config for '$name' sets no SEED_FILES (SEED_FILES= is allowed)"
   read -ra SEED_FILES_ARR <<< "${SEED_FILES:-}"
+  # How a merge reaches origin: `direct` pushes after the post-merge baseline;
+  # `pr` pushes the branch and runs PR_CMD, and the host merges. Absent means
+  # direct — the only mode there was until 20 Sep.
+  MERGE_MODE="${MERGE_MODE:-direct}"
+  case "$MERGE_MODE" in
+    direct) ;;
+    pr) [[ -n "${PR_CMD:-}" ]] || die ".fleet/config for '$name' says MERGE_MODE=pr but sets no PR_CMD" ;;
+    *)  die ".fleet/config for '$name' sets MERGE_MODE=$MERGE_MODE — direct or pr" ;;
+  esac
 }
 
 # ── story frontmatter ────────────────────────────────────────────────────────

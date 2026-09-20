@@ -1058,10 +1058,15 @@ epic_story() {                        # epic_story <case-name> — a story on an
   sed -i '2a base: epic/test' "$REPO/.stories/$STORY.md"
 }
 
-merge_run() {                         # merge_run [VAR=value…] → MLOG MRC
+merge_run() {                         # merge_run [VAR=value…] [-- <merge.sh flags…>] → MLOG MRC
+  local -a vars=() flags=(); local a after=0
+  for a in "$@"; do
+    if [[ "$a" == -- ]]; then after=1; continue; fi
+    if (( after )); then flags+=("$a"); else vars+=("$a"); fi
+  done
   MLOG="$FX/merge.log"
   ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      "$@" bash "$FLEET/merge.sh" t "$STORY" ) > "$MLOG" 2>&1
+      "${vars[@]}" bash "$FLEET/merge.sh" t "$STORY" "${flags[@]}" ) > "$MLOG" 2>&1
   MRC=$?
 }
 merge_epic() {                        # merge_epic <log> [VAR=value…] → exit code
@@ -1710,6 +1715,17 @@ EOF
   sed -i '/^PROBE_DIR=/d' "$d/a/target/.fleet/config"
   probe t; assert_eq "$rc" 1 "a missing required key dies"; assert_contains "$out" "PROBE_DIR" "and names it"
   probe t PROBE_DIR=probes; assert_eq "$rc" 0 "unless the environment supplies it"
+
+  # Plan of 20 Sep: how a repo lands. Absent means direct; pr needs the command.
+  probe t PROBE_DIR=probes MERGE_MODE=pr
+  assert_eq "$rc" 1 "MERGE_MODE=pr without PR_CMD dies"; assert_contains "$out" "PR_CMD" "and names the missing key"
+  probe t PROBE_DIR=probes MERGE_MODE=bogus
+  assert_eq "$rc" 1 "an unknown MERGE_MODE dies"; assert_contains "$out" "MERGE_MODE" "and names the key"
+  probe t PROBE_DIR=probes MERGE_MODE=pr PR_CMD='echo url'
+  assert_eq "$rc" 0 "pr with a command loads"
+  printf 'MERGE_MODE=pr\nPR_CMD=echo\n' >> "$d/a/target/.fleet/config"
+  probe t PROBE_DIR=probes MERGE_MODE=direct
+  assert_eq "$rc" 0 "MERGE_MODE from the environment wins over the file, like every key"
 }
 
 # The harness sources <target>/.fleet/config. A builder that can change it on
@@ -1951,6 +1967,113 @@ case_93_bot_status_pre() {
   assert_eq "$(cat "$TRACE"/curl-args-* | grep -cE "(^|<pre>)9[0-9][0-9]  $long  ")" 25 "every row arrived whole, one of them opening the second message"
 }
 
+# Plan of 20 Sep. merge.sh refuses the integration branch because the QUEUE
+# must never land anything there. A human's word from a phone is a different
+# thing: --land lifts that one refusal for this invocation. The queue never
+# passes it, so auto-merge stays story → epic. main and master stay refused
+# whatever the flag, and a story that lives on an epic is not landed one by
+# one — its epic is, and the refusal says how.
+#
+# Red when --land is unknown or ignored, when it also lifts main, when it lets
+# an epic story skip its epic, or when the queue starts passing it.
+case_91_merge_land() {
+  CASE="91 --land lands a PASS story on the integration branch, a human's call"; fixture c91
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  merge_run
+  assert_eq "$MRC" 1 "without --land the refusal of case 59 stands"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "and the integration branch did not move"
+  local nv; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  assert_grep '[-]-land' "$MLOG" "the refusal names the flag a human would pass"
+  merge_run -- --land
+  assert_eq "$MRC" 0 "with --land it merges"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" $((nv + 1)) "after the post-merge baseline"
+  [[ "$(git -C "$REPO" rev-parse origin/base)" != "$before" ]] && ok || fail "the integration branch moved"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "and holds the story"
+  local sha; sha="$(field merged)"
+  [[ -n "$sha" ]] && git -C "$REPO" merge-base --is-ancestor "$sha" origin/base && ok \
+    || fail "merged: records a sha that is in the integration branch"
+
+  CASE="91b --land does not lift main"; fixture c91b
+  git -C "$REPO" push -q origin base:main
+  sed -i '2a base: main' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run -- --land
+  assert_eq "$MRC" 1 "refused"
+  assert_grep 'main' "$MLOG" "naming main"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/main && fail "main took the story" || ok
+
+  CASE="91c a story on an epic is landed through its epic, not by --land"; epic_story c91c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local ebefore; ebefore="$(epic_head)"
+  merge_run -- --land
+  assert_eq "$MRC" 1 "refused"
+  assert_grep '[-]-epic epic/test' "$MLOG" "with the epic command named"
+  # The launcher's own status commits move the integration branch; what must
+  # not reach it is the story.
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && fail "the integration branch took the story" || ok
+  assert_eq "$(epic_head)" "$ebefore" "nor did the epic move"
+  # Once it is on its epic the answer is the same command, not "already merged".
+  merge_run
+  assert_eq "$MRC" 0 "merged into its epic"
+  merge_run -- --land
+  assert_eq "$MRC" 1 "still refused with --land"
+  assert_grep '[-]-epic epic/test' "$MLOG" "still naming the epic command"
+
+  CASE="91d the queue still never lands a PASS story on the integration branch"; fixture c91d
+  queue_run
+  assert_eq "$(field status)" done "the story passed"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && fail "the integration branch took the story" || ok
+  assert_eq "$(field merged)" "" "nothing recorded"
+}
+
+# Plan of 20 Sep. A repo whose host wants a request rather than a push:
+# MERGE_MODE=pr pushes the branch and runs PR_CMD in the target checkout with
+# the source branch appended and PR_SOURCE/PR_TARGET in its environment; what
+# it prints — the request's URL — is the reply. Nothing is merged and nothing
+# recorded: the merge happens on the host and lands in origin/<base> like any
+# human merge. Every refusal applies as in direct mode.
+#
+# Red when MERGE_MODE is ignored (a merge happens), when the branch is not
+# pushed first, when the command does not get the branch, or when a refusal
+# is skipped in pr mode.
+case_92_merge_pr_mode() {
+  CASE="92 MERGE_MODE=pr pushes the branch and opens a request instead of merging"; epic_story c92
+  cat > "$FX/fake-pr.sh" <<'EOP'
+printf 'args=%s\nsource=%s\ntarget=%s\ncwd=%s\n' "$*" "${PR_SOURCE:-}" "${PR_TARGET:-}" "$(pwd -P)" >> "$(dirname "$0")/pr.log"
+echo "https://example.test/mr/1"
+EOP
+  local pr="bash $FX/fake-pr.sh"
+  merge_run MERGE_MODE=pr PR_CMD="$pr"
+  assert_eq "$MRC" 1 "a story that is not done is refused in pr mode too"
+  assert_no_file "$FX/pr.log" "and no request was opened"
+
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before nv; before="$(epic_head)"; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run MERGE_MODE=pr PR_CMD="$pr"
+  assert_eq "$MRC" 0 "exit 0"
+  git -C "$REPO" rev-parse --verify --quiet "origin/story/$STORY" >/dev/null && ok || fail "the story branch was pushed first"
+  assert_grep "^args=story/$STORY\$" "$FX/pr.log" "the command got the branch appended"
+  assert_grep "^source=story/$STORY\$" "$FX/pr.log" "and as PR_SOURCE"
+  assert_grep '^target=epic/test$' "$FX/pr.log" "and the base as PR_TARGET"
+  assert_grep "^cwd=$(cd "$REPO" && pwd -P)\$" "$FX/pr.log" "run in the target checkout"
+  assert_contains "$(cat "$MLOG")" "https://example.test/mr/1" "what it printed is the output"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  assert_eq "$(field merged)" "" "nothing recorded in the story"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$nv" "no post-merge baseline ran: the merge is the host's"
+
+  CASE="92b an epic in pr mode"; rm -f "$FX/pr.log"
+  merge_run
+  assert_eq "$MRC" 0 "landed on the epic directly, so the epic is ahead"
+  before="$(git -C "$REPO" rev-parse origin/base)"
+  merge_epic "$FX/merge-epic.log" MERGE_MODE=pr PR_CMD="$pr"
+  assert_eq "$?" 0 "exit 0"
+  assert_grep '^args=epic/test$' "$FX/pr.log" "the epic is the source"
+  assert_grep '^target=base$' "$FX/pr.log" "the integration branch the target"
+  assert_contains "$(cat "$FX/merge-epic.log")" "https://example.test/mr/1" "the URL is the output"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -1989,7 +2112,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_83_scope_fleet_config case_84_prompts_carry_the_targets_facts
        case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
-       case_90_status_titles_and_landing case_93_bot_status_pre)
+       case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
+       case_93_bot_status_pre)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

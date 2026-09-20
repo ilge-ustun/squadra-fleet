@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 #
 # merge.sh <repo> <id>          a story into its epic   — the queue calls this
+# merge.sh <repo> <id> --land   a story whose base IS the integration branch,
+#                               onto it — a human's word (/merge from the
+#                               phone); the queue never passes --land
 # merge.sh <repo> --epic <name> an epic into the integration branch — a human
 #                               calls this, and nothing in the fleet does
+#
+# MERGE_MODE (the target's .fleet/config, default direct) says how the result
+# reaches origin. direct: merge here, run the post-merge baseline, push. pr:
+# push the branch and run PR_CMD — the host's `glab mr create` or `gh pr
+# create` — in the target checkout with the source branch appended and
+# PR_SOURCE / PR_TARGET in its environment; what it prints (the request's
+# URL) is the output. Nothing is merged and nothing recorded in pr mode: the
+# merge happens on the host and lands in origin/<base> like any human merge.
+# Every refusal below applies in both modes.
 #
 # Merge a story into its epic branch, but only if the machine already said so
 # and only if the merged result still holds up.
@@ -15,8 +27,11 @@
 #                                         count; line 3 of .review/<id>.md is
 #                                         the harness's computation.
 #   something is live in the worktree   → no
+#   the story's base is main or master  → no, and never
 #   the story's base is the integration
-#   branch, main or master              → no, and never. Those are a human's.
+#   branch                              → no, unless a human said --land
+#   --land on a story that lives on an
+#   epic                                → no; its epic lands, with --epic
 #   already merged                      → nothing to do
 #
 # Then the part that earns the autonomy: the merge happens in a throwaway
@@ -32,18 +47,26 @@
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
-[[ $# -ge 2 ]] || die "usage: merge.sh <repo> <id> | <repo> --epic <epic/name>"
-load_repo "$1"; shift          # REPO_ROOT, BASE_BRANCH, the commands and SEED_FILES come from the target
+USAGE="usage: merge.sh <repo> <id> [--land] | <repo> --epic <epic/name>"
+[[ $# -ge 2 ]] || die "$USAGE"
+load_repo "$1"; shift          # REPO_ROOT, BASE_BRANCH, the commands, SEED_FILES and MERGE_MODE come from the target
 PUSH_STATUS="${PUSH_STATUS:-1}"
 
-MODE=story; ID="${1:-}"
-if [[ "$ID" == --epic ]]; then
-  MODE=epic; ID="${2:-}"
-  [[ -n "$ID" ]] || die "usage: merge.sh <repo> --epic <epic/name>"
+MODE=story; ID=""; LAND=0
+while (($#)); do
+  case "$1" in
+    --land) LAND=1; shift ;;
+    --epic) MODE=epic; ID="${2:-}"; [[ -n "$ID" ]] || die "$USAGE"; shift 2 ;;
+    -*)     die "unknown option $1 — $USAGE" ;;
+    *)      [[ -z "$ID" ]] || die "$USAGE"; ID="$1"; shift ;;
+  esac
+done
+if [[ "$MODE" == epic ]]; then
   # The one thing this must never do is point the same machinery at main.
   [[ "$ID" == epic/* ]] || die "--epic takes an epic/... branch, not '$ID'"
+  (( LAND == 0 )) || die "--epic already lands on $BASE_BRANCH; --land is for a story"
 else
-  [[ -n "$ID" ]] || die "usage: merge.sh <repo> <id> | <repo> --epic <epic/name>"
+  [[ -n "$ID" ]] || die "$USAGE"
   [[ -f "$REPO_ROOT/.stories/$ID.md" ]] || die "no such story: .stories/$ID.md"
 fi
 LOGID="${ID//\//-}"
@@ -78,16 +101,53 @@ LIVE="$(get live)";     MERGED="$(get merged)";   BRANCH="$(get branch)"
 [[ "$VERDICT" == PASS ]] || die "$ID computed $VERDICT, not PASS — the machine vetoed it"
 [[ "$LIVE" == false ]]   || die "$ID has something running in its worktree"
 [[ "$BRANCH" != "—" ]]   || die "$ID has no branch"
+# A human's --land on a story that lives on an epic gets the command that
+# works, merged into its epic already or not — before "already merged"
+# could answer instead.
+if (( LAND == 1 )); then
+  case "$BASE" in
+    main|master|"$BASE_BRANCH") ;;
+    *) die "$ID lives on $BASE, not on $BASE_BRANCH — land its epic: merge.sh $REPO_NAME --epic $BASE" ;;
+  esac
+fi
 [[ "$MERGED" == false ]] || { log "$ID is already merged into $BASE"; exit 0; }
 
+# The queue calls this on every computed PASS. It must never land anything
+# on the integration branch: that is a human's decision, and --land is how
+# a human says it (never from run-queue.sh). main and master stay refused
+# whatever the flag. A story that lives on an epic is not landed on its own
+# — its epic is, as one piece — so --land refuses it and names the command.
 case "$BASE" in
-  "$BASE_BRANCH"|main|master)
-    die "$ID is based on $BASE — the integration branch and main are merged by a human, never here" ;;
+  main|master)
+    die "$ID is based on $BASE — main is never merged here, --land or not" ;;
+  "$BASE_BRANCH")
+    (( LAND == 1 )) || die "$ID is based on $BASE — the integration branch is merged by a human: merge.sh $REPO_NAME $ID --land, or /merge $REPO_NAME $ID" ;;
 esac
 
 git -C "$REPO_ROOT" fetch -q origin || die "fetch failed"
 git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/$BASE" >/dev/null \
   || die "origin has no $BASE"
+fi
+
+# ── pr mode: the host merges ─────────────────────────────────────────────────
+#
+# The branch goes to origin (a story branch is never pushed by the launcher,
+# so this is its first push), PR_CMD opens the request, and its output —
+# the URL — is this script's output. No throwaway worktree, no post-merge
+# baseline here: the host's pipeline is that check, and the merge is the
+# reviewer's click. Nothing is recorded in the story; status.sh derives
+# `landed` from origin once the host has merged.
+if [[ "$MERGE_MODE" == pr ]]; then
+  [[ "$PUSH_STATUS" == "1" ]] || die "MERGE_MODE=pr pushes the branch; PUSH_STATUS=$PUSH_STATUS forbids it"
+  if [[ "$MODE" == story ]]; then
+    git -C "$REPO_ROOT" push -q origin "$BRANCH:refs/heads/$BRANCH" || die "push of $BRANCH failed"
+  fi
+  log "$BRANCH → $BASE: opening a request with: $PR_CMD $BRANCH"
+  export PR_SOURCE="$BRANCH" PR_TARGET="$BASE"
+  OUT="$(cd "$REPO_ROOT" && eval "$PR_CMD" '"$BRANCH"')" || die "PR_CMD failed:"$'\n'"$OUT"
+  printf '%s\n' "$OUT"
+  log "nothing merged here — the request is merged on the host and lands in origin/$BASE"
+  exit 0
 fi
 
 cleanup
