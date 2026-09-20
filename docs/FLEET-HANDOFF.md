@@ -1,8 +1,13 @@
-# Fleet handoff — state as of 19 Sep 2026
+# Fleet handoff — state as of 20 Sep 2026, midday
 
 Autonomous coding-agent fleet. Its first and so far only target is
 `khaita-app`. Supersedes every earlier handoff. Read `docs/lessons.md`
 alongside this — L-01 … L-27 hold the findings this only summarises.
+
+**Next work is planned, not started:** `docs/plans/2026-09-20-status-merge-epics.md`
+— readable `/status` with titles, `/merge` from the phone, per-repo direct
+merge or PR, and an explicit story/epic model. Approved by the human on
+20 Sep; eight commits, each with its red case named. Start there.
 
 **Orient by running things, not by trusting this file.** Numbers in prose rot
 (L-11). The commands that produce them:
@@ -86,7 +91,15 @@ Users `ubuntu` (admin), `fleet` (agents, `~/work/khaita/khaita-app`), `hermes`.
 
 **Installed under `fleet`:** Claude Code 2.1.263 (`~/.local/bin/claude`),
 Codex 0.153.4 and Node 24 under nvm, jq. Neither agent is on a systemd unit's
-default PATH — `systemd/fleet-queue.service` sets it explicitly.
+default PATH — `systemd/fleet-queue.service` sets it explicitly. `gh` and
+`glab` are **not** installed yet (step 1 of the plan above).
+
+**Remotes and keys (20 Sep):** this repo pushes to
+`github.com/ilge-ustun/squadra-fleet` through a write-enabled deploy key,
+`~/.ssh/id_squadra_fleet`, bound to the host alias `github.com-squadra-fleet`
+in `~/.ssh/config` so it is never offered elsewhere. khaita keeps its GitLab
+deploy key (`~/.ssh/id_deploy`). Deploy keys can push; they cannot open a
+pull request — that is what the `gh`/`glab` tokens in the plan are for.
 
 **Memory, measured:** an interactive Claude Code session on this host is
 **~530 MB**; Hermes ~694 MB; system ~120 MB. ~1.4 GB is committed before the
@@ -247,11 +260,11 @@ seed files are copied into every agent worktree.
 
 Nothing in the notifier can fail a run. Unconfigured, it warns and returns 0.
 
-**systemd** units are written and pass `systemd-analyze --user verify`, but are
-**not installed** — now two pairs, `fleet-queue` (15 min) and `fleet-bot`
-(1 min). Commands in `systemd/README.md`; one needs an admin
-(`loginctl enable-linger fleet` — currently `no`, so units would die with the
-ssh session), and the bot needs a @BotFather token before it does anything.
+**systemd is live since 20 Sep 11:45.** Both pairs are symlinked from
+`~/work/fleet/systemd` into `~/.config/systemd/user`, `Linger=yes`, the queue
+timer fires every 15 min running `run-queue.sh --all --max 5`, the bot polls
+every minute. `.env.fleet` holds the @BotFather token and chat id (mode 600).
+`journalctl --user -u fleet-queue --since today` is where a drain's story is.
 
 ---
 
@@ -270,52 +283,46 @@ Run `bash status.sh khaita` rather than trusting this table.
 | 009 | the collection page's test mocked away the collection | done, PASS in 1 |
 | 010 | "still loading" vs "loaded and empty" | done, PASS in 3 |
 | 011 | theme toggle icons | done, PASS in 1, **merged into `epic/ui-polish`** |
-| 012 | "new version available" | **draft** — needs a decision, §6 |
-| 013 | offline chip stuck on | **draft**, ready to promote |
+| 012 | "new version available" | **draft** — needs a decision, §6. **Reproduced live on 20 Sep:** a stale `ThemeSwitch` chunk served by `sw.js`'s cache survived a `.next` wipe in dev — exactly the stale-asset mechanism the story describes |
+| 013 | offline chip stuck on | done, **PASS in 1**, **the first round run from `~/work/fleet` and the first auto-merge** — promoted from the phone, drained by the timer, merged into `epic/offline-pwa` at `23e5751` with a green post-merge baseline. **Human-verified in a browser on 20 Sep** (short blip, long outage, lie-fi): working. Analysis of the round is in this session's log; the review is `.review/013.md`. Left behind: the `../wt-013` worktree, harmless |
 | 014 | the queue refreshes from origin | done, **PASS in 4**, merged into `develop`. Round 3 was vetoed by the harness's own bug (L-27); round 4 was `REVIEW_ONLY=1` and all ten mutations went RED |
 
 **Round yield is governed by the bounded domain, not the AC count** (L-20):
 5 unbounded ACs → 8 rounds; 2 ACs with one unbounded "every" → 3; 2 bounded
-ACs → 1.
+ACs → 1; 013's 3 bounded ACs → 1. Its round cost: builder 468 s and $1.39
+(34 turns), reviewer 155 s, 7 mutations all RED in 30 s, 1 probe GREEN.
 
 ---
 
 ## 6. What needs a human, in order
 
-1. **A @BotFather token.** Everything in the control plane is built and
-   tested, and none of it does anything until `.env.fleet` has
-   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, and the two `fleet-bot` units
-   are symlinked. Steps in `systemd/README.md`. Until then every
-   notification is a `warn` into the queue log, which nobody reads at 2 a.m.
-   — which was the whole problem.
-2. **`loginctl enable-linger fleet`** — needs an admin. Without it both timers
-   die with the ssh session.
-3. **Watch the first auto-merge.** The machinery is covered by the suite,
-   including the post-merge baseline that keeps a bad merge off the epic, but
-   it has never run on a real story. `AUTO_MERGE=0` turns it off.
-4. **Story 012** — its root cause is that `public/sw.js` bytes never change on
+1. **Execute the plan** in `docs/plans/2026-09-20-status-merge-epics.md`,
+   in its order. Step 1 installs `gh` and `glab`; the tokens and the two
+   `auth login`s in it are yours.
+2. **Land `epic/ui-polish`** (011, waiting since 18 Sep) and
+   **`epic/offline-pwa`** (013, verified) into `develop`:
+   `bash merge.sh khaita --epic epic/ui-polish`, same for `epic/offline-pwa`.
+   Both run the post-merge baseline. After the plan lands this is
+   `/merge khaita epic/…` from the phone.
+3. **Story 012** — its root cause is that `public/sw.js` bytes never change on
    deploy, so no new worker installs and the banner is **unreachable**, not
-   badly made. Fixing it properly means versioning or stamping `sw.js` at build
-   time, which also fixes `/manifest.json` and the icons never refreshing for
-   returning users. That reaches into how the app builds. Read its ACs before
-   promoting.
-5. **Story 013** — ready to promote as-is. `/promote khaita 013` once the bot is up.
-6. **The remaining khaita items** — mobile search and lyrics-language defaults
+   badly made. Now observed for real (§5). Fixing it properly means versioning
+   or stamping `sw.js` at build time, which also fixes `/manifest.json` and
+   the icons never refreshing for returning users. That reaches into how the
+   app builds. Read its ACs before promoting; add the 20 Sep observation to
+   its Evidence.
+4. **The remaining khaita items** — mobile search and lyrics-language defaults
    on `epic/search`; "shazam" needs decomposing before it is a story.
-7. **`epic/ui-polish` is 2 ahead of `develop`** (`bash status.sh khaita --epics`).
-   `bash merge.sh khaita --epic epic/ui-polish` when you want it in.
 
 ---
 
 ## 7. Harness gaps still open
 
-- **Auto-merge has never run on a real story.** The machinery exists and the
-  suite covers it, including the post-merge baseline that undoes a bad merge
-  and the `AUTO_MERGE=0` switch. What it has not had is a real story on a real
-  epic. Treat the first few as worth watching.
-- **The bot is written and not installed.** It needs a @BotFather token in
-  `.env.fleet` and the two units symlinked; both are a human's, and until then
-  every notification is a `warn` into the queue log.
+- **Auto-merge has run once** (013 → `epic/offline-pwa`, 20 Sep) and did
+  what the suite said it would. One data point; the next few are still worth
+  reading in the journal.
+- **The bot is live and has handled `/promote`.** `/status` arrives as
+  proportional text and shows no titles — the plan fixes both.
 - **`.blocked/` has never fired from a builder** in fourteen stories. The
   story-writer escalates instead — 011 raised a product question and refused to
   decide — and intake is arguably the right place for it (L-24). The path is
@@ -324,10 +331,14 @@ ACs → 1.
   never a target, so no round can touch it and the self-test branch is gone
   (L-26, L-27). `bash test-lib.sh` before every commit there is the whole of
   the discipline; nothing enforces it.
-- **The first real run from the new home has not happened.** Every script is
-  covered by the suite against a synthetic target; the read-only entry points
-  have been run against the real checkout. A full round with real agents from
-  `~/work/fleet` is still to be watched.
+- **`next_ready` in `launch.sh` does not skip `TEMPLATE.md`** while
+  `run-queue.sh` does, and khaita's template says `status: ready`. A bare
+  `launch.sh khaita` with nothing ready would pick the template. Pre-existing;
+  worth its own story.
+- **Epics are only branch names.** A story belongs to one through `base:`;
+  nothing enforces `epic/*` at creation and `done` hides whether a story is
+  waiting, on an epic, or landed. The plan adds the derived state, the INTO
+  column, and `new-epic.sh`.
 - **Lanes.** One, still. The lock (C4) makes two safe; whether two fit is a
   memory question, and the timing line now in every Machine block is what will
   answer it. The trigger, stated in advance: ≥3 stories `ready` for a day, and
