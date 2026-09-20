@@ -1195,7 +1195,7 @@ case_63_bot_status() {
   bot poll
   assert_eq "$(sent)" 1 "one reply"
   assert_contains "$(sent_text)" "$STORY" "naming the story"
-  assert_contains "$(sent_text)" "done" "and its status"
+  assert_contains "$(sent_text)" "awaiting merge" "and its landing state"
 }
 
 # The write path: this is what makes a phone a control plane.
@@ -1864,6 +1864,60 @@ case_88_suite_env_is_clean() {
   [[ -n "${HOME:-}" ]] && ok || fail "HOME survived, or git would have no identity"
 }
 
+# Plan of 20 Sep. From a phone an id means nothing and `done` covers three
+# situations: waiting for a human, sitting on an epic, landed. The title comes
+# from the story's heading; the landing state is derived from git and the
+# computed verdict, never stored. The epic block leads the default output so
+# what a human decides to merge is the first thing they read, and --bot is
+# the phone form: no colour, the hint spelled as the bot command.
+#
+# Red without the title, without the derived state (a bare `done`), without
+# the INTO column, without the epic line in the default output, and without
+# --bot (usage, exit 2).
+case_90_status_titles_and_landing() {
+  CASE="90 status.sh: title, landing state, INTO, epic summary, --bot"; fixture c90
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  # A second story that has not run, so the table has one line per state.
+  sed "s/Story $STORY/Story 901/; 0,/^status:.*/s//status: draft/" "$REPO/.stories/$STORY.md" \
+    > "$REPO/.stories/901.md"
+  local out; out="$( status_run )"
+  assert_contains "$out" "TITLE" "the table has a title column"
+  assert_contains "$out" "INTO" "and says where each story lands"
+  assert_contains "$out" "fixture story" "the title, without its 'Story NNN:' prefix"
+  assert_not_contains "$out" "Story $STORY:" "the prefix is stripped"
+  assert_contains "$out" "awaiting merge" "a PASS nobody merged is awaiting merge"
+  assert_contains "$out" "draft" "a story that has not run shows its frontmatter status as is"
+  local j; j="$( status_run --json )"
+  assert_eq "$(jq -r '.[0].title'   <<< "$j")" "fixture story"   "--json carries the title"
+  assert_eq "$(jq -r '.[0].landing' <<< "$j")" "awaiting merge"  "and the landing state"
+  assert_eq "$(jq -r '.[0].status'  <<< "$j")" done              "while status stays the frontmatter's"
+  assert_eq "$(jq -r '.[1].landing' <<< "$j")" draft             "a draft's landing state is its status"
+
+  CASE="90b a story on an epic: on epic, then landed"; epic_story c90b
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  out="$( status_run )"
+  assert_contains "$out" "epic/test" "INTO names the epic"
+  assert_contains "$out" "awaiting merge" "not merged yet"
+  merge_run
+  assert_eq "$MRC" 0 "the story merged into its epic"
+  out="$( status_run )"
+  assert_contains "$out" "on epic" "merged into an epic that is not in the integration branch"
+  assert_contains "$out" "1 merged" "the epic block leads the default output"
+  assert_contains "$out" "merge.sh t --epic epic/test" "with the command a human runs to land it"
+  local bot; bot="$( status_run --bot )"
+  assert_contains "$bot" "/merge t epic/test" "--bot spells the hint as the phone command"
+  assert_contains "$bot" "on epic" "and has the same rows"
+  assert_not_contains "$bot" $'\x1b[' "with no colour codes"
+  local epics; epics="$( status_run --epics )"
+  assert_contains "$epics" "epic/test" "--epics still prints the epic block"
+  assert_not_contains "$epics" "on epic" "and nothing else"
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 0 "the epic landed on the integration branch"
+  out="$( status_run )"
+  assert_contains "$out" "landed" "and the story is now landed"
+  assert_eq "$(jq -r '.[0].landing' <<< "$( status_run --json )")" landed "--json agrees"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -1901,7 +1955,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_81_existing_merge_preserved case_82_load_repo
        case_83_scope_fleet_config case_84_prompts_carry_the_targets_facts
        case_85_seed_files_from_config case_86_probe_dir
-       case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused)
+       case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
+       case_90_status_titles_and_landing)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
