@@ -18,7 +18,7 @@ git -C ~/work/khaita/khaita-app log --oneline develop -20
 
 ## 0. Where things live (19 Sep 2026)
 
-The fleet is its own repository, `~/work/fleet` (`gitlab.com/turrandott/fleet`),
+The fleet is its own repository, `~/work/fleet` (`github.com/ilge-ustun/squadra-fleet`),
 and takes any repo it is pointed at. It is **never itself a target**.
 
 ```
