@@ -1908,6 +1908,13 @@ case_90_status_titles_and_landing() {
   assert_eq "$(jq -r '.[0].landing' <<< "$j")" "awaiting merge"  "and the landing state"
   assert_eq "$(jq -r '.[0].status'  <<< "$j")" done              "while status stays the frontmatter's"
   assert_eq "$(jq -r '.[1].landing' <<< "$j")" draft             "a draft's landing state is its status"
+  # A phone wraps a <pre> block at ~40 columns, so --bot is not the table:
+  # a short state line and the title on its own line, newest story first.
+  local bot; bot="$( status_run --bot )"
+  assert_not_contains "$bot" "TITLE" "--bot has no table header"
+  assert_contains "$bot" "$STORY  awaiting merge  R1  PASS  → base" "a state line short enough not to wrap"
+  assert_contains "$bot" $'\n     fixture story' "the title on its own line under it"
+  [[ "${bot%%$STORY*}" == *901* ]] && ok || fail "901 comes before $STORY: newest first"
 
   CASE="90b a story on an epic: on epic, then landed"; epic_story c90b
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -1922,7 +1929,7 @@ case_90_status_titles_and_landing() {
   assert_contains "$out" "merge.sh t --epic epic/test" "with the command a human runs to land it"
   local bot; bot="$( status_run --bot )"
   assert_contains "$bot" "/merge t epic/test" "--bot spells the hint as the phone command"
-  assert_contains "$bot" "on epic" "and has the same rows"
+  assert_contains "$bot" "$STORY  on epic  R1  PASS  → epic/test" "and has the same state"
   assert_not_contains "$bot" $'\x1b[' "with no colour codes"
   local epics; epics="$( status_run --epics )"
   assert_contains "$epics" "epic/test" "--epics still prints the epic block"
@@ -1964,7 +1971,7 @@ case_93_bot_status_pre() {
   local n; n="$(cat "$TRACE"/curl-args-* | grep -c '^text=<pre>')"
   assert_eq "$n" 2 "each its own code block"
   # A row is never cut in half: every one of the 25 arrives as a whole line.
-  assert_eq "$(cat "$TRACE"/curl-args-* | grep -cE "(^|<pre>)9[0-9][0-9]  $long  ")" 25 "every row arrived whole, one of them opening the second message"
+  assert_eq "$(cat "$TRACE"/curl-args-* | grep -cE "(^|<pre>)     $long\$")" 25 "every title arrived whole on its own line, one opening the second message"
 }
 
 # Plan of 20 Sep. merge.sh refuses the integration branch because the QUEUE

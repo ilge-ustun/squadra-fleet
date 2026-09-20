@@ -73,7 +73,7 @@ Every entry point names the repo first. The phone forms go through
 | at a terminal | from the phone | what |
 |---|---|---|
 | `status.sh <repo> [id]` | `/status <repo>` | the epics, then every story: title, landing state, round, verdict, base |
-| `status.sh <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
+| `status.sh <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form (a `<pre>` block wraps on a phone, so: a state line, the title under it, newest first) |
 | `write-story.sh <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story |
 | `lint-story.sh <repo> <id> [--strict]` | | mechanical checks |
 | `new-epic.sh <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |

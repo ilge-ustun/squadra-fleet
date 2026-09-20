@@ -11,7 +11,12 @@ below, both found in the field: `status.sh` reads ancestry from
 behind), and a `done` story with no branch and no `merged:` sha shows
 `done`, not `awaiting merge` — nothing could be merged. `PR_CMD` also gets
 `PR_SOURCE`/`PR_TARGET` in its environment, because a story on an epic
-targets the epic, not the integration branch.
+targets the epic, not the integration branch. And decision 1's horizontal
+scroll does not exist: Telegram wraps a `<pre>` block at about 40 columns
+on a phone, so `--bot` is not the table — a short state line
+(`013  on epic  R1  PASS  → epic/offline-pwa`), the title under it, notes
+on a third line, newest story first, every story shown (the user's call
+on 20 Sep). The terminal table is unchanged.
 
 ## Context
 
