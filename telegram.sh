@@ -150,6 +150,21 @@ cmd_revert() {                        # cmd_revert <id>
   fi
 }
 
+# Landing on the integration branch is a human's decision; sending this is
+# how the human makes it. The script owns every refusal and this only
+# reports what it said — in pr mode, the request's URL.
+cmd_merge() {                         # cmd_merge <id> | epic/<name>
+  local what="${1:-}"
+  if [[ "$what" =~ ^[0-9]{3}$ ]]; then
+    story_ok "$what" || { echo "no such story: $what"; return; }
+    bash "$FLEET_HOME/merge.sh" "$REPO_NAME" "$what" --land 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+  elif [[ "$what" == epic/* ]]; then
+    bash "$FLEET_HOME/merge.sh" "$REPO_NAME" --epic "$what" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+  else
+    echo "usage: /merge <repo> <id>  (a story based on the integration branch)  |  /merge <repo> epic/<name>"
+  fi
+}
+
 cmd_run() {
   if $QUEUE_START_CMD >/dev/null 2>&1; then echo "queue started"; else echo "could not start the queue"; fi
 }
@@ -159,8 +174,8 @@ dispatch() {                          # dispatch <text> → reply on stdout
   read -r verb repo arg rest <<< "$text"
   case "$verb" in
     /run) cmd_run; return ;;
-    /status|/why|/promote|/answer|/revert) : ;;
-    *) printf '%s\n' "/status <repo>  /why <repo> <id>  /promote <repo> <id>  /answer <repo> <id> <text>  /revert <repo> <id>  /run"; return ;;
+    /status|/why|/promote|/answer|/revert|/merge) : ;;
+    *) printf '%s\n' "/status <repo>  /why <repo> <id>  /promote <repo> <id>  /answer <repo> <id> <text>  /merge <repo> <id>|epic/<name>  /revert <repo> <id>  /run"; return ;;
   esac
   # dispatch runs inside a command substitution, so a die here — an unknown
   # repo, a name that is not a name — ends only this command and its message
@@ -172,6 +187,7 @@ dispatch() {                          # dispatch <text> → reply on stdout
     /promote) with_lock cmd_promote "${arg:-}" ;;
     /answer)  [[ -n "${rest:-}" ]] && with_lock cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <repo> <id> <text>" ;;
     /revert)  with_lock cmd_revert "${arg:-}" ;;
+    /merge)   with_lock cmd_merge "${arg:-}" ;;
   esac
 }
 

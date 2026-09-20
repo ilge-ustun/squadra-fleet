@@ -1137,7 +1137,7 @@ case_59_merge_refuses_integration_branch() {
 bot() {                               # bot <verb> [args…] → BLOG BRC
   BLOG="$FX/bot.log"
   ( cd "$FX" && env PATH="$(FAKES)" \
-      FAKE_TRACE_DIR="$TRACE" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass \
       TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 \
       FAKE_TELEGRAM_UPDATES="${FAKE_TELEGRAM_UPDATES:-}" \
       QUEUE_START_CMD=true \
@@ -2074,6 +2074,43 @@ EOP
   assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
 }
 
+# Plan of 20 Sep. Landing on the integration branch is a human's decision,
+# and the phone is where the human is. /merge <repo> <id> is merge.sh with
+# --land; /merge <repo> epic/<name> is --epic. The script owns every refusal
+# and the reply is what it said, colours stripped — in pr mode that is the
+# request's URL.
+#
+# Red when /merge is an unknown verb, when the story form forgets --land
+# (refused), or when the epic form is not wired.
+case_93b_bot_merge() {
+  CASE="93b /merge lands a story on the integration branch from the phone"; fixture c93b
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  update 120 42 "/merge t $STORY"
+  bot poll
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "the integration branch holds the story"
+  assert_contains "$(sent_text)" "merged into base" "and the human is told"
+  assert_not_contains "$(sent_text)" $'\x1b[' "without colour codes"
+
+  CASE="93c /merge lands an epic"; epic_story c93c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: the story is on its epic"
+  update 121 42 "/merge t epic/test"
+  bot poll
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "the integration branch holds the epic"
+  assert_contains "$(sent_text)" "epic/test merged into base" "and the human is told"
+
+  CASE="93d /merge with anything else is usage"; fixture c93d
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  update 122 42 "/merge t nope"
+  bot poll
+  assert_contains "$(sent_text)" "usage" "usage"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "and nothing moved"
+  update 123 42 "/merge t"
+  bot poll
+  assert_eq "$(sent)" 2 "a missing argument is answered too"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2113,7 +2150,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
        case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
-       case_93_bot_status_pre)
+       case_93_bot_status_pre case_93b_bot_merge)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
