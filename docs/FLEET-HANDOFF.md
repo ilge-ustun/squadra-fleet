@@ -4,10 +4,12 @@ Autonomous coding-agent fleet. Its first and so far only target is
 `khaita-app`. Supersedes every earlier handoff. Read `docs/lessons.md`
 alongside this — L-01 … L-27 hold the findings this only summarises.
 
-**Next work is planned, not started:** `docs/plans/2026-09-20-status-merge-epics.md`
-— readable `/status` with titles, `/merge` from the phone, per-repo direct
-merge or PR, and an explicit story/epic model. Approved by the human on
-20 Sep; eight commits, each with its red case named. Start there.
+**20 Sep, evening:** `docs/plans/2026-09-20-status-merge-epics.md` is
+landed — readable `/status` with titles and a derived landing state,
+`/merge` from the phone, `MERGE_MODE=direct|pr` per repo, epics named at
+creation (`new-epic.sh`), and a `README.md`. Its step 8 (khaita on `pr`
+mode) waits for the human's `glab auth login`. `README.md` is now the map;
+this file is the state.
 
 **Orient by running things, not by trusting this file.** Numbers in prose rot
 (L-11). The commands that produce them:
@@ -35,14 +37,16 @@ and takes any repo it is pointed at. It is **never itself a target**.
 <target>/.fleet/config              the target's own settings, committed there, sourced by load_repo:
                                     BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD
                                     SEED_FILES PROBE_DIR, optional REPO_RULES (a markdown snippet
-                                    rendered into the agents' rules)
+                                    rendered into the agents' rules), optional MERGE_MODE
+                                    (direct, the default, or pr) with PR_CMD — README.md
 <target>/.stories .review .blocked  committed state, on the target's integration branch
 <target>/.runs .review-out          machine-local, gitignored in the target
 ```
 
 Every entry point names its repo first: `launch.sh khaita 014`,
-`status.sh khaita`, `merge.sh khaita 014`, `run-queue.sh khaita` or
-`run-queue.sh --all`. Telegram commands too: `/promote khaita 013`. A
+`status.sh khaita`, `merge.sh khaita 014`, `new-epic.sh khaita search`,
+`run-queue.sh khaita` or `run-queue.sh --all`. Telegram commands too:
+`/promote khaita 013`, `/merge khaita epic/ui-polish`. A
 variable in the caller's environment wins over `.fleet/config`; a missing
 file or key is a `die`. Two registered repos may not share a parent
 directory (their `../wt-<id>` worktrees would collide) — `load_repo` refuses.
@@ -91,8 +95,10 @@ Users `ubuntu` (admin), `fleet` (agents, `~/work/khaita/khaita-app`), `hermes`.
 
 **Installed under `fleet`:** Claude Code 2.1.263 (`~/.local/bin/claude`),
 Codex 0.153.4 and Node 24 under nvm, jq. Neither agent is on a systemd unit's
-default PATH — `systemd/fleet-queue.service` sets it explicitly. `gh` and
-`glab` are **not** installed yet (step 1 of the plan above).
+default PATH — `systemd/fleet-queue.service` sets it explicitly. `gh` 2.101.0
+and `glab` 1.118.0 are in `~/.local/bin` since 20 Sep (release tarballs,
+checksums verified); neither is logged in yet — that is the human's
+`gh auth login --with-token` / `glab auth login --hostname gitlab.com --token`.
 
 **Remotes and keys (20 Sep):** this repo pushes to
 `github.com/ilge-ustun/squadra-fleet` through a write-enabled deploy key,
@@ -153,10 +159,14 @@ intent (a sentence)
                             hand-run launcher never changes a branch)
        refuses anything but a computed PASS on an epic/* base
        merges in a throwaway worktree, runs the baseline on the MERGED result,
-       and pushes only if that is green
+       and pushes only if that is green (MERGE_MODE=direct); with
+       MERGE_MODE=pr it pushes the branch and runs PR_CMD instead — the
+       host merges, nothing is recorded
        → notifies: "merged → epic/x  ·  undo: /revert <repo> <id>"
-  → a human merges the epic into the integration branch:
-       merge.sh <repo> --epic epic/x    — same baseline, never automatic
+  → a human lands on the integration branch, never the queue:
+       merge.sh <repo> --epic epic/x       an epic      — /merge <repo> epic/x
+       merge.sh <repo> <id> --land         a story based on it — /merge <repo> <id>
+       same baseline; main/master refused with or without --land
 ```
 
 ### The verdict
@@ -187,10 +197,15 @@ launch.sh              the launcher; <repo> --reap runs reap_orphans and exits
 run-queue.sh           drains every ready story of <repo>, or --all; reaps first; --max N
 write-story.sh         intent → draft story (STORY_MODEL, default claude-opus-5)
 lint-story.sh          mechanical story checks; --strict makes warnings fatal
-status.sh              read-only; one line per story, --json for machines
-merge.sh               story → its epic, or --epic <name> → the integration
-                       branch (a human's call); post-merge baseline before any
-                       push; records the merge sha in the story
+status.sh              read-only; the epics, then one line per story with its
+                       title and derived landing state; --json, --epics, --bot
+new-epic.sh            origin/epic/<name> from the integration branch — the one
+                       way an epic is created; write-story --base and lint-story
+                       accept nothing but epic/*
+merge.sh               story → its epic, or --epic <name> / <id> --land → the
+                       integration branch (a human's call); post-merge baseline
+                       before any push; records the merge sha in the story;
+                       MERGE_MODE=pr opens a request through PR_CMD instead
 revert.sh              undoes that merge by story id
 reset.sh               clears a story back to the queue; refuses if live or
                        unmerged without --force
@@ -253,7 +268,9 @@ sends through `FLEET_NOTIFY_CMD` (the launcher when a story stops, the queue
 when one merges), and reads commands back by polling `getUpdates` — a pull,
 because the box has no public endpoint. Commands:
 `/status <repo>` `/why <repo> <id>` `/promote <repo> <id>` `/answer <repo>
-<id> <text>` `/revert <repo> <id>` `/run`. Only messages from `TELEGRAM_CHAT_ID` are acted on
+<id> <text>` `/merge <repo> <id>|epic/<name>` `/revert <repo> <id>` `/run`.
+`/status` arrives as a code block with titles, split over several messages
+when it cannot fit. Only messages from `TELEGRAM_CHAT_ID` are acted on
 and nobody else gets a reply at all. The token
 goes in `.env.fleet` at the fleet repo root, never in a target — a target's
 seed files are copied into every agent worktree.
@@ -296,14 +313,15 @@ ACs → 1; 013's 3 bounded ACs → 1. Its round cost: builder 468 s and $1.39
 
 ## 6. What needs a human, in order
 
-1. **Execute the plan** in `docs/plans/2026-09-20-status-merge-epics.md`,
-   in its order. Step 1 installs `gh` and `glab`; the tokens and the two
-   `auth login`s in it are yours.
+1. **Log `glab` in** (`glab auth login --hostname gitlab.com --token`, a
+   project access token on khaita-app with `api` scope, Developer role), then
+   step 8 of the plan: `MERGE_MODE=pr` and the `PR_CMD` from `README.md` in
+   khaita's `.fleet/config`, and one `/merge` by hand to see the URL come
+   back. `gh auth login --with-token` likewise when a GitHub target exists.
 2. **Land `epic/ui-polish`** (011, waiting since 18 Sep) and
    **`epic/offline-pwa`** (013, verified) into `develop`:
    `bash merge.sh khaita --epic epic/ui-polish`, same for `epic/offline-pwa`.
-   Both run the post-merge baseline. After the plan lands this is
-   `/merge khaita epic/…` from the phone.
+   Both run the post-merge baseline. From the phone: `/merge khaita epic/…`.
 3. **Story 012** — its root cause is that `public/sw.js` bytes never change on
    deploy, so no new worker installs and the banner is **unreachable**, not
    badly made. Now observed for real (§5). Fixing it properly means versioning
@@ -321,8 +339,9 @@ ACs → 1; 013's 3 bounded ACs → 1. Its round cost: builder 468 s and $1.39
 - **Auto-merge has run once** (013 → `epic/offline-pwa`, 20 Sep) and did
   what the suite said it would. One data point; the next few are still worth
   reading in the journal.
-- **The bot is live and has handled `/promote`.** `/status` arrives as
-  proportional text and shows no titles — the plan fixes both.
+- **The bot is live and has handled `/promote`.** `/status` is a code block
+  with titles since 20 Sep; `/merge` exists but has not yet been sent for
+  real — the first one is item 2 above, and worth reading in the journal.
 - **`.blocked/` has never fired from a builder** in fourteen stories. The
   story-writer escalates instead — 011 raised a product question and refused to
   decide — and intake is arguably the right place for it (L-24). The path is
@@ -335,10 +354,11 @@ ACs → 1; 013's 3 bounded ACs → 1. Its round cost: builder 468 s and $1.39
   `run-queue.sh` does, and khaita's template says `status: ready`. A bare
   `launch.sh khaita` with nothing ready would pick the template. Pre-existing;
   worth its own story.
-- **Epics are only branch names.** A story belongs to one through `base:`;
-  nothing enforces `epic/*` at creation and `done` hides whether a story is
-  waiting, on an epic, or landed. The plan adds the derived state, the INTO
-  column, and `new-epic.sh`.
+- **Epics are only branch names, by design now.** `status.sh` derives
+  `awaiting merge` / `on epic` / `landed`, `new-epic.sh` creates them, and
+  the name is enforced at creation. Stories 002 and 003 show `done`, not
+  `landed`: they were merged by hand, their branches are gone and no
+  `merged:` sha was recorded — the derivation has nothing to read.
 - **Lanes.** One, still. The lock (C4) makes two safe; whether two fit is a
   memory question, and the timing line now in every Machine block is what will
   answer it. The trigger, stated in advance: ≥3 stories `ready` for a day, and

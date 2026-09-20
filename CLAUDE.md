@@ -2,7 +2,7 @@
 
 ## What this repo is
 
-A bash harness that runs an autonomous builder/reviewer loop against **other**
+`README.md` is the map — read it first. A bash harness that runs an autonomous builder/reviewer loop against **other**
 repositories: a story is written, a builder agent (Claude Code) implements it in
 a worktree, a reviewer agent (Codex) proposes mutations, and the harness runs
 the baseline, applies every mutation, and computes the verdict itself. The
@@ -19,12 +19,19 @@ against this checkout.
 - `<target>/.fleet/config` — the target's own settings, committed there and
   sourced by `lib.sh:load_repo`: `BASE_BRANCH INSTALL_CMD VITEST_CMD
   BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR`, optional `REPO_RULES` (a markdown
-  file, relative to the target, rendered into the agent prompts).
+  file, relative to the target, rendered into the agent prompts), optional
+  `MERGE_MODE` (`direct`, the default, or `pr` — which requires `PR_CMD`;
+  the contract is in `README.md`).
   Missing file or missing key is a `die`. A variable already in the caller's
   environment wins over the file.
 - Every entry point takes the repo name first: `launch.sh khaita 014`,
-  `status.sh khaita`, `merge.sh khaita 014`, `run-queue.sh khaita` or
-  `run-queue.sh --all`. Telegram commands are repo-qualified: `/promote khaita 013`.
+  `status.sh khaita`, `merge.sh khaita 014`, `new-epic.sh khaita search`,
+  `run-queue.sh khaita` or `run-queue.sh --all`. Telegram commands are
+  repo-qualified: `/promote khaita 013`, `/merge khaita epic/ui-polish`.
+- An epic is a branch named `epic/*` and nothing else; `new-epic.sh` creates
+  it, `write-story.sh --base` and `lint-story.sh` accept no other base.
+  Landing on the integration branch is a human's call: `merge.sh --epic`,
+  `merge.sh <id> --land`, or `/merge` — never `run-queue.sh`.
 - Per-repo state (`.stories/ .review/ .blocked/` committed; `.runs/
   .review-out/` ignored) lives in the target. Machine-local fleet files
   (`.env.fleet` with the bot token, `.bot-offset`) live here, gitignored.

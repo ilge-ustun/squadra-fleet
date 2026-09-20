@@ -3,6 +3,16 @@
 Repo: `/home/fleet/work/fleet` (+ one commit in khaita's `develop`). The
 extraction plan that used to live in this file is done and shipped.
 
+**Status, 20 Sep evening:** steps 1–7 landed (cases 90–94, suite at 530).
+Step 8 waits for the human's `glab auth login`; the config lines it needs
+are in `README.md` under `PR_CMD`. Two details differ from the design
+below, both found in the field: `status.sh` reads ancestry from
+`origin/<branch>` (merge.sh pushes; a checked-out local branch stays
+behind), and a `done` story with no branch and no `merged:` sha shows
+`done`, not `awaiting merge` — nothing could be merged. `PR_CMD` also gets
+`PR_SOURCE`/`PR_TARGET` in its environment, because a story on an epic
+targets the epic, not the integration branch.
+
 ## Context
 
 Story 013 was the first round run from the new home and the first
