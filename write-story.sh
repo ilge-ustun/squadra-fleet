@@ -38,6 +38,10 @@ STORY_ID="${1:-}"; INTENT="${2:-}"
 STORY_BASE="$BASE_BRANCH"
 if [[ "${3:-}" == "--base" ]]; then
   STORY_BASE="${4:?--base needs a branch}"
+  # An epic is a branch named epic/*, made by new-epic.sh — nothing else is
+  # one, and a story is either on the integration branch or on an epic.
+  [[ "$STORY_BASE" == epic/* ]] \
+    || die "--base takes an epic/… branch, not '$STORY_BASE' — make one with: new-epic.sh $REPO_NAME <name>"
 fi
 git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/$STORY_BASE" >/dev/null \
   || die "no such branch on origin: $STORY_BASE"

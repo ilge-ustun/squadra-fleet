@@ -2111,6 +2111,63 @@ case_93b_bot_merge() {
   assert_eq "$(sent)" 2 "a missing argument is answered too"
 }
 
+# Plan of 20 Sep. An epic was only a branch name a story's base: pointed at,
+# and nothing enforced the name. Now the name is enforced where a story is
+# born: write-story.sh takes --base epic/* only, lint-story.sh accepts a
+# base that is absent, the integration branch, or epic/*, and new-epic.sh
+# is the one way an epic branch comes into being — cut from origin's
+# integration branch and pushed, so the next story can name it.
+#
+# Red when write-story.sh accepts feat/x (the branch exists, so the old
+# existence check passes and the agent runs), when lint-story.sh accepts
+# base: feat/x, and when new-epic.sh is missing or accepts a second run or
+# a name that is not a name.
+case_94_epic_naming() {
+  CASE="94 an epic is named epic/* at creation, and created by new-epic.sh"; fixture c94
+  git -C "$REPO" push -q origin base:feat/x
+  git -C "$REPO" push -q origin base:epic/test
+  local out rc
+  ws() {                              # ws <id> <base> → out rc
+    out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_BUILDER=nocommit \
+            bash "$FLEET/write-story.sh" t "$1" "x" --base "$2" 2>&1 )"; rc=$?
+  }
+  ws 901 feat/x
+  assert_eq "$rc" 1 "write-story.sh refuses a base that is not epic/*"
+  assert_contains "$out" "new-epic.sh" "and says how an epic is made"
+  assert_eq "$(calls claude)" 0 "before any agent runs"
+  ws 902 epic/test
+  assert_eq "$(calls claude)" 1 "an epic/* base gets past the check to the agent"
+
+  local d="$FX/lint"; mkdir -p "$d"
+  lint_base() {                       # lint_base <name> <base-line> → out rc
+    printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
+    out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
+  }
+  lint_base feat "base: feat/x";     assert_eq "$rc" 1 "lint: base: feat/x is an error, although the branch exists"
+  assert_contains "$out" "epic/" "naming the rule"
+  lint_base epic "base: epic/test";  assert_eq "$rc" 0 "lint: base: epic/test is accepted"
+  lint_base integ "base: base";      assert_eq "$rc" 0 "lint: the integration branch is accepted"
+  lint_base none "";                 assert_eq "$rc" 0 "lint: no base is accepted"
+
+  new_epic() {                        # new_epic <name> → out rc
+    out="$( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/new-epic.sh" t "$1" 2>&1 )"; rc=$?
+  }
+  new_epic search
+  assert_eq "$rc" 0 "new-epic.sh creates an epic"
+  assert_eq "$(git -C "$REPO" rev-parse --verify --quiet origin/epic/search)" "$(git -C "$REPO" rev-parse origin/base)" \
+    "on origin, cut from origin's integration branch"
+  assert_contains "$out" "epic/search" "and says so"
+  assert_eq "$(git -C "$REPO" branch --show-current)" base "the checkout stays where it was"
+  new_epic search
+  assert_eq "$rc" 1 "a second time it refuses"
+  assert_contains "$out" "exists" "and says why"
+  new_epic 'bad name'
+  assert_eq "$rc" 1 "a name with a space is refused"
+  new_epic epic/x
+  assert_eq "$rc" 1 "so is one that already carries the prefix"
+  git -C "$REPO" rev-parse --verify --quiet origin/epic/epic/x >/dev/null && fail "nothing was created for it" || ok
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2150,7 +2207,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
        case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
-       case_93_bot_status_pre case_93b_bot_merge)
+       case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -51,6 +51,10 @@ head -1 "$STORY_FILE" | grep -q '^---$' || err "no frontmatter — the launcher 
 
 BASE="$(field base)"
 if [[ -n "$BASE" ]]; then
+  # A story lives on the integration branch or on an epic, and an epic is
+  # named epic/*. Anything else would merge somewhere nothing lands from.
+  [[ "$BASE" == "$BASE_BRANCH" || "$BASE" == epic/* ]] \
+    || err "base: $BASE — a base is $BASE_BRANCH or epic/<name> (new-epic.sh), nothing else"
   if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/$BASE" >/dev/null \
     && ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASE" >/dev/null; then
     err "base: $BASE — no such branch locally or on origin"
