@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# telegram.sh send "<text>"
+# telegram.sh send [--pre] "<text>"
 # telegram.sh poll
 #
 # The fleet's way of reaching a human, and the human's way of reaching back.
@@ -43,12 +43,37 @@ api()        { printf 'https://api.telegram.org/bot%s/%s' "$TELEGRAM_BOT_TOKEN" 
 
 # ── out ──────────────────────────────────────────────────────────────────────
 
-send() {                              # send <text>
+# Telegram caps a message at 4096 characters. A table that cannot fit is sent
+# as several messages, split on line boundaries so no row is cut in half;
+# the margin below the cap leaves room for the <pre> wrapper.
+SEND_MAX="${SEND_MAX:-3800}"
+
+send() {                              # send [--pre] <text>
+  local pre=0; [[ "${1:-}" == --pre ]] && { pre=1; shift; }
   local text="$1"
   configured || { warn "not configured (.env.fleet) — message not sent: ${text%%$'\n'*}"; return 0; }
+  local chunk="" line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -n "$chunk" && $(( ${#chunk} + 1 + ${#line} )) -gt "$SEND_MAX" ]]; then
+      send_one "$pre" "$chunk"; chunk=""
+    fi
+    chunk+="${chunk:+$'\n'}$line"
+  done <<< "$text"
+  [[ -n "$chunk" ]] && send_one "$pre" "$chunk"
+  return 0
+}
+
+# --pre: a monospace block, so a table keeps its columns on a phone. HTML
+# parse mode, with the three characters HTML would misread escaped.
+send_one() {                          # send_one <pre 0|1> <text>
+  local text="$2"; local -a mode=()
+  if [[ "$1" == 1 ]]; then
+    text="${text//&/&amp;}"; text="${text//</&lt;}"; text="${text//>/&gt;}"
+    text="<pre>$text</pre>"; mode=(--data-urlencode "parse_mode=HTML")
+  fi
   curl -sS --max-time "$CURL_TIMEOUT" -X POST "$(api sendMessage)" \
        --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-       --data-urlencode "text=$text" > /dev/null \
+       --data-urlencode "text=$text" "${mode[@]}" > /dev/null \
     || warn "sendMessage failed — the fleet is fine, you just were not told"
   return 0
 }
@@ -76,7 +101,7 @@ with_lock() {                         # with_lock <command…>
   return $rc
 }
 
-cmd_status() { bash "$FLEET_HOME/status.sh" "$REPO_NAME" | sed 's/\x1b\[[0-9;]*m//g'; }
+cmd_status() { bash "$FLEET_HOME/status.sh" "$REPO_NAME" --bot; }
 
 cmd_why() {                           # cmd_why <id>
   local id="$1"
@@ -180,12 +205,18 @@ poll() {
     fi
     log "command: ${text%%$'\n'*}"
     reply="$(dispatch "$text" 2>&1)"
-    send "${reply:-(no output)}"
+    # A table goes as a code block; everything else as plain text, so a URL
+    # in a reply stays a link.
+    if [[ "${text%% *}" == /status ]]; then send --pre "${reply:-(no output)}"
+    else                                    send "${reply:-(no output)}"; fi
   done
 }
 
 case "${1:-}" in
-  send) shift; [[ $# -ge 1 ]] || { echo "usage: telegram.sh send <text>" >&2; exit 2; }; send "$*" ;;
+  send) shift
+        pre=""; [[ "${1:-}" == --pre ]] && { pre=--pre; shift; }
+        [[ $# -ge 1 ]] || { echo "usage: telegram.sh send [--pre] <text>" >&2; exit 2; }
+        send $pre "$*" ;;
   poll) poll ;;
   *)    echo "usage: telegram.sh {send <text>|poll}" >&2; exit 2 ;;
 esac

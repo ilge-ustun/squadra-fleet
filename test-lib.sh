@@ -1918,6 +1918,39 @@ case_90_status_titles_and_landing() {
   assert_eq "$(jq -r '.[0].landing' <<< "$( status_run --json )")" landed "--json agrees"
 }
 
+# Plan of 20 Sep. A table sent as plain text arrives in a proportional font
+# and falls apart; inside <pre> it keeps its columns and scrolls sideways.
+# Telegram caps a message at 4096 characters, so a long table goes as
+# several messages split on line boundaries rather than one refused send.
+#
+# Red without --pre (no parse_mode, no <pre> in the argv) and without the
+# split (one send for a table that cannot fit).
+case_93_bot_status_pre() {
+  CASE="93 /status arrives as a code block, split when it cannot fit"; fixture c93
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  update 110 42 "/status t"
+  bot poll
+  assert_eq "$(sent)" 1 "one message for a short table"
+  assert_contains "$(sent_text)" "parse_mode=HTML" "sent as HTML"
+  assert_contains "$(sent_text)" "text=<pre>" "inside a code block"
+  assert_contains "$(sent_text)" "</pre>" "which is closed"
+  assert_contains "$(sent_text)" "fixture story" "and carries the table"
+  assert_not_contains "$(sent_text)" $'\x1b[' "with no colour codes"
+
+  CASE="93 a table over the limit is split on line boundaries"; fixture c93-long
+  local i long; long="$(printf 'a%.0s' {1..200})"
+  for i in $(seq 901 925); do
+    sed "s/Story $STORY: fixture story/Story $i: $long/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/$i.md"
+  done
+  update 111 42 "/status t"
+  bot poll
+  assert_eq "$(sent)" 2 "two messages"
+  local n; n="$(cat "$TRACE"/curl-args-* | grep -c '^text=<pre>')"
+  assert_eq "$n" 2 "each its own code block"
+  # A row is never cut in half: every one of the 25 arrives as a whole line.
+  assert_eq "$(cat "$TRACE"/curl-args-* | grep -cE "(^|<pre>)9[0-9][0-9]  $long  ")" 25 "every row arrived whole, one of them opening the second message"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -1956,7 +1989,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_83_scope_fleet_config case_84_prompts_carry_the_targets_facts
        case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
-       case_90_status_titles_and_landing)
+       case_90_status_titles_and_landing case_93_bot_status_pre)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
