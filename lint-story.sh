@@ -98,7 +98,15 @@ done
 # ── citations ────────────────────────────────────────────────────────────────
 #
 # A citation is a backticked token containing a "/", optionally with :LINE or
-# :LINE-LINE, checked against the working tree. The "/" requirement is what
+# :LINE-LINE, checked against the story's BASE — not against the checkout.
+# .stories lives on the integration branch while the code a story cites lives
+# on its epic, so reading from disk called every file an epic introduced "does
+# not exist" and counted every file the epic changed from the wrong branch
+# (khaita's story 016: six such lines, two of them errors). The cost was never
+# the noise — it is that a citation which really has rotted cannot be told
+# apart from it. origin first, because merge.sh pushes and a local branch that
+# is not checked out here lags; then the local branch; then the checkout, which
+# is all a target with no pushed base has. The "/" requirement is what
 # keeps this useful: without it the check flagged `res.ok`, `cache.match`,
 # `caches.open` (JS expressions) and `sw.js`, `Collection.tsx`, `02-REVIEW.md`
 # (bare filenames in prose) across every real story — 20 false positives, zero
@@ -108,6 +116,21 @@ done
 # beginning with "/" (URL paths like /manifest.json), and anything containing
 # whitespace — story 012 cited `git log -- public/sw.js`, a command, which the
 # first version read as a path because its character class allowed spaces.
+
+CITE_REF=""
+for ref in "origin/${BASE:-$BASE_BRANCH}" "${BASE:-$BASE_BRANCH}"; do
+  if git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+    CITE_REF="$ref"; break
+  fi
+done
+cite_exists() {                       # cite_exists <path>
+  if [[ -n "$CITE_REF" ]]; then git -C "$REPO_ROOT" cat-file -e "$CITE_REF:$1" 2>/dev/null
+  else [[ -e "$REPO_ROOT/$1" ]]; fi
+}
+cite_lines() {                        # cite_lines <path> → line count
+  if [[ -n "$CITE_REF" ]]; then git -C "$REPO_ROOT" show "$CITE_REF:$1" 2>/dev/null | wc -l
+  else wc -l < "$REPO_ROOT/$1"; fi
+}
 
 checked=0
 while read -r cite; do
@@ -122,7 +145,7 @@ while read -r cite; do
   [[ "$path" == */* ]] || continue   # no directory: a filename in prose, not a citation
   [[ "$path" == *.* ]] || continue
   checked=$((checked + 1))
-  if [[ ! -e "$REPO_ROOT/$path" ]]; then
+  if ! cite_exists "$path"; then
     # A line number asserts the file exists NOW, so a missing one is rot
     # (story 004 cited a diagnosis that was never on the integration branch).
     # A bare path may legitimately be forward-looking: a story names the test
@@ -137,7 +160,7 @@ while read -r cite; do
     continue
   fi
   [[ -n "$lines" ]] || continue
-  total="$(wc -l < "$REPO_ROOT/$path")"
+  total="$(cite_lines "$path")"
   first="${lines%%-*}"; last="${lines##*-}"
   if (( first > total )) || (( last > total )); then
     err "cites $path:$lines but the file has $total lines"
@@ -147,8 +170,8 @@ done < <(grep -oE '`[A-Za-z0-9_./@-]*\[?[A-Za-z0-9_.-]*\]?[A-Za-z0-9_./-]*\.[a-z
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 
-printf '\n%s: %d error(s), %d warning(s), %d citation(s) checked, %d AC(s)\n' \
-  "$(basename "$STORY_FILE")" "$ERRORS" "$WARNINGS" "$checked" "${#ACS[@]}"
+printf '\n%s: %d error(s), %d warning(s), %d citation(s) checked against %s, %d AC(s)\n' \
+  "$(basename "$STORY_FILE")" "$ERRORS" "$WARNINGS" "$checked" "${CITE_REF:-the checkout}" "${#ACS[@]}"
 
 if (( ERRORS > 0 )); then exit 1; fi
 if (( STRICT == 1 && WARNINGS > 0 )); then

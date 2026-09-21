@@ -2176,6 +2176,68 @@ case_94_epic_naming() {
   git -C "$REPO" rev-parse --verify --quiet origin/epic/epic/x >/dev/null && fail "nothing was created for it" || ok
 }
 
+# .stories lives on the integration branch; the code a story cites lives on its
+# epic. Reading citations off the checkout therefore called every file an epic
+# introduced "does not exist" and counted every changed file's lines from the
+# wrong branch — six such lines on khaita's story 016, two of them errors. The
+# cost is not the noise: a citation that really has rotted is indistinguishable
+# from it.
+case_98_lint_cites_resolve_against_base() {
+  CASE="98 lint-story resolves citations against the story's base, not the checkout"; fixture c98
+  local d="$FX/lint"; mkdir -p "$d"
+  local out rc
+
+  # An epic that adds a file and lengthens one the integration branch has. The
+  # checkout stays on base, where the added file does not exist and the other
+  # is a single line.
+  git -C "$REPO" checkout -q -b epic/test
+  printf 'a\nb\nc\nd\ne\nf\ng\nh\n' > "$REPO/src/added.ts"
+  printf 'x\n%.0s' {1..40} > "$REPO/src/marker.txt"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "epic: one new file, one longer file"
+  git -C "$REPO" push -q origin epic/test
+  git -C "$REPO" checkout -q base
+  [[ -e "$REPO/src/added.ts" ]] && fail "the checkout must not hold the epic's file" || ok
+  assert_eq "$(wc -l < "$REPO/src/marker.txt")" 1 "and holds the short marker"
+
+  story() {                           # story <name> <base-line> <citation prose>
+    printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n%s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' \
+      "$2" "$1" "$3" > "$d/$1.md"
+  }
+  lint() { out="$(cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1)"; rc=$?; }
+
+  story onepic "base: epic/test" 'It cites `src/added.ts:5` and `src/marker.txt:35-40`.'
+  lint onepic
+  assert_eq "$rc" 0 "a file the epic adds, cited with a line, is not rot"
+  assert_not_contains "$out" "added.ts" "and is not mentioned at all"
+  assert_not_contains "$out" "marker.txt" "nor is a range only the epic's version reaches"
+  assert_contains "$out" "checked against origin/epic/test" "and the summary says where it looked"
+
+  story overrun "base: epic/test" 'It cites `src/marker.txt:41`.'
+  lint overrun
+  assert_eq "$rc" 1 "a range past the end of the epic version still fails"
+  assert_contains "$out" "has 40 lines" "counted on the epic, not the 1 line the checkout has"
+
+  story rotted "base: epic/test" 'It cites `src/gone.ts:3`.'
+  lint rotted
+  assert_eq "$rc" 1 "a file on neither branch still fails"
+  assert_contains "$out" "gone.ts:3" "and is named"
+
+  # No base: means the integration branch, and that resolves from git too.
+  story integ "" 'It cites `src/marker.txt:2`.'
+  lint integ
+  assert_eq "$rc" 1 "with no base: the integration branch is the reference"
+  assert_contains "$out" "has 1 lines" "which is where the count comes from"
+
+  # Nothing to resolve against — a target whose base is on neither origin nor
+  # local. The checkout is the last resort, which is where it began.
+  printf 'only here\n' > "$REPO/src/untracked.ts"
+  story loose "" 'It cites `src/untracked.ts:1`.'
+  out="$(cd "$FX" && BASE_BRANCH=nosuch bash "$FLEET/lint-story.sh" t "$d/loose.md" 2>&1)"; rc=$?
+  assert_eq "$rc" 0 "with no resolvable base ref it falls back to the checkout"
+  rm -f "$REPO/src/untracked.ts"
+}
+
 # The phone is not a terminal. Every verb but /run and /help takes the repo
 # first, and with one repo registered naming it each time is ceremony that
 # turns /why 012 into "unknown repo '012'" — the registry path is a true
@@ -2316,7 +2378,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
        case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
-       case_97_bot_repo_list)
+       case_97_bot_repo_list case_98_lint_cites_resolve_against_base)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
