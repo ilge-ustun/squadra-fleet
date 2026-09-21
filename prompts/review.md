@@ -65,6 +65,12 @@ verbatim so it can become the next story's instrument. Probes are optional
 and writing none is not held against you — but a regression you only describe
 in prose is a regression nobody can re-run.
 
+Say which acceptance criterion the probe's defect belongs under, or that it
+belongs under none. This decides how it is repaired: a defect that is a new
+case of a claim already made is folded into that claim, while a criterion
+invented for it becomes another branch in the implementation, and another
+case nobody has stated.
+
 Run: {{VITEST_CMD}}, {{BUILD_CMD}}, {{LINT_CMD}}. The harness has run them
 too; yours inform your judgment, its results decide.
 

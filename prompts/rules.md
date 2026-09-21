@@ -18,6 +18,11 @@ Rules that override anything you infer:
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
 - One task, one commit.
+- Before branching on a value to decide which of two mechanisms delivers an
+  outcome, check the value tells the cases apart. One that is absent both when
+  something has finished and while it is still in flight does not, and no
+  guard added afterwards will separate them: guard and the other case appears.
+  Find the value that differs between them and branch on that.
 {{REPO_RULES}}
 - If a decision is needed that the story does not answer, write .blocked/{{STORY_ID}}.md
   with the question, each option and its cost, and your recommendation. Then stop.
