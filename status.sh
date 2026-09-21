@@ -25,18 +25,22 @@
 #   landed           done, merged, and its base is in the integration branch
 #   done             done and none of the above (a FAIL nobody merged)
 #
+# --bot is the phone view and hides `landed` and `done`, which ask nothing of
+# anyone; --all turns that off. One story named by id is always shown.
+#
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
-USAGE="usage: status.sh <repo> [--json|--epics|--bot] [story-id]"
+USAGE="usage: status.sh <repo> [--json|--epics|--bot] [--all] [story-id]"
 [[ $# -ge 1 ]] || die "$USAGE"
 load_repo "$1"; shift
-JSON=0; EPICS=0; BOT=0; ONE=""
+JSON=0; EPICS=0; BOT=0; ALL=0; ONE=""
 while (($#)); do
   case "$1" in
     --json)  JSON=1; shift ;;
     --epics) EPICS=1; shift ;;
     --bot)   BOT=1; shift ;;
+    --all)   ALL=1; shift ;;
     -*)      echo "$USAGE" >&2; exit 2 ;;
     *)       ONE="$1"; shift ;;
   esac
@@ -241,14 +245,30 @@ if (( JSON == 1 )); then printf '%s' "$JSON_ROWS" | jq -s .; exit 0; fi
 # rule. Newest first — the current work is what the screen shows before
 # any scrolling.
 if (( BOT == 1 )); then
-  (( ${#R_ID[@]} )) && echo "-------"
+  # The phone view answers "what wants me?", so a landed story is noise: it
+  # asks for nothing and pushes the ones that do below the fold. --all turns
+  # the filter off, a story named by id is always shown, and the terminal
+  # table below still prints every row.
+  shown=0
   for (( i = ${#R_ID[@]} - 1; i >= 0; i-- )); do
+    if (( ALL == 0 )) && [[ -z "$ONE" ]]; then
+      case "${R_LAND[$i]}" in landed|done) continue ;; esac
+    fi
+    (( shown )) || echo "-------"
+    shown=1
     r="${R_ROUND[$i]}"; [[ "$r" =~ ^[0-9]+$ ]] && r="R$r"
     printf '%s %s\n→ %s | %s | %s | %s\n' \
       "${R_ID[$i]}" "${R_TITLE[$i]}" "${R_INTO[$i]}" "${R_LAND[$i]}" "$r" "${R_VERDICT[$i]}"
     [[ -n "${R_NOTES[$i]}" ]] && printf '! %s\n' "${R_NOTES[$i]}"
     echo "-------"
   done
+  if (( shown == 0 )); then
+    if (( ${#R_ID[@]} )); then
+      echo "nothing in flight — /status-all $REPO_NAME shows what has landed"
+    else
+      echo "no stories yet"
+    fi
+  fi
   [[ -n "$DETAIL" ]] && { echo; printf '%s\n' "$DETAIL"; }
   exit 0
 fi

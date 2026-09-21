@@ -111,10 +111,17 @@ the first command above and `/why <repo> <id>` is the Machine block.
 
 Every entry point names the repo first. The phone forms go through
 `telegram.sh poll`; only messages from `TELEGRAM_CHAT_ID` are acted on.
+`/help` lists the verbs. With exactly one repo registered the `<repo>` word
+may be left out of any of them, so `/why 012` is `/why khaita 012`; a name
+that is not in the registry is reported with the ones that are, never read
+as a story id.
 
 | at a terminal | from the phone | what |
 |---|---|---|
-| `status.sh <repo> [id]` | `/status <repo>` | the epics, then every story: title, landing state, round, verdict, base |
+| `status.sh <repo> [id]` | `/status <repo>` | the epics, then the stories. The phone form hides `landed` and `done` |
+| `status.sh <repo> --bot --all` | `/status-all <repo>` | the same, hiding nothing |
+| | `/repo` | the repos this bot knows |
+| | `/help` | the verbs, grouped, and what each does |
 | `status.sh <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form (a `<pre>` block wraps on a phone, so: id and title, then `→ base \| state \| round \| verdict`, between rules, newest first) |
 | `write-story.sh <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story |
 | `lint-story.sh <repo> <id> [--strict]` | | mechanical checks |

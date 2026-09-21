@@ -92,6 +92,55 @@ story_ok() { [[ "$1" =~ ^[0-9]{3}$ && -f "$REPO_ROOT/.stories/$1.md" ]]; }
 # failed status commit is a die, the loser is a dead round. Every writer takes
 # the same advisory lock first — launch.sh does the same in
 # commit_status.
+repo_names() {                        # repo_names → one registered repo per line
+  local f
+  for f in "$FLEET_HOME"/repos/*.env; do
+    [[ -e "$f" ]] || continue
+    basename "$f" .env
+  done
+}
+
+# Every verb but /run, /help and /repo takes the repo first. A human on a
+# phone forgets which name the registry uses; this is the cheapest way to
+# ask, and it needs no repo of its own to answer.
+cmd_repo() {
+  local n p out=""
+  for n in $(repo_names); do
+    p="$(sed -n 's/^REPO_PATH=//p' "$FLEET_HOME/repos/$n.env" | head -1)"
+    out+="$n  ${p:-?}"$'\n'
+  done
+  if [[ -n "$out" ]]; then printf '%s' "$out"
+  else echo "no repos registered — add one at repos/<name>.env"; fi
+}
+
+# Grouped by what the human is doing, because a flat list of eight verbs is
+# read as eight unrelated things. This is also the unknown-verb reply: a
+# wrong command is exactly when the list is wanted.
+cmd_help() {
+  local only n; only="$(repo_names)"; n="$(grep -c . <<< "$only")"
+  cat <<'EOF'
+Look
+/status <repo> — the stories still in flight
+/status-all <repo> — those, plus what has landed
+/why <repo> <id> — the machine block of the last round
+/repo — the repos this bot knows
+
+Move a story on
+/promote <repo> <id> — draft to ready; the next drain takes it
+/answer <repo> <id> <text> — answer a blocked story and requeue it
+
+Land it, or take it back
+/merge <repo> <id> — land a story on the integration branch
+/merge <repo> epic/<name> — land a whole epic
+/revert <repo> <id> — undo a story's merge into its epic
+
+Run it
+/run — drain the queue now instead of waiting for the timer
+/help — this
+EOF
+  (( n == 1 )) && printf '\nOne repo is registered (%s), so you can leave <repo> out.\n' "$only"
+}
+
 with_lock() {                         # with_lock <command…>
   exec 9>"$REPO_ROOT/.git/fleet.lock"
   flock -w "${FLEET_LOCK_WAIT:-120}" 9 || warn "waited ${FLEET_LOCK_WAIT:-120}s for the fleet lock — going ahead"
@@ -101,7 +150,7 @@ with_lock() {                         # with_lock <command…>
   return $rc
 }
 
-cmd_status() { bash "$FLEET_HOME/status.sh" "$REPO_NAME" --bot; }
+cmd_status() { bash "$FLEET_HOME/status.sh" "$REPO_NAME" --bot "$@"; }
 
 cmd_why() {                           # cmd_why <id>
   local id="$1"
@@ -173,16 +222,38 @@ dispatch() {                          # dispatch <text> → reply on stdout
   local text="$1" verb repo arg rest
   read -r verb repo arg rest <<< "$text"
   case "$verb" in
-    /run) cmd_run; return ;;
-    /status|/why|/promote|/answer|/revert|/merge) : ;;
-    *) printf '%s\n' "/status <repo>  /why <repo> <id>  /promote <repo> <id>  /answer <repo> <id> <text>  /merge <repo> <id>|epic/<name>  /revert <repo> <id>  /run"; return ;;
+    /run)        cmd_run;  return ;;
+    /help|/start) cmd_help; return ;;
+    /repo|/repos) cmd_repo; return ;;
+    /status|/status-all|/why|/promote|/answer|/revert|/merge) : ;;
+    *) cmd_help; return ;;
   esac
+
+  # The repo comes first, but with one repo registered naming it every time is
+  # ceremony, and forgetting it used to answer "unknown repo '012'" — a true
+  # statement about the registry, and no use to anyone. With exactly one repo
+  # the words shift right and that repo is used. With several, nothing is
+  # guessed: the reply names the ones that exist.
+  if [[ -z "$repo" || ! -f "$FLEET_HOME/repos/$repo.env" ]]; then
+    local only n; only="$(repo_names)"; n="$(grep -c . <<< "$only")"
+    # Only when the word in the repo slot is plainly not a repo name: absent,
+    # a story id, or an epic. A misspelt repo is told so rather than quietly
+    # read as a story id, which would answer a question nobody asked.
+    if (( n == 1 )) && [[ -z "$repo" || "$repo" =~ ^[0-9]{3,}$ || "$repo" == epic/* ]]; then
+      rest="${arg:+$arg }$rest"; arg="$repo"; repo="$only"
+    else
+      printf 'unknown repo: %s\nknown: %s\n/help lists the commands\n' \
+        "${repo:-(none given)}" "$(paste -sd' ' <<< "$only")"
+      return
+    fi
+  fi
   # dispatch runs inside a command substitution, so a die here — an unknown
   # repo, a name that is not a name — ends only this command and its message
   # is the reply. The poll loop never dies.
   load_repo "${repo:-}"
   case "$verb" in
-    /status)  cmd_status ;;
+    /status)      cmd_status ;;
+    /status-all)  cmd_status --all ;;
     /why)     cmd_why "${arg:-}" ;;
     /promote) with_lock cmd_promote "${arg:-}" ;;
     /answer)  [[ -n "${rest:-}" ]] && with_lock cmd_answer "${arg:-}" "$rest" || echo "usage: /answer <repo> <id> <text>" ;;
@@ -223,8 +294,10 @@ poll() {
     reply="$(dispatch "$text" 2>&1)"
     # A table goes as a code block; everything else as plain text, so a URL
     # in a reply stays a link.
-    if [[ "${text%% *}" == /status ]]; then send --pre "${reply:-(no output)}"
-    else                                    send "${reply:-(no output)}"; fi
+    case "${text%% *}" in
+      /status|/status-all) send --pre "${reply:-(no output)}" ;;
+      *)                   send      "${reply:-(no output)}" ;;
+    esac
   done
 }
 

@@ -2176,6 +2176,105 @@ case_94_epic_naming() {
   git -C "$REPO" rev-parse --verify --quiet origin/epic/epic/x >/dev/null && fail "nothing was created for it" || ok
 }
 
+# The phone is not a terminal. Every verb but /run and /help takes the repo
+# first, and with one repo registered naming it each time is ceremony that
+# turns /why 012 into "unknown repo '012'" — the registry path is a true
+# answer to a question nobody asked. With exactly one repo the words shift
+# right and that repo is used; with several nothing is guessed.
+case_95_bot_help_and_repo_default() {
+  CASE="95 /help groups the verbs and says what each does"; fixture c95
+  update 120 42 "/help"
+  bot poll
+  assert_eq "$(sent)" 1 "one message"
+  local t; t="$(sent_text)"
+  assert_contains "$t" "/status-all" "names status-all"
+  assert_contains "$t" "/repo" "names repo"
+  assert_contains "$t" "/promote" "names promote"
+  assert_contains "$t" "/merge" "names merge"
+  assert_contains "$t" "/revert" "names revert"
+  assert_contains "$t" "/run" "names run"
+  assert_contains "$t" "Look" "a group heading"
+  assert_contains "$t" "Land" "another group heading"
+
+  CASE="95 an unknown verb answers with the same help"; fixture c95-unknown
+  update 121 42 "/nope"
+  bot poll
+  assert_contains "$(sent_text)" "/status-all" "the fallback is the help"
+
+  CASE="95 with one repo registered the repo may be left out"; fixture c95-one
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  update 122 42 "/why $STORY"
+  bot poll
+  assert_not_contains "$(sent_text)" "unknown repo" "no registry error"
+  assert_contains "$(sent_text)" "computed" "the machine block came back"
+
+  rm -f "$TRACE"/curl-args-*
+  CASE="95 /status with no repo at all uses the only one"
+  update 123 42 "/status"
+  bot poll
+  assert_contains "$(sent_text)" "fixture story" "the table came back"
+
+  rm -f "$TRACE"/curl-args-*
+  CASE="95 a misspelt repo is told so, not read as a story id"
+  update 124 42 "/why nosuch $STORY"
+  bot poll
+  assert_contains "$(sent_text)" "unknown repo: nosuch" "it names what was not found"
+  assert_contains "$(sent_text)" "known: t" "and what is registered"
+  assert_not_contains "$(sent_text)" "no such story" "it did not shift a name into the id slot"
+}
+
+# /status is the view a human reads on a phone between rounds: what still
+# wants attention. A landed story wants none, and after fourteen of them the
+# two that matter are below the fold. /status-all keeps the whole history one
+# command away.
+case_96_bot_status_hides_landed() {
+  CASE="96 /status hides what has landed"; fixture c96
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run -- --land
+  assert_eq "$MRC" 0 "the story landed"
+  cat > "$REPO/.stories/901.md" <<'EOS'
+---
+status: ready
+round: 0
+---
+
+# Story 901: still going
+EOS
+  git -C "$REPO" add .stories/901.md
+  git -C "$REPO" commit -q -m "story 901"
+  update 130 42 "/status t"
+  bot poll
+  assert_contains "$(sent_text)" "still going" "the open story is shown"
+  assert_not_contains "$(sent_text)" "fixture story" "the landed one is not"
+
+  rm -f "$TRACE"/curl-args-*
+  CASE="96 /status-all shows it again"
+  update 131 42 "/status-all t"
+  bot poll
+  assert_contains "$(sent_text)" "fixture story" "the landed story is back"
+  assert_contains "$(sent_text)" "still going" "and the open one too"
+  assert_contains "$(sent_text)" "text=<pre>" "still a code block"
+
+  rm -f "$TRACE"/curl-args-*
+  CASE="96 with nothing in flight /status says so"; fixture c96-empty
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run -- --land
+  update 132 42 "/status t"
+  bot poll
+  assert_contains "$(sent_text)" "status-all" "it names the command that shows them"
+}
+
+# A human who has forgotten a repo's name cannot ask the bot today: every
+# verb needs the name they are missing.
+case_97_bot_repo_list() {
+  CASE="97 /repo lists the registry"; fixture c97
+  update 140 42 "/repo"
+  bot poll
+  assert_eq "$(sent)" 1 "one message"
+  assert_contains "$(sent_text)" "$REPO" "names the checkout it points at"
+  assert_not_contains "$(sent_text)" "unknown repo" "it needs no repo of its own"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2215,7 +2314,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_85_seed_files_from_config case_86_probe_dir
        case_87_queue_all_repos case_88_suite_env_is_clean case_89_shared_parent_dir_refused
        case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
-       case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming)
+       case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming
+       case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
+       case_97_bot_repo_list)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
