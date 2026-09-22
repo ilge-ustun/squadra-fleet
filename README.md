@@ -4,24 +4,28 @@ An autonomous coding fleet: a bash harness that turns a one-sentence intent
 into a story, has a builder agent implement it, has a reviewer agent attack
 it, computes the verdict itself, and merges what passes. It runs against
 **other** repositories — its first target is `khaita-app` — and is never a
-target itself. It is driven from a terminal or from a phone through a
-Telegram bot.
+target itself. It is driven from a terminal, from a phone through a Telegram
+bot, and by a coordinator: a human with an agent session beside them, on any
+harness and model.
 
 The principle that shapes everything: **the machine can veto, never grant.**
 A story passes only when the baseline is green, every acceptance criterion
 has a test the reviewer proved goes red, no probe found anything, and the
 reviewer said PASS. Any one of those missing is a FAIL with the reason named.
 
-Read `docs/FLEET-HANDOFF.md` for the current state and `docs/lessons.md`
-(L-01 …) for why things are the way they are. This file is the map.
+This file is the map. `docs/FLEET-HANDOFF.md` is the state, `docs/lessons.md`
+(L-01 …) the reasons, `docs/COORDINATORS.md` the coordinator on other
+harnesses and models. Orient by running commands, not by trusting prose —
+numbers in prose rot.
 
 ## The loop
 
 ```
 intent ──write-story.sh──▶ .stories/<id>.md (draft)
-       ──lint-story.sh───▶ cited paths exist, ACs are **ACn headed, base: is legal
+       ──lint-story.sh───▶ cited paths exist on the base, ACs are **ACn headed, base: is legal
+       ──the coordinator─▶ reads the draft, edits by hand, lints again, commits
        ──a human────────▶ status: ready   (at a terminal, or /promote from the phone)
-       ──launch.sh───────▶ worktree from origin/<base>; builder; baseline; scope;
+       ──the queue───────▶ launch.sh: worktree from origin/<base>; builder; baseline; scope;
                            reviewer; mutation runner; probe runner; computed verdict
                            → .review/<id>.md, committed with the status
        ──merge.sh────────▶ story → its epic, on a computed PASS (the queue does this)
@@ -29,24 +33,62 @@ intent ──write-story.sh──▶ .stories/<id>.md (draft)
                            (merge.sh --epic / --land, or /merge from the phone)
 ```
 
-`run-queue.sh` drains every `ready` story of a repo and calls `merge.sh` on
-each computed PASS. Two systemd timers (`systemd/`) run the queue every
-15 minutes and the bot every minute; nothing in the fleet lands anything on
-the integration branch by itself.
+`run-queue.sh` drains every `ready` story of a repo, lowest id first, and
+calls `merge.sh` on each computed PASS. Two systemd timers (`systemd/`) run
+the queue every 15 minutes and the bot every minute. Nothing in the fleet
+lands anything on the integration branch by itself, and nothing in it
+promotes a story.
+
+## Roles
+
+Three agents run inside the harness, one judgment runs beside it, and the
+harness itself is bash. Each agent is one CLI call on stdin; each is
+replaceable at that seam.
+
+| role | runs as | model | does | may not |
+|---|---|---|---|---|
+| story writer | `write-story.sh`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `claude-opus-5` | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
+| builder | `launch.sh`: `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `claude-sonnet-4-6`; a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `check-mutation.sh` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
+| reviewer | `launch.sh`: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head: reads files, runs the suite, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
+| the machine | `launch.sh`, `mutation.sh` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
+| the coordinator | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
+| the human | terminal or phone | — | promotes, lands, answers blocks, deploys, holds every token | — |
+
+The reviewer's checks are also in the builder's rules since 22 Sep: which
+instrument proves each criterion, whether it asserts what the criterion
+claims, deleting the behaviour outright, and the edge case a probe would
+construct. The builder sees the attack before it faces it.
 
 ## Story versus epic
 
-A **story** is one file, `.stories/<id>.md`, with frontmatter (`status`,
-`round`, optional `base`, `scope_deny`, `model`; `merged:` is written by
-`merge.sh`) and acceptance criteria headed `**ACn — …**`, each naming the
-instrument that proves it and the mutation that turns it red. Its branch is
-`story/<id>`, cut by the launcher from `origin/<base>`.
-
-An **epic** is a branch named `epic/<name>` and nothing more: no file, no
-record. Stories name it with `base:`; `status.sh` derives everything else
-from git. The name is enforced where a story is born: `write-story.sh --base`
+A **story** is one file, `.stories/<id>.md`, and the only specification the
+agents get. An **epic** is a branch named `epic/<name>` and nothing more;
+stories name it with `base:` and `status.sh` derives everything else from
+git. The name is enforced where a story is born: `write-story.sh --base`
 takes only `epic/*`, `lint-story.sh` rejects any other base, and
 `new-epic.sh` is the one way an epic branch is created.
+
+The frontmatter, read by every script:
+
+| key | who writes it | meaning |
+|---|---|---|
+| `status` | the writer, the human, the launcher | `draft` → `ready` → `in_progress` → `done` \| `blocked` \| `needs_human` |
+| `round` | the launcher | rounds run so far; `MAX_ROUNDS` (default 2) more per launch |
+| `base` | the writer | `epic/<name>`, or absent for the integration branch |
+| `scope_deny` | the writer | space-separated globs the builder must not touch; deny-only; `.fleet/*` always |
+| `model` | the coordinator | the builder's model for this story alone |
+| `merged` | `merge.sh` | the merge commit's sha, for `revert.sh` and `status.sh` |
+
+The body follows `.stories/TEMPLATE.md`: Symptom, Evidence, Acceptance
+criteria, Known weakness of the instrument, Human verification, Out of
+scope. Each criterion is headed `**ACn — <claim>.**` at column 0 (a grep
+extracts them; a table is invisible), names the instrument that proves it,
+and names the change that turns that instrument red. No criterion says the
+suite, build or lint stays green — the baseline is unconditional.
+
+Ids are three digits and ascend in run order: the queue takes the lowest
+`ready` first. The next story is drafted only when the previous one reads
+`on epic`, because the writer reads the epic's tip.
 
 How each lands:
 
@@ -65,8 +107,7 @@ A repo can instead ask for a request on its host (`MERGE_MODE=pr`, below).
 
 `status.sh` shows a **landing state**, derived from git and the computed
 verdict on every run and never stored. The frontmatter `status:` is the
-launcher's word (`draft ready in_progress blocked needs_human done`); the
-landing state says what became of a `done` story's code:
+launcher's word; the landing state says what became of a `done` story's code:
 
 | shown | meaning | what it needs |
 |---|---|---|
@@ -74,11 +115,69 @@ landing state says what became of a `done` story's code:
 | `awaiting merge` | `done`, computed PASS, branch still there, nobody merged it | a human: `merge.sh <id> --land` or `/merge <repo> <id>` |
 | `on epic` | `done` and merged into its epic, which is not yet in the integration branch | the epic to land: `/merge <repo> epic/<name>` |
 | `landed` | `done` and its code is in the integration branch — its branch, or the `merged:` sha in its frontmatter, is an ancestor of it | nothing |
-| `done` | `done` and none of the above: a FAIL nobody merged, **or** a story merged by hand whose branch is gone and whose `merged:` sha was never recorded — git has nothing to check | nothing, or a `merged: <sha>` line in the story if you want it to read `landed` |
+| `done` | `done` and none of the above: a FAIL nobody merged, **or** a story merged by hand whose branch is gone and whose `merged:` sha was never recorded | nothing, or a `merged: <sha>` line if you want it to read `landed` |
 
 The machine claims only what it can prove: a story whose code is in the
 integration branch but whose evidence was deleted reads `done`, not
 `landed`.
+
+## The verdict
+
+The reviewer's `VERDICT:` line is one input; `launch.sh` computes the
+result and writes it as line 3 of `.review/<id>.md`, with a `### Machine`
+block per round.
+
+```
+machine_pass := baseline green — test, build, lint, run by the harness
+             ∧ every **ACn in the story has ≥1 mutation in .review-out/mutations/
+             ∧ every mutation is RED when the harness runs it
+             ∧ no probe is RED
+final        := SPEC  if the reviewer said SPEC
+             |  PASS  if machine_pass and the reviewer said PASS
+             |  FAIL  otherwise — every failing condition is on the `computed:` line
+```
+
+A mutation is `ACn-<slug>.patch` (a `git diff`) with a `.test` (vitest
+selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
+The reviewer writes at least one per criterion; the builder writes its own
+as `ACn-tdd-<slug>` — the failing test it observed, handed over instead of
+described. The harness runs every one in a clean tree with the classifier
+in `mutation.sh`:
+
+| class | meaning | who fixes it |
+|---|---|---|
+| `RED` | the mutation was caught — the only good answer | — |
+| `GREEN` | it survived: no instrument asserts that behaviour | the builder: a real test |
+| `PRE_RED` | the selector already fails before the mutation | the builder's test, or the base |
+| `SELECTOR_INVALID` | the selector names no test (wrong path, wrong `-t`, a shell command in a `.test`) | whoever wrote it |
+| `PATCH_INVALID` | the patch does not apply to the head | the patch was made before the last commit |
+| `NO_TESTS` | the mutation broke compilation | the mutation, not the test (L-08) |
+| `NO_SELECTOR` | no `.test` or `.cmd` beside the patch | whoever wrote it |
+| `ACn has no mutation` | no patch for that criterion at all | the reviewer, or a criterion nothing can instrument |
+| `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
+
+A **probe** is the inverse of a mutation: a test the reviewer leaves in
+`.review-out/probes/`, run by the harness against the tree as it stands. A
+failing probe fails the story whatever the `VERDICT:` line says, and is
+committed so it can become the next round's instrument.
+
+`SPEC` means a criterion no implementation can satisfy; it is immune to the
+veto, ends the rounds, and goes to a human. `UNPARSEABLE` is the launcher's
+word for a reviewer that ended without a verdict line; it is not-PASS.
+
+**`check-mutation.sh <repo> <patch…> [--wt <dir>]`** runs the same
+classifier on a tree someone is still working in — the builder's worktree,
+or a human's checkout. It refuses an uncommitted tree, applies each patch,
+runs its selector, undoes the patch with `git apply -R`, prints the class
+the verdict would print, and exits 0 only when every patch is RED. The
+builder's rules tell it to run this on `.review-out/mutations/AC*-tdd-*.patch`
+before finishing, so an invalid selector or a stale patch is found before
+the round ends, not after. `prompts/README.md` is the full contract.
+
+Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`,
+`scope.txt`, `mutations/` (every patch, selector and `.result`), `probes/`,
+`reviewer.md`, `builder.md`. Raw runner output stays machine-local in the
+target's `.runs/`.
 
 ## Watching it
 
@@ -90,58 +189,46 @@ bash status.sh khaita                  # the epics, then every story — landing
 bash status.sh khaita 013              # one story, with its latest round's Machine block
 journalctl --user -u fleet-queue -f    # the queue's drains, live (Ctrl-C to leave)
 journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
-```
-
-A story's row says `RUNNING` while something is live in its worktree.
-The raw output of that round is in the target, machine-local and
-gitignored, one flat directory named by story and round:
-
-```bash
-ls -t ~/work/khaita/khaita-app/.runs/ | grep ^013 | head       # newest first
+ls -t ~/work/khaita/khaita-app/.runs/ | grep ^013 | head       # raw output, newest first
 tail -f ~/work/khaita/khaita-app/.runs/013-round1-*.log        # a mutation being run
 ```
 
-What the round *decided* is committed: `.review/013.md` (the computed
-verdict on line 3, a `### Machine` block per round) and
-`.review/013/round-N/` (baseline, scope, every mutation and probe, the
-builder's and reviewer's own words). From the phone, `/status <repo>` is
-the first command above and `/why <repo> <id>` is the Machine block.
+A story's row says `RUNNING` while something is live in its worktree. From
+the phone, `/status <repo>` is the first command above and `/why <repo>
+<id>` is the Machine block.
 
 ## Commands
 
-Every entry point names the repo first. The phone forms go through
-`telegram.sh poll`; only messages from `TELEGRAM_CHAT_ID` are acted on.
-`/help` lists the verbs. With exactly one repo registered the `<repo>` word
-may be left out of any of them, so `/why 012` is `/why khaita 012`; a name
-that is not in the registry is reported with the ones that are, never read
-as a story id.
+Every entry point names its repo first. The phone forms are Telegram verbs
+answered by `telegram.sh poll` every minute.
 
 | at a terminal | from the phone | what |
 |---|---|---|
 | `status.sh <repo> [id]` | `/status <repo>` | the epics, then the stories. The phone form hides `landed` and `done` |
 | `status.sh <repo> --bot --all` | `/status-all <repo>` | the same, hiding nothing |
-| | `/repo` | the repos this bot knows |
-| | `/help` | the verbs, grouped, and what each does |
-| `status.sh <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form (a `<pre>` block wraps on a phone, so: id and title, then `→ base \| state \| round \| verdict`, between rules, newest first) |
-| `write-story.sh <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story |
-| `lint-story.sh <repo> <id> [--strict]` | | mechanical checks |
+| | `/repo` · `/help` | the repos this bot knows · the verbs, grouped |
+| `status.sh <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
+| `write-story.sh <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
+| `lint-story.sh <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
 | `new-epic.sh <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
 | edit `status: ready` | `/promote <repo> <id>` | into the queue |
-| `launch.sh <repo> <id>` | | one story, one round at a time (detached, see the handoff) |
-| `run-queue.sh <repo>` · `--all` | `/run` | drain the queue |
+| `run-queue.sh <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
+| `launch.sh <repo> <id>` | | one story, one launch; detached, never inside a session |
 | `status.sh <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
 | answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
+| `check-mutation.sh <repo> <patch…> [--wt <dir>]` | | the verdict's classifier on a working tree |
 | `merge.sh <repo> <id> --land` | `/merge <repo> <id>` | a develop story → the integration branch |
 | `merge.sh <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
+| `revert.sh <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
+| `reset.sh <repo> <id> [--force] [--draft]` | | back to the queue |
+| `install-skills.sh` | | link `skills/` into `~/.claude/skills` and `~/.codex/skills` |
+| `test-lib.sh [substring]` | | the harness's own suite |
 
 A merge from the phone is detached: the bot acknowledges it immediately and
 sends the result when it ends. It has to be — the merge installs deps and runs
 the whole post-merge baseline, and the poll that answers the command is a
 systemd oneshot with a two-minute start timeout, which killed khaita's epic
-merge mid-flight on 22 Sep 2026. At a terminal `merge.sh` is synchronous as
-before.
-| `revert.sh <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
-| `reset.sh <repo> <id>` | | back to the queue |
+merge mid-flight on 22 Sep 2026. At a terminal `merge.sh` is synchronous.
 
 Run a launcher detached, never as a child of an interactive agent session:
 
@@ -156,10 +243,11 @@ target itself carries, on its integration branch:
 
 ```
 .fleet/config        sourced by lib.sh:load_repo — every key below
-.fleet/rules.md      optional, REPO_RULES: rules rendered into the agents' prompts
+.fleet/rules.md      optional, REPO_RULES: rules rendered into the builder's prompt
 .stories/TEMPLATE.md the shape a story takes; write-story.sh gives it to the agent
 .stories/ .review/ .blocked/   committed fleet state
 .runs/ .review-out/            machine-local, gitignored
+AGENTS.md → CLAUDE.md          the same instructions under the name Codex reads
 ```
 
 `.fleet/config` is env-style and sourced; a variable already in the caller's
@@ -169,13 +257,19 @@ environment wins over the file; a missing required key is a `die`.
 |---|---|---|
 | `BASE_BRANCH` | yes | the integration branch (`develop`); fleet state lives only here |
 | `INSTALL_CMD` | yes | run in every fresh worktree (`npm ci`) |
-| `VITEST_CMD` | yes | must accept `<selector> --reporter json --outputFile <f>` and write vitest's JSON shape |
+| `VITEST_CMD` | yes | must accept `<selector> --reporter json --outputFile <f>` and write vitest's JSON shape; the baseline and the classifier read it |
 | `BUILD_CMD` `LINT_CMD` | yes | the rest of the baseline |
 | `SEED_FILES` | stated, may be empty | untracked files copied into every worktree (`.env.local`) — never a token |
 | `PROBE_DIR` | yes | where a reviewer's probe lands, inside the suite's include glob |
-| `REPO_RULES` | no | markdown file rendered into the agent prompts |
+| `REPO_RULES` | no | markdown file rendered into the builder's rules as `{{REPO_RULES}}` |
 | `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
 | `PR_CMD` | with `pr` | see below |
+
+khaita's `.fleet/rules.md` carries the deploy prohibition and the test
+environment's known traps (no `result.all` in @testing-library/react 16,
+no SSR test that sets `window = undefined`, no `Date.now()` for uniqueness,
+read an unfamiliar API's type in `node_modules` first). Every khaita builder
+gets them through `REPO_RULES`.
 
 ### `PR_CMD`
 
@@ -208,17 +302,36 @@ the CLIs' own config files, never in `.env.fleet` or a target.
 
 ## The coordinator
 
-The judgment between a wish and the queue — writing the intent, reviewing
-the draft, reading a verdict, deciding what follows — is a human with an
-agent session beside them. That session's procedures are `skills/<name>/
-SKILL.md`, one format that Claude Code and Codex both load;
-`bash install-skills.sh` links them into `~/.claude/skills/` and
-`~/.codex/skills/`. `docs/COORDINATORS.md` says how to run the coordinator
-on another harness or model and how a trial is recorded. `AGENTS.md` is
-`CLAUDE.md` under the name Codex reads.
+The harness has no coordinator role: bash orchestrates and the verdict is
+computed. What is left — turning a wish into a story, reviewing the draft,
+reading verdicts, answering blocks, landing epics, maintaining the harness —
+is a human with an agent session beside them. That session's procedures are
+five skills in `skills/<name>/SKILL.md`, written for any agent: actions
+rather than tool names, the reason beside every rule. Claude Code and Codex
+read the same `name:`/`description:` frontmatter, so one set of files serves
+both; `bash install-skills.sh` links them into `~/.claude/skills/` and
+`~/.codex/skills/`. `AGENTS.md` is `CLAUDE.md` under the name Codex reads.
 
-A coordinator of any model starts no launcher, promotes nothing and lands
-nothing; the queue timer and the human do those.
+| skill | when |
+|---|---|
+| `fleet-coordinate` | orientation, what only a human does, the rules for a coordinator of any model, routing |
+| `fleet-story` | a wish → intent → `write-story.sh` → the draft review → `lint-story.sh --strict` → commit |
+| `fleet-verdict` | the Machine block and the evidence; the decision tree for FAIL, `needs_human`, `blocked`, `UNPARSEABLE`, `SPEC` |
+| `fleet-land` | landing states, who merges what, cleanup after a failed merge, `revert.sh`, `reset.sh` |
+| `fleet-develop` | changing the harness |
+
+Three rules make a coordinator safe whatever model runs it. It **starts no
+launcher** — a promoted story is taken by the queue timer within fifteen
+minutes or by a human's `/run`, which is also what lets a sandboxed harness
+coordinate at all. It **promotes nothing and lands nothing**; it ends by
+naming the command. It **never touches tokens**.
+
+`docs/COORDINATORS.md` has the Codex recipe, the `model_providers` template
+for other providers, and the trial protocol; `docs/coordinator-trials.md`
+records each trial — harness, model, story, lint result after the
+coordinator's own review, hand edits needed, rounds to PASS, and any
+attempt at a human-only action. The story commit carries a
+`Coordinator: <harness>/<model>` trailer.
 
 ## What needs a human
 
@@ -226,30 +339,60 @@ nothing; the queue timer and the human do those.
 - Landing an epic, or a develop story, on the integration branch.
 - Answering `.blocked/<id>.md` and `needs_human` stops; the notification
   carries the command that answers it.
+- Deploying: in khaita, `npm run deploy` and every `firebase` command.
 - Installing the systemd units and enabling lingering (`systemd/README.md`).
-- Tokens: the bot's in `.env.fleet` (mode 600), `gh`/`glab` logins.
+- Tokens: the bot's in `.env.fleet` (mode 600), `gh`/`glab` logins, any
+  provider key for another coordinator model.
+
+## Seams
+
+Fleet-level, `${X:-default}` in the scripts, set in the caller's environment:
+
+| seam | default | meaning |
+|---|---|---|
+| `BUILDER_MODEL` | `claude-sonnet-4-6` | the builder; a story's `model:` overrides it |
+| `STORY_MODEL` | `claude-opus-5` | the story writer |
+| `REVIEWER_MODEL` | empty | empty keeps codex's own default; set, `codex exec -m`; recorded as `reviewer:` in the Machine block |
+| `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
+| `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
+| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human |
+| `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
+| `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
+| `PUSH_STATUS` | 1 | 0 to work offline |
+| `FLEET_NOTIFY_CMD` | `telegram.sh send` | how the fleet reaches a human |
+| `FLEET_LOCK_WAIT` `QUEUE_START_CMD` `FLEET_REGISTRY_DIR` | | the lock, how the bot starts a drain, where the registry is |
+
+Worktrees are siblings of the target: `../wt-<id>` for a builder,
+`../wt-<id>-review` for the reviewer, `../ws-<id>` for the story writer,
+`../merge-<name>` for a merge. All are throwaway.
 
 ## Tests and working rules
 
 `bash test-lib.sh` runs the suite (fake agents in `test/`, re-executed under
 `env -i`); its last line is the count. Green before every commit; a case
-that has never been observed red is not a case. Never edit `launch.sh`
-while a launcher is running it. `die` over `warn`. Prompts on stdin, never
-argv. One task, one commit. `docs/lessons.md` holds the rest.
+that has never been observed red is not a case — a new feature is red
+because it is absent, a characterisation is red by running it against a
+copy with the block deleted (`FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
+`FLEET_LIB_OVERRIDE`). The checkout at `~/work/fleet` is live — the timers
+execute it — so every change is made in a worktree and fast-forwarded in
+when both units are inactive. Never edit `launch.sh` while a launcher is
+running it. `die` over `warn`. Prompts on stdin, never argv. One task, one
+commit. `docs/lessons.md` holds the rest.
 
 ## Where things are
 
 ```
-lib.sh          load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
-launch.sh       the launcher              run-queue.sh   the drain
-write-story.sh  intent → story            lint-story.sh  mechanical checks
-new-epic.sh     an epic branch            status.sh      what the fleet is doing
-merge.sh        story → epic, --land, --epic, MERGE_MODE
-revert.sh       undo a story's merge      reset.sh       back to the queue
-telegram.sh     send | poll — the notifications and the phone commands
-render.sh       render_prompt()           prompts/       the agents' prompts, README = the verdict contract
-mutation.sh     the classifier            check-mutation.sh  the same classifier, run by a builder on its own evidence
-skills/         the coordinator's procedures, linked by install-skills.sh
-test-lib.sh     the suite                 test/          fake claude, codex, vitest, curl
-systemd/        the two timer pairs       docs/          handoff, lessons, plans
+lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
+launch.sh           the launcher              run-queue.sh   the drain
+mutation.sh         the classifier            check-mutation.sh  the same classifier, on a working tree
+write-story.sh      intent → story            lint-story.sh  mechanical checks against the story's base
+new-epic.sh         an epic branch            status.sh      what the fleet is doing
+merge.sh            story → epic, --land, --epic, MERGE_MODE
+revert.sh           undo a story's merge      reset.sh       back to the queue
+telegram.sh         send | poll — the notifications and the phone commands
+render.sh           render_prompt()           prompts/       the agents' prompts, README = the verdict contract
+skills/             the coordinator's procedures, linked by install-skills.sh
+test-lib.sh         the suite                 test/          fake claude, codex, vitest, curl, npm
+systemd/            the two timer pairs       docs/          handoff, lessons, coordinators, trials, plans
+AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```
