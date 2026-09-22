@@ -1,5 +1,11 @@
 # Coordinators — running the fleet's judgment on any model
 
+**A coordinator is optional.** The fleet is autonomous from `ready` to
+`on epic`, and a human alone runs the rest from a phone: `write-story.sh`
+drafts, they promote, the queue builds and judges, `/merge` lands. A
+coordinator only helps with what takes judgment — the intent, the draft
+review, reading a FAIL. Nothing in the pipeline depends on one.
+
 The harness has no coordinator role. Bash orchestrates, three agents run
 inside it, and the verdict is computed. What is left — turning a wish into a
 story, reviewing the draft, reading verdicts, answering blocks, landing

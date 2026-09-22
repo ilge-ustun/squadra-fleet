@@ -4,9 +4,12 @@ An autonomous coding fleet: a bash harness that turns a one-sentence intent
 into a story, has a builder agent implement it, has a reviewer agent attack
 it, computes the verdict itself, and merges what passes. It runs against
 **other** repositories — its first target is `khaita-app` — and is never a
-target itself. It is driven from a terminal, from a phone through a Telegram
-bot, and by a coordinator: a human with an agent session beside them, on any
-harness and model.
+target itself. It is autonomous: from the moment a story is `ready`, the
+queue builds, reviews, judges and merges it into its epic with no one
+watching, and a human operates the whole loop alone from a terminal or a
+phone through a Telegram bot. A coordinator — an agent session beside the
+human — is optional help for the two steps that take judgment, drafting and
+reading verdicts; nothing depends on one.
 
 The principle that shapes everything: **the machine can veto, never grant.**
 A story passes only when the baseline is green, every acceptance criterion
@@ -51,7 +54,7 @@ replaceable at that seam.
 | builder | `launch.sh`: `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `claude-sonnet-4-6`; a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `check-mutation.sh` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | `launch.sh`: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head: reads files, runs the suite, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | `launch.sh`, `mutation.sh` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
-| the coordinator | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
+| the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
 | the human | terminal or phone | — | promotes, lands, answers blocks, deploys, holds every token | — |
 
 The reviewer's checks are also in the builder's rules since 22 Sep: which
@@ -300,13 +303,19 @@ the CLIs' own config files, never in `.env.fleet` or a target.
 3. `bash status.sh <name>` — it loads or says which key is missing.
 4. `bash new-epic.sh <name> <epic>`, then `write-story.sh … --base epic/<epic>`.
 
-## The coordinator
+## The coordinator — optional
 
-The harness has no coordinator role: bash orchestrates and the verdict is
-computed. What is left — turning a wish into a story, reviewing the draft,
-reading verdicts, answering blocks, landing epics, maintaining the harness —
-is a human with an agent session beside them. That session's procedures are
-five skills in `skills/<name>/SKILL.md`, written for any agent: actions
+**The fleet does not need a coordinator.** Everything from `ready` to
+`on epic` is the queue's, and a human alone can run the rest:
+`write-story.sh` drafts and lints a story from one sentence, the human
+reads and promotes it, the queue does the work, `/status` and `/why` say
+what happened, `/answer` and `/merge` finish it. The coordinator is
+optional help for what takes judgment — phrasing the intent, reviewing the
+draft against the code, reading a FAIL and deciding what follows,
+maintaining the harness. Use one when that help is worth the tokens; skip
+it and nothing changes in the pipeline.
+
+When one is used, its procedures are five skills in `skills/<name>/SKILL.md`, written for any agent: actions
 rather than tool names, the reason beside every rule. Claude Code and Codex
 read the same `name:`/`description:` frontmatter, so one set of files serves
 both; `bash install-skills.sh` links them into `~/.claude/skills/` and
