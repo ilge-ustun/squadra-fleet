@@ -2389,6 +2389,67 @@ case_97_bot_repo_list() {
   assert_not_contains "$(sent_text)" "unknown repo" "it needs no repo of its own"
 }
 
+# A1 (22 Sep). The builder hands its TDD evidence to the verdict and learns
+# one round later whether a patch applied or a selector named a test.
+# check-mutation.sh <repo> <patch…> [--wt <dir>] runs the verdict's own
+# classifier — the same run_selector, the same classes — on the builder's
+# committed tree, restores with git apply -R, and exits 0 only when every
+# patch is RED. Red while the script does not exist.
+case_100_check_mutation() {
+  CASE="100 check-mutation.sh classifies like the verdict"; fixture c100
+  local m="$REPO/.review-out/mutations" before out rc
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
+  before="$(git -C "$REPO" hash-object src/marker.txt)"
+
+  check() {                           # check <class> <rc> <label> [VAR=value …] — from $FX, the tree named by --wt
+    local cls="$1" erc="$2" label="$3" patch="${PATCH:-AC1-tdd-marker}"; shift 3
+    out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker "$@" \
+            bash "$FLEET/check-mutation.sh" t "$m/$patch.patch" --wt "$REPO" 2>&1 )"; rc=$?
+    assert_eq "$(printf '%s\n' "$out" | grep -E '^[A-Z_]+ +AC1' | tail -n1)" "$cls $patch" "$label: class line"
+    assert_eq "$rc" "$erc" "$label: exit code"
+    assert_eq "$(git -C "$REPO" hash-object src/marker.txt)" "$before" "$label: the real file is restored byte for byte"
+    assert_eq "$(git -C "$REPO" status --porcelain | grep -v '^?? .review-out/')" "" "$label: tree clean afterwards"
+  }
+  check RED              0 "caught"               FAKE_VITEST=marker
+  check GREEN            1 "survived"             FAKE_VITEST=pass
+  check NO_TESTS         1 "broke compilation"    FAKE_VITEST=marker-notests
+  check PRE_RED          1 "instrument already red" FAKE_VITEST=fail
+  check SELECTOR_INVALID 1 "selector names no test" FAKE_VITEST=notests
+  printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-x\n+y\n' > "$m/AC1-bad.patch"
+  printf 'fake.test.tsx\n' > "$m/AC1-bad.test"
+  PATCH=AC1-bad check PATCH_INVALID 1 "patch does not apply"
+  rm "$m/AC1-bad.test"
+  PATCH=AC1-bad check NO_SELECTOR   1 "no selector beside the patch"
+
+  # Two patches at once: one line each, exit 1 because one is not RED.
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" "$m/AC1-bad.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "RED AC1-tdd-marker" "two patches: first classified"
+  assert_contains "$out" "NO_SELECTOR AC1-bad" "two patches: second classified"
+  assert_eq "$rc" 1 "two patches: exit 1 when any is not RED"
+
+  # The default tree is the cwd, as a builder runs it.
+  out="$( cd "$REPO" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t .review-out/mutations/AC1-tdd-marker.patch 2>&1 )"; rc=$?
+  assert_contains "$out" "RED AC1-tdd-marker" "cwd is the tree when --wt is absent"
+  assert_eq "$rc" 0 "and it exits 0"
+
+  # An uncommitted change is refused before anything runs: the safe point is
+  # a commit, and a restore over uncommitted work is how real fixes got lost.
+  local calls; calls="$(grep -c '^vitest' "$TRACE/calls")"
+  printf 'uncommitted\n' >> "$REPO/README.md"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "dirty tree: exit 1"
+  assert_contains "$out" "README.md" "dirty tree: names the path"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$calls" "dirty tree: nothing ran"
+  assert_grep 'uncommitted' "$REPO/README.md" "dirty tree: the uncommitted work is untouched"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2431,7 +2492,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
-       case_99_bot_merge_detaches)
+       case_99_bot_merge_detaches case_100_check_mutation)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

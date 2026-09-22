@@ -69,6 +69,8 @@ REVIEW_ONLY="${REVIEW_ONLY:-0}"      # 1 = re-review the head, run no builder
 
 # render_prompt() — needs die/warn and PROMPTS_DIR from lib.sh.
 source "$FLEET_HOME/render.sh" || die "cannot source render.sh"
+# porcelain, run_selector, classify_mutation — the verdict's classifier.
+source "$FLEET_HOME/mutation.sh" || die "cannot source mutation.sh"
 
 command -v claude >/dev/null || die "claude not on PATH"
 command -v codex  >/dev/null || die "codex not on PATH"
@@ -148,47 +150,13 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
 
 # ── mutation runner ──────────────────────────────────────────────────────────
 #
-# The reviewer proposes mutations as files; the harness runs them. For each
-# .review/<id>/round-N/mutations/ACn-<slug>.patch with a .test (vitest
-# selector) or .cmd (any command) beside it, in the clean reviewer tree:
-#
-#   pre-run, unmutated  → must be green. Failing → PRE_RED: the instrument was
-#                         already red and proves nothing. Collecting no tests
-#                         → SELECTOR_INVALID: the selector never named a test,
-#                         which is a different mistake with a different fix
-#   git apply           → else PATCH_INVALID
-#   run, mutated        → RED needs a REAL failure. .test: numFailedTests > 0;
-#                         zero tests collected is NO_TESTS (the mutation broke
-#                         compilation — L-08), never RED. .cmd: non-zero exit.
-#                         GREEN = the mutation survived: for this behaviour the
-#                         instrument is absent.
-#   restore             → tree must be clean again, or the run stops: nothing
-#                         measured after a failed restore can be trusted
-#
-# Selector lines are executed with bash -c: a .cmd is a command by contract,
-# and a .test may carry `-t "a pattern with spaces"`. Same trust as the
-# reviewer already has — it wrote them in a tree it could edit.
-
-porcelain() { git -C "$1" status --porcelain | grep -v '^?? \.review-out/' || true; }
-
-run_selector() {                      # run_selector <wt> <kind> <selector-file> <raw-out-prefix> → RED|GREEN|NO_TESTS
-  local wt="$1" kind="$2" line raw="$4.json" log="$4.log"
-  line="$(head -n1 "$3")"
-  rm -f "$raw"
-  case "$kind" in
-    test)
-      ( cd "$wt" && bash -c "$VITEST_CMD $line --reporter json --outputFile '$raw'" ) > "$log" 2>&1
-      if   [[ ! -f "$raw" ]];                                  then echo NO_TESTS
-      elif jq -e '.numTotalTests == 0'  "$raw" >/dev/null;     then echo NO_TESTS
-      elif jq -e '.numFailedTests > 0'  "$raw" >/dev/null;     then echo RED
-      else                                                          echo GREEN; fi ;;
-    cmd)
-      if ( cd "$wt" && bash -c "$line" ) > "$log" 2>&1; then echo GREEN; else echo RED; fi ;;
-  esac
-}
+# The reviewer proposes mutations as files; the harness runs them. The
+# classifier itself — pre-run, apply, run, restore, and the classes — lives in
+# mutation.sh, shared with check-mutation.sh so a builder can run the same
+# judgment on its own evidence before the verdict does.
 
 run_mutations() {                     # run_mutations <wt> <evidence-dir> → MUT_ROWS (one "ACn CLASS slug" per line)
-  local wt="$1" mdir="$2/mutations" p name ac slug kind sel cls pre raw
+  local wt="$1" mdir="$2/mutations" p name ac slug kind cls raw
   MUT_ROWS=""
   [[ -d "$mdir" ]] || return 0
 
@@ -197,32 +165,12 @@ run_mutations() {                     # run_mutations <wt> <evidence-dir> → MU
     name="$(basename "$p" .patch)"; ac="${name%%-*}"; slug="${name#*-}"
     raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-$name"
 
-    if   [[ -f "$mdir/$name.test" ]]; then kind=test; sel="$mdir/$name.test"
-    elif [[ -f "$mdir/$name.cmd"  ]]; then kind=cmd;  sel="$mdir/$name.cmd"
-    else kind=""; fi
-
-    if [[ -z "$kind" ]]; then
-      cls=NO_SELECTOR
+    if find_selector "$p"; then
+      kind="$SEL_KIND"
+      classify_mutation "$wt" "$p" "$SEL_KIND" "$SEL_FILE" "$raw" checkout
+      cls="$MUT_CLASS"
     else
-      [[ -z "$(porcelain "$wt")" ]] || die "mutation runner: tree dirty before $name"
-      pre="$(run_selector "$wt" "$kind" "$sel" "$raw-pre")"
-      if [[ "$pre" == NO_TESTS ]]; then
-        # The selector collected nothing before the mutation was applied: a
-        # path that does not exist, a -t pattern that matches no test, or a
-        # shell command written into a .test file (014, round 1). Not the
-        # same finding as an instrument that runs and fails, and not the same
-        # fix, so not the same name.
-        cls=SELECTOR_INVALID
-      elif [[ "$pre" != GREEN ]]; then
-        cls=PRE_RED
-      elif ! git -C "$wt" apply --check "$p" 2> "$raw-apply.log" || ! git -C "$wt" apply "$p" 2>> "$raw-apply.log"; then
-        cls=PATCH_INVALID
-        git -C "$wt" checkout -q -- . ; git -C "$wt" clean -qfd -e .review-out
-      else
-        cls="$(run_selector "$wt" "$kind" "$sel" "$raw-mut")"
-        git -C "$wt" checkout -q -- . ; git -C "$wt" clean -qfd -e .review-out
-        [[ -z "$(porcelain "$wt")" ]] || die "mutation runner: tree dirty after restoring $name"
-      fi
+      kind=""; cls=NO_SELECTOR
     fi
 
     {
