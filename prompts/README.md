@@ -8,7 +8,7 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 | file | placeholders |
 |---|---|
-| `rules.md` | `{{STORY_ID}}` |
+| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` |
 | `build-round1.md` | `{{STORY_ID}}` `{{RULES}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{REVIEW_TEXT}}` |
 | `review.md` | `{{STORY_ID}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` |

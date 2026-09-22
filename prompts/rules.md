@@ -15,6 +15,12 @@ Rules that override anything you infer:
   whose selector stays green means the test never proved what you said it
   proved, and the story fails whatever your summary claims. Leave the tree
   clean apart from .review-out/ .
+  Before you finish, run the harness's own classifier on your evidence:
+    {{CHECK_MUTATION}} .review-out/mutations/AC*-tdd-*.patch
+  It refuses an uncommitted tree, applies each patch, runs its selector,
+  undoes the patch, and prints the class the verdict will print. Anything
+  but RED is a finding you still own — fix the test, the patch or the
+  selector, commit, regenerate the patch, run it again.
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
 - One task, one commit.

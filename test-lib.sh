@@ -2450,6 +2450,18 @@ case_100_check_mutation() {
   assert_grep 'uncommitted' "$REPO/README.md" "dirty tree: the uncommitted work is untouched"
 }
 
+# A1 (22 Sep). The builder is told, in its rules, to run check-mutation.sh on
+# its own TDD evidence before it finishes — with the repo name rendered in,
+# so the line is runnable as printed. Red while rules.md does not say so.
+case_101_builder_told_to_check_evidence() {
+  CASE="101 the builder's rules name check-mutation.sh for this repo"; fixture c101
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep "bash $FLEET/check-mutation.sh t " "$TRACE/claude-prompt-1" "the helper, with this fleet's path and this repo's name"
+  assert_grep 'tdd-\*\.patch' "$TRACE/claude-prompt-1" "applied to the builder's own tdd- patches"
+  assert_not_grep '{{CHECK_MUTATION}}' "$TRACE/claude-prompt-1" "no leftover placeholder"
+  assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2492,7 +2504,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
-       case_99_bot_merge_detaches case_100_check_mutation)
+       case_99_bot_merge_detaches case_100_check_mutation
+       case_101_builder_told_to_check_evidence)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

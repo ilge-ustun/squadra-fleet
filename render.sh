@@ -26,11 +26,14 @@ render_prompt() {
   out="${out//\{\{VITEST_CMD\}\}/${VITEST_CMD:-}}"
   out="${out//\{\{BUILD_CMD\}\}/${BUILD_CMD:-}}"
   out="${out//\{\{LINT_CMD\}\}/${LINT_CMD:-}}"
+  # The fleet's own helper, with this repo's name, so the line is runnable
+  # as printed: `bash <fleet>/check-mutation.sh <repo>`.
+  out="${out//\{\{CHECK_MUTATION\}\}/${CHECK_MUTATION:-}}"
 
   # A placeholder the file uses but whose variable is empty substitutes to
   # nothing and reaches the agent as a gap, not an error. Name it.
   local p v
-  for p in STORY_ID RULES REVIEW_TEXT STORY_TEXT INTENT STORY_BASE HEAD_SHA BASE_SHA ROUND VITEST_CMD BUILD_CMD LINT_CMD; do
+  for p in STORY_ID RULES REVIEW_TEXT STORY_TEXT INTENT STORY_BASE HEAD_SHA BASE_SHA ROUND VITEST_CMD BUILD_CMD LINT_CMD CHECK_MUTATION; do
     [[ "$src" == *"{{$p}}"* ]] || continue
     v="${!p:-}"
     [[ -n "$v" ]] || die "$1 uses {{$p}} but $p is empty"

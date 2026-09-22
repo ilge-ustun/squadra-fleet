@@ -466,6 +466,7 @@ if [[ -n "${REPO_RULES:-}" ]]; then
   REPO_RULES_TEXT="$(cat "$REPO_ROOT/$REPO_RULES")" || die "REPO_RULES $REPO_RULES is not readable in $REPO_ROOT"
 fi
 
+CHECK_MUTATION="bash $FLEET_HOME/check-mutation.sh $REPO_NAME"   # {{CHECK_MUTATION}} in rules.md
 RULES="$(render_prompt rules.md)"
 
 # ── review rounds ────────────────────────────────────────────────────────────
