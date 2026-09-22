@@ -11,6 +11,15 @@ creation (`new-epic.sh`), and a `README.md`. Its step 8 (khaita on `pr`
 mode) waits for the human's `glab auth login`. `README.md` is now the map;
 this file is the state.
 
+**22 Sep, afternoon:** from the `/insights` report — `check-mutation.sh`
+(the verdict's classifier, `mutation.sh`, callable by a builder on its own
+`tdd-` evidence; rules.md tells it to), the reviewer's attack and the
+verdict vocabulary in the builder's rules, `REVIEWER_MODEL`, khaita's
+test-environment traps in its `.fleet/rules.md`. And the coordinator as
+five harness-neutral skills (`skills/`, `install-skills.sh`,
+`docs/COORDINATORS.md`), so the fleet can be coordinated from Codex on a
+non-Anthropic model; trials go in `docs/coordinator-trials.md`.
+
 **Orient by running things, not by trusting this file.** Numbers in prose rot
 (L-11). The commands that produce them:
 

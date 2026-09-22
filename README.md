@@ -206,6 +206,20 @@ the CLIs' own config files, never in `.env.fleet` or a target.
 3. `bash status.sh <name>` — it loads or says which key is missing.
 4. `bash new-epic.sh <name> <epic>`, then `write-story.sh … --base epic/<epic>`.
 
+## The coordinator
+
+The judgment between a wish and the queue — writing the intent, reviewing
+the draft, reading a verdict, deciding what follows — is a human with an
+agent session beside them. That session's procedures are `skills/<name>/
+SKILL.md`, one format that Claude Code and Codex both load;
+`bash install-skills.sh` links them into `~/.claude/skills/` and
+`~/.codex/skills/`. `docs/COORDINATORS.md` says how to run the coordinator
+on another harness or model and how a trial is recorded. `AGENTS.md` is
+`CLAUDE.md` under the name Codex reads.
+
+A coordinator of any model starts no launcher, promotes nothing and lands
+nothing; the queue timer and the human do those.
+
 ## What needs a human
 
 - Promoting a story to `ready` — reading it is the review that matters.
@@ -234,6 +248,8 @@ merge.sh        story → epic, --land, --epic, MERGE_MODE
 revert.sh       undo a story's merge      reset.sh       back to the queue
 telegram.sh     send | poll — the notifications and the phone commands
 render.sh       render_prompt()           prompts/       the agents' prompts, README = the verdict contract
+mutation.sh     the classifier            check-mutation.sh  the same classifier, run by a builder on its own evidence
+skills/         the coordinator's procedures, linked by install-skills.sh
 test-lib.sh     the suite                 test/          fake claude, codex, vitest, curl
 systemd/        the two timer pairs       docs/          handoff, lessons, plans
 ```
