@@ -2496,6 +2496,36 @@ case_103_reviewer_model() {
   assert_grep '^reviewer: codex$' "$REPO/.review/$STORY.md" "the block says so"
 }
 
+# B2 (22 Sep). The coordinator's procedures are skills/<name>/SKILL.md,
+# one format two harnesses read: Claude Code from ~/.claude/skills/<name>,
+# Codex from ~/.codex/skills/<name>. install-skills.sh symlinks them into
+# both, is idempotent, and refuses to replace anything that is not its own
+# symlink. Red while the script does not exist.
+case_104_install_skills() {
+  CASE="104 install-skills.sh links every skill into both harnesses"; fixture c104
+  local H="$FX/home" out rc n
+  mkdir -p "$H"
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "exit 0"
+  n="$(ls -d "$FLEET"/skills/*/ | wc -l)"
+  assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Claude Code"
+  assert_eq "$(find "$H/.codex/skills"  -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Codex"
+  assert_eq "$(readlink -f "$H/.claude/skills/fleet-story")" "$(readlink -f "$FLEET/skills/fleet-story")" "the link points at the fleet's copy"
+  assert_file "$H/.codex/skills/fleet-story/SKILL.md" "readable through the Codex link"
+  assert_grep '^name: fleet-story$' "$H/.codex/skills/fleet-story/SKILL.md" "with the frontmatter both harnesses read"
+
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "second run: exit 0"
+  assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "second run: still one link per skill"
+
+  # A directory that is not our symlink is someone's work: refused, named.
+  rm "$H/.codex/skills/fleet-land"; mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "a foreign directory: exit 1"
+  assert_contains "$out" "fleet-land" "names it"
+  assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "and leaves it alone"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2540,7 +2570,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
-       case_103_reviewer_model)
+       case_103_reviewer_model case_104_install_skills)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
