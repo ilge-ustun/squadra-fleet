@@ -230,7 +230,7 @@ systemd/               two timer + oneshot pairs (queue, bot), NOT installed —
 ### Seams
 
 Fleet-level, `${X:-default}` in the scripts: `BUILDER_MODEL` `STORY_MODEL`
-`MAX_TURNS` `MAX_ROUNDS` `AGENT_TIMEOUT` `PUSH_STATUS` `REVIEW_ONLY`
+`REVIEWER_MODEL` (empty: codex's own default; else `codex exec -m`) `MAX_TURNS` `MAX_ROUNDS` `AGENT_TIMEOUT` `PUSH_STATUS` `REVIEW_ONLY`
 `FLEET_NOTIFY_CMD` `AUTO_MERGE` `FLEET_LOCK_WAIT` `QUEUE_START_CMD`
 `FLEET_REGISTRY_DIR`.
 

@@ -55,6 +55,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" 
 load_repo "$1"; shift
 
 BUILDER_MODEL="${BUILDER_MODEL:-claude-sonnet-4-6}"
+# Empty: codex runs on its own configured default. Named: `codex exec -m`.
+# A quota outage on one model stranded every story until this existed.
+REVIEWER_MODEL="${REVIEWER_MODEL:-}"
 MAX_TURNS="${MAX_TURNS:-60}"
 # Wall clock per agent call. MAX_TURNS bounds the builder's turns, nothing
 # bounded its time: unattended, a hung agent is indistinguishable from a slow
@@ -613,7 +616,7 @@ while (( ROUND < ROUND_CEILING )); do
   # host (RTM_NEWADDR: Operation not permitted), so Codex's own sandbox fails to
   # start before it reads anything. Isolation comes from the detached worktree
   # and the unprivileged fleet user with no sudo — not from bwrap.
-  log "reviewer: codex"
+  log "reviewer: codex${REVIEWER_MODEL:+ $REVIEWER_MODEL}"
   T0=$SECONDS
   # codex emits JSON Lines on stdout and notices on stderr — "Reading
   # additional input from stdin..." whenever stdin is not a TTY, i.e. every
@@ -623,8 +626,9 @@ while (( ROUND < ROUND_CEILING )); do
   # First real run of the runner, 17 Sep. stderr is kept as evidence, not
   # merged; the filter skips anything that is not JSON and takes only the
   # reviewer's own messages, not command_execution items.
+  REVIEWER_ARGS=(); [[ -n "$REVIEWER_MODEL" ]] && REVIEWER_ARGS=(-m "$REVIEWER_MODEL")
   REVIEW_RAW="$(cd "$REVIEWER_WT" && printf '%s' "$REVIEW_PROMPT" \
-    | timeout -k 30 "$AGENT_TIMEOUT" codex exec --json --sandbox danger-full-access 2> "$EVIDENCE_DIR/reviewer.stderr")"
+    | timeout -k 30 "$AGENT_TIMEOUT" codex exec --json --sandbox danger-full-access "${REVIEWER_ARGS[@]}" 2> "$EVIDENCE_DIR/reviewer.stderr")"
   REVIEW_RC=$?
   T_REVIEW=$(( SECONDS - T0 ))
   if (( REVIEW_RC == 124 )); then
@@ -721,6 +725,7 @@ reviewed: $(date -Iseconds)
 baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
 timing:   builder ${T_BUILD}s | baseline ${T_BASE}s | reviewer ${T_REVIEW}s | mutations ${T_MUT}s | total $(( SECONDS - T_ROUND ))s
 builder:  $BUILDER_MODEL
+reviewer: codex${REVIEWER_MODEL:+ $REVIEWER_MODEL}
 acs:      $AC_IDS
 scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
 model:    $MODEL_VERDICT

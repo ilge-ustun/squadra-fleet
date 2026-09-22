@@ -2479,6 +2479,23 @@ case_102_builder_sees_the_reviewers_attack() {
   done
 }
 
+# A4 (22 Sep). The reviewer ran on whatever ~/.codex/config.toml defaulted
+# to; nothing could name a model for it, so a quota outage on that one
+# model stranded every story. REVIEWER_MODEL is the seam, recorded in the
+# Machine block beside builder:. Red while codex is called without -m.
+case_103_reviewer_model() {
+  CASE="103 REVIEWER_MODEL names the reviewer's model"; fixture c103
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 REVIEWER_MODEL=fleet-test-reviewer
+  assert_grep '^-m$' "$TRACE/codex-args-1" "codex got -m"
+  assert_grep '^fleet-test-reviewer$' "$TRACE/codex-args-1" "with the model"
+  assert_grep '^reviewer: codex fleet-test-reviewer$' "$REPO/.review/$STORY.md" "the block records which model reviewed"
+
+  CASE="103b unset, codex keeps its own default"; fixture c103b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_not_grep '^-m$' "$TRACE/codex-args-1" "no -m"
+  assert_grep '^reviewer: codex$' "$REPO/.review/$STORY.md" "the block says so"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2522,7 +2539,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
-       case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack)
+       case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
+       case_103_reviewer_model)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
