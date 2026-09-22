@@ -132,6 +132,7 @@ Move a story on
 Land it, or take it back
 /merge <repo> <id> — land a story on the integration branch
 /merge <repo> epic/<name> — land a whole epic
+  both answer at once and send the result when the baseline is done
 /revert <repo> <id> — undo a story's merge into its epic
 
 Run it
@@ -203,15 +204,34 @@ cmd_revert() {                        # cmd_revert <id>
 # how the human makes it. The script owns every refusal and this only
 # reports what it said — in pr mode, the request's URL.
 cmd_merge() {                         # cmd_merge <id> | epic/<name>
-  local what="${1:-}"
+  local what="${1:-}"; local -a args
   if [[ "$what" =~ ^[0-9]{3}$ ]]; then
     story_ok "$what" || { echo "no such story: $what"; return; }
-    bash "$FLEET_HOME/merge.sh" "$REPO_NAME" "$what" --land 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+    args=("$REPO_NAME" "$what" --land)
   elif [[ "$what" == epic/* ]]; then
-    bash "$FLEET_HOME/merge.sh" "$REPO_NAME" --epic "$what" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+    args=("$REPO_NAME" --epic "$what")
   else
     echo "usage: /merge <repo> <id>  (a story based on the integration branch)  |  /merge <repo> epic/<name>"
+    return
   fi
+  # A merge installs deps and runs the whole post-merge baseline — suite, build,
+  # lint — which is minutes of work. This poll is a systemd oneshot with
+  # TimeoutStartSec=2min, so running the merge inside it hands systemd the power
+  # to kill it: khaita's epic/pwa merge died at exactly two minutes on 22 Sep
+  # 2026, with its worktree left behind, nothing landed, and no reply at all.
+  # A poll that blocks that long also answers nothing else meanwhile.
+  #
+  # So: detach, acknowledge now, and let the merge send its own result. It takes
+  # the fleet lock itself, because this poll's lock is released the moment this
+  # function returns — and it closes the inherited fd 9 first, or it would be
+  # waiting on a lock it already holds a handle to.
+  setsid nohup bash -c '
+    fleet="$1"; lock="$2"; shift 2
+    out="$(flock -w 900 "$lock" bash "$fleet/merge.sh" "$@" 2>&1 | sed "s/\x1b\[[0-9;]*m//g")"
+    bash "$fleet/telegram.sh" send --pre "${out:-(no output)}"
+  ' _ "$FLEET_HOME" "$REPO_ROOT/.git/fleet.lock" "${args[@]}" \
+    >/dev/null 2>&1 </dev/null 9>&- &
+  echo "merging $what — deps, suite, build and lint run first, so give it a few minutes. The result follows on its own."
 }
 
 cmd_run() {

@@ -133,6 +133,13 @@ as a story id.
 | answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
 | `merge.sh <repo> <id> --land` | `/merge <repo> <id>` | a develop story → the integration branch |
 | `merge.sh <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
+
+A merge from the phone is detached: the bot acknowledges it immediately and
+sends the result when it ends. It has to be — the merge installs deps and runs
+the whole post-merge baseline, and the poll that answers the command is a
+systemd oneshot with a two-minute start timeout, which killed khaita's epic
+merge mid-flight on 22 Sep 2026. At a terminal `merge.sh` is synchronous as
+before.
 | `revert.sh <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
 | `reset.sh <repo> <id>` | | back to the queue |
 

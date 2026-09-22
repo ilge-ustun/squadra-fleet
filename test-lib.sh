@@ -1153,6 +1153,21 @@ update() {                            # update <update_id> <from_id> <text> → 
 }
 
 sent() { cat "$TRACE"/curl-args-* 2>/dev/null | grep -c 'sendMessage' ; }
+
+# A detached merge answers twice: the acknowledgement while it runs, and its
+# result when it ends. Nothing in the poll waits for the second one, so a case
+# that asserts on it has to.
+wait_for_send() {                     # wait_for_send <n> [seconds]
+  local want="$1" limit="${2:-90}" waited=0
+  while (( $(sent) < want )); do
+    if (( waited++ >= limit * 2 )); then
+      fail "waited ${limit}s for $want message(s), saw $(sent)"
+      return 1
+    fi
+    sleep 0.5
+  done
+  return 0
+}
 # The whole recorded argv, not just the line starting with text=: a message is
 # multi-line and only its first line carries the prefix.
 sent_text() { cat "$TRACE"/curl-args-* 2>/dev/null; }
@@ -2095,6 +2110,7 @@ case_93b_bot_merge() {
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
   update 120 42 "/merge t $STORY"
   bot poll
+  wait_for_send 2
   git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "the integration branch holds the story"
   assert_contains "$(sent_text)" "merged into base" "and the human is told"
   assert_not_contains "$(sent_text)" $'\x1b[' "without colour codes"
@@ -2105,6 +2121,7 @@ case_93b_bot_merge() {
   assert_eq "$MRC" 0 "precondition: the story is on its epic"
   update 121 42 "/merge t epic/test"
   bot poll
+  wait_for_send 2
   git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "the integration branch holds the epic"
   assert_contains "$(sent_text)" "epic/test merged into base" "and the human is told"
 
@@ -2236,6 +2253,41 @@ case_98_lint_cites_resolve_against_base() {
   out="$(cd "$FX" && BASE_BRANCH=nosuch bash "$FLEET/lint-story.sh" t "$d/loose.md" 2>&1)"; rc=$?
   assert_eq "$rc" 0 "with no resolvable base ref it falls back to the checkout"
   rm -f "$REPO/src/untracked.ts"
+}
+
+# A merge runs the post-merge baseline — install, suite, build, lint. The poll
+# that answers /merge is a systemd oneshot with TimeoutStartSec=2min, so running
+# the merge inside it means systemd kills whichever merge is slower than that:
+# khaita's epic/pwa merge died at exactly two minutes on 22 Sep 2026 with its
+# worktree left behind, nothing landed, and no reply. The poll must answer and
+# get out of the way.
+case_99_bot_merge_detaches() {
+  CASE="99 /merge answers at once and reports when the merge ends"; fixture c99
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+
+  # A baseline slower than the poll, so "the merge has not finished yet" is a
+  # fact about this case rather than a race it happens to win.
+  # Slow, then the ordinary fake — the baseline reads the JSON report it
+  # writes, so a bare sleep would just look like a red suite.
+  printf '#!/usr/bin/env bash\nsleep 3\nexec vitest "$@"\n' > "$FX/slow-vitest"
+  chmod +x "$FX/slow-vitest"
+
+  update 120 42 "/merge t $STORY"
+  local started elapsed
+  started="$(date +%s)"
+  VITEST_CMD="$FX/slow-vitest" bot poll
+  elapsed=$(( $(date +%s) - started ))
+
+  (( elapsed < 3 )) && ok || fail "the poll returned before the baseline could finish (took ${elapsed}s)"
+  assert_eq "$(sent)" 1 "one message so far — the acknowledgement"
+  assert_contains "$(sent_text)" "merging" "which says the merge is running"
+  assert_not_contains "$(sent_text)" "merged into base" "and does not claim it has landed"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base \
+    && fail "nothing has landed yet" || ok
+
+  wait_for_send 2
+  assert_contains "$(sent_text)" "merged into base" "the result arrives on its own"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "and the merge really happened"
 }
 
 # The phone is not a terminal. Every verb but /run and /help takes the repo
@@ -2378,7 +2430,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_90_status_titles_and_landing case_91_merge_land case_92_merge_pr_mode
        case_93_bot_status_pre case_93b_bot_merge case_94_epic_naming
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
-       case_97_bot_repo_list case_98_lint_cites_resolve_against_base)
+       case_97_bot_repo_list case_98_lint_cites_resolve_against_base
+       case_99_bot_merge_detaches)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
