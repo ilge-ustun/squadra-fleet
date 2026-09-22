@@ -2462,6 +2462,23 @@ case_101_builder_told_to_check_evidence() {
   assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
 }
 
+# A2 (22 Sep). 20 of the 24 FAIL rounds since 007 were the reviewer's probes
+# going red or the reviewer's mutations surviving: the builder never saw the
+# attack it would face. The reviewer's checks and the machine's vocabulary
+# now sit in the builder's rules, in round 1 and in round 2. Red while
+# rules.md carries neither.
+case_102_builder_sees_the_reviewers_attack() {
+  CASE="102 the builder's rules carry the reviewer's checks"; fixture c102
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_VITEST=pass
+  assert_eq "$(calls claude)" 2 "two rounds ran"
+  local n
+  for n in 1 2; do
+    assert_grep 'behaviour under test outright' "$TRACE/claude-prompt-$n" "round $n: the delete-it-outright check"
+    assert_grep 'PROBE' "$TRACE/claude-prompt-$n" "round $n: told what a probe is"
+    assert_grep 'SELECTOR_INVALID' "$TRACE/claude-prompt-$n" "round $n: the machine vocabulary"
+  done
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2505,7 +2522,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_95_bot_help_and_repo_default case_96_bot_status_hides_landed
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
-       case_101_builder_told_to_check_evidence)
+       case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

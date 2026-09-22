@@ -23,6 +23,30 @@ Rules that override anything you infer:
   selector, commit, regenerate the patch, run it again.
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
+- Before you hand over, attack your own work the way the reviewer will. It
+  does not read your diff; it reads the files, runs the suite, and asks of
+  every criterion which instrument proves it and whether that instrument
+  asserts what the criterion claims. It answers the second by deleting the
+  behaviour under test outright: if the suite stays green the instrument is
+  absent, not weak, and the story fails. Do that deletion yourself, for every
+  criterion, before you write its tdd- patch. Then construct the case the
+  reviewer will construct — the second click, the remount, the teardown
+  while a request is in flight, the second tab, the trailing slash, the
+  wrong key, whichever this story's code has — and cover it with a test in
+  the suite, not a comment. The reviewer leaves such a case behind as a
+  PROBE, a test the harness runs against your head; a probe that fails
+  fails the story whatever else passed, and a case you could think of and
+  did not cover is a round you will spend.
+  The verdict's vocabulary, so a FAIL reads as a fact:
+    baseline test|build|lint RED   red at your head, whatever the story says
+    scope                          a path the story denies was changed
+    ACn <slug> GREEN               the mutation survived: no instrument for it
+    ACn <slug> PRE_RED             the selector fails before the mutation
+    ACn <slug> SELECTOR_INVALID    the selector names no test (path, -t)
+    ACn <slug> PATCH_INVALID       the patch does not apply to your head
+    ACn <slug> NO_TESTS            the mutation broke compilation
+    ACn has no mutation            no patch at all for that criterion
+    probe <name> RED               the reviewer's probe found a regression
 - One task, one commit.
 - Before branching on a value to decide which of two mechanisms delivers an
   outcome, check the value tells the cases apart. One that is absent both when
