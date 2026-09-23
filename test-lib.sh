@@ -2586,6 +2586,23 @@ STUB
   assert_eq "$(review_line 3)" "verdict: FAIL" "and the veto follows"
 }
 
+# A probe's class came from an unchecked $(run_selector …): a runner that
+# failed to start left cls empty, the .result empty, the probe row without a
+# class, and the veto had nothing to look at — a silent PASS marked done.
+# Break the runner for probes only (a probe's selector path carries
+# fleet-probe-; mutations do not) and the launcher must stop, not finish.
+# Red while launch.sh takes run_selector's output without its status.
+case_107_probe_runner_failure_is_not_a_pass() {
+  CASE="107 a failing probe runner stops the round rather than passing it"; fixture c107
+  sed -i "s|^export function runBashTo(line: string, o: BashToOptions): number {|&\n  if (line.includes('fleet-probe-')) throw new Error('injected: probe runner failure');|" "$FLEET/ts/src/lib/proc.ts"
+  grep -q 'injected: probe runner failure' "$FLEET/ts/src/lib/proc.ts" || { fail "the injection did not land — proc.ts changed shape"; return; }
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1
+  [[ "$RC" -ne 0 ]] && ok || fail "the launcher exited 0 with a broken probe runner"
+  [[ "$(field status)" != done ]] && ok || fail "the story was marked done"
+  assert_not_grep '^verdict: PASS' "$REPO/.review/$STORY.md" "no PASS was written"
+  assert_grep 'probe runner' "$LOG" "the log says which runner failed"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2631,7 +2648,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
        case_103_reviewer_model case_104_install_skills
-       case_105_fixture_excludes_node_modules case_106_one_classifier)
+       case_105_fixture_excludes_node_modules case_106_one_classifier
+       case_107_probe_runner_failure_is_not_a_pass)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

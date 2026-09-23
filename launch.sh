@@ -257,7 +257,10 @@ run_probes() {                        # run_probes <wt> <evidence-dir> → PROBE
     # run_selector reads its selector from a file; a probe's selector is just
     # the path it was copied to.
     printf '%s\n' "$dest" > "$raw.sel"
-    cls="$(run_selector "$wt" test "$raw.sel" "$raw")"
+    # The status matters: a runner that could not start gives no class, and
+    # an empty class is neither RED nor GREEN — it would veto nothing (107).
+    cls="$(run_selector "$wt" test "$raw.sel" "$raw")" || die "probe runner: $name — the runner failed; its message is above"
+    case "$cls" in RED|GREEN|NO_TESTS) ;; *) die "probe runner: $name — not a class: '$cls'" ;; esac
     rm -f "$wt/$dest"
     [[ -z "$(porcelain "$wt")" ]] || die "probe runner: tree dirty after removing $name"
 
