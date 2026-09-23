@@ -20,16 +20,20 @@ Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 ## The verdict contract
 
 The reviewer's line `VERDICT: PASS|FAIL|SPEC` is **one input** to the
-verdict, not the verdict. `launch.sh` computes:
+verdict, not the verdict. The rule is `ts/src/lib/verdict.ts`, called by
+`launch.sh` once per round:
 
 ```
 machine_pass := baseline green — test, build, lint, run by the harness
+             ∧ scope CLEAN — no changed path the story's scope_deny names
              ∧ every **ACn in the story has ≥1 mutation in .review-out/mutations/
              ∧ every mutation is RED when the harness runs it
-final        := SPEC  if the reviewer said SPEC
-             |  PASS  if machine_pass and the reviewer said PASS
-             |  FAIL  otherwise — every failing condition is listed on the
-                      `computed:` line of the round's `### Machine` block
+             ∧ no probe is RED
+final        := the reviewer's word, except that PASS becomes FAIL when
+                machine_pass is false. SPEC, FAIL and UNPARSEABLE stay as
+                they are. Every failing condition is listed on the
+                `computed:` line of the round's `### Machine` block,
+                whatever the verdict.
 ```
 
 **The machine can veto, never grant.** Nothing becomes PASS that the reviewer
@@ -38,9 +42,10 @@ did not call PASS; a reviewer PASS becomes FAIL when the machine disagrees.
 The reviewer's line is parsed in three places that do not reference each
 other:
 
-1. `launch.sh` greps `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$` on the
-   reviewer's text — on **any** line, not only the last, although `review.md`
-   asks for the last. Recorded here rather than tightened; a change needs a
+1. `ts/src/lib/verdict.ts` matches `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$`
+   on the reviewer's text — on **any** line, not only the last, although
+   `review.md` asks for the last; PASS wins over FAIL over SPEC when several
+   are present. Recorded here rather than tightened; a change needs a
    `test-lib.sh` case first.
 2. it writes `verdict: <computed>` — lowercase — as line 3 of `.review/<id>.md`
 3. on restart, `launch.sh` greps `^verdict: (FAIL|UNPARSEABLE|SPEC)` there to

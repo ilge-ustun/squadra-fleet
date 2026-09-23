@@ -45,8 +45,11 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
 - **22 Sep — `README.md` rewritten** as the complete documentation.
 - **23 Sep — decision: the harness migrates to TypeScript**, one seam at a
   time. §9. The same day, seam 1 — the classifier — was built on branch
-  `ts-classifier` (worktree `../fleet-wt-ts-classifier`), suite 654, **not
-  landed**: the human lands it. `docs/plans/2026-09-23-typescript-migration.md`
+  `ts-classifier` (worktree `../fleet-wt-ts-classifier`), **not landed**:
+  the human lands it. Seam 2 — the verdict rule and the round section of
+  `.review/<id>.md`, `ts/src/lib/verdict.ts` and `machine-block.ts` — followed
+  on the same branch the same day, with the probe runner's silent PASS
+  closed on the way. `docs/plans/2026-09-23-typescript-migration.md`
   is the plan for every seam and the record of the first.
 
 Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
@@ -65,8 +68,9 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
   launch.sh              the launcher          mutation.sh        the classifier's bash face (shim over ts/)
   check-mutation.sh      the classifier on a working tree (a builder's, or yours)
-  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/lib/,
-                         src/bin/mutation.ts; run by node as is, no build, no runtime deps
+  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/lib/verdict.ts,
+                         src/lib/machine-block.ts, src/bin/{mutation,verdict}.ts; run by node as is, no build,
+                         no runtime deps; fixtures/verdict/ holds the round section's goldens
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
   run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh status.sh revert.sh reset.sh
   telegram.sh            send | poll           render.sh          render_prompt()
@@ -276,10 +280,10 @@ none run yet — the next story's round count is the first data point for A2.
 - **Codex quota.** `REVIEWER_MODEL` exists now; nothing falls back
   automatically when the reviewer's model is out of quota.
 - **The bash ceiling.** `die` inside `$(…)` ends only the subshell (why
-  `classify_mutation` returned through a global — closed for it by seam 1,
-  still open for `run_probes`' `$(run_selector …)` at `launch.sh:260` until
-  seam 2), quoting slips, the edit-while-running hazard, 23 `jq` calls of
-  which 6 parse the two CLIs' output. Not a defect today; the reason for §9.
+  `classify_mutation` returned through a global — closed by seam 1 for
+  mutations and by seam 2 for probes, where it had been a silent PASS),
+  quoting slips, the edit-while-running hazard, 23 `jq` calls of which 6
+  parse the two CLIs' output. Not a defect today; the reason for §9.
 
 ---
 

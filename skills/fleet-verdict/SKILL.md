@@ -26,10 +26,10 @@ The block, per round:
 ```
 baseline: test GREEN | build GREEN | lint GREEN
 builder:  <model>            reviewer: codex [<model>]
-scope:    CLEAN | HIT <paths>
+scope:    CLEAN | VIOLATION <paths>
 model:    PASS|FAIL|SPEC|UNPARSEABLE      ← the reviewer's line
-computed: PASS | FAIL — <reason>; <reason>; …
-mutations:  ACn  CLASS  slug        probes:  name  RED|GREEN
+computed: PASS | FAIL — <reason>; <reason>; …   (SPEC and UNPARSEABLE keep their reasons too)
+mutations:  ACn  CLASS  slug        probes:  CLASS  name
 ```
 
 ## What each reason means, and the fix it needs

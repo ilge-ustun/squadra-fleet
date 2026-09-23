@@ -44,20 +44,7 @@ Later seams run everything in one process, so these are set now:
 ## The seams, in order
 
 1. **Classifier** — built, below.
-2. **Verdict and the Machine block.** `computeVerdict({baseline, scope,
-   acIds, mutRows, probeRows, reviewerVerdict}) → {model, computed, reasons}`
-   and `renderMachineBlock(...)`, reproducing `launch.sh:693-745` byte for
-   byte: the trailing `"; "` on every reason, the `%-4s %-13s %s` mutation
-   table, `reviewer: codex` when `REVIEWER_MODEL` is empty. `launch.sh` sends
-   its globals as JSON on stdin and pastes the block back. The unchecked
-   `cls="$(run_selector …)"` at `launch.sh:260` gets its status check here
-   (today an empty class would write an empty `.result` and veto nothing).
-   The `.result` second line (`launch.sh:181-182`) moves into
-   `lib/vitest-json.ts` using `mutJsonPath`. Pinned by cases 9, 24–26, 51,
-   78, 103; read by `status.sh:148,151`, `run-queue.sh:134,138`,
-   `telegram.sh:160`. Also fix `prompts/README.md:25-33`, which omits scope
-   and probes from the rule. Old review files lack `reviewer:` (added in
-   `5d94376`); a parser accepts it missing.
+2. **Verdict and the Machine block** — built, below.
 3. **`status.sh`.** `ts/src/bin/status.ts` behind a same-name bash wrapper:
    `lib/config.ts` (above), the frontmatter reader (`lib.sh:89-96`),
    `procs_in_worktree` (`lib.sh:122-130`), the git queries
@@ -132,3 +119,45 @@ recorded in `.review/019/round-2`; the tree was clean afterwards; 8 s.
 
 The live checkout needs no `npm ci`, ever: `ts/node_modules` serves tsc and
 vitest in a development worktree and nothing else.
+
+## Seam 2: the verdict and the round section, as built (branch `ts-classifier`, 23 Sep 2026)
+
+```
+ts/src/lib/verdict.ts          computeVerdict: the reviewer's line parsed per newline-delimited line, the reasons in
+                               bash's order, PASS→FAIL the only change the machine makes. Alone in its file: case 108
+                               replaces it and requires the launcher to answer what the stub says
+ts/src/lib/machine-block.ts    renderRoundSection, byte for byte; the row parsers; the labels and separators a reader
+                               will split on; formatIsoSeconds (= date -Iseconds)
+ts/src/bin/verdict.ts          stdin JSON (the round's values, as strings) → --append the section, one tab-separated line back
+ts/src/lib/result-summary.ts   the .result file's second line, jq -c parity decided row by row
+ts/fixtures/verdict/           gen.sh — the retired bash block and heredoc verbatim — and five goldens it wrote
+launch.sh                      the verdict block is one jq -n | node call; run_mutations hands the .result to the
+                               classifier; run_probes checks run_selector's status
+```
+
+What changed in substance:
+
+- **A crashed probe runner no longer passes a story.** `run_probes` took
+  `$(run_selector …)` without its status; an empty class vetoed nothing and
+  the story went to `done`. Now it dies (case 107). This was the last
+  die-in-subshell hazard named in the handoff's §7.
+- The `.result` file is written by the classifier, and the stale `-mut.json`
+  line a resumed round could append after a PRE_RED is gone with it.
+- The rule and the text are typed and tested in one place. Seam 3's reader of
+  `.review/<id>.md` splits on the constants the writer exports.
+
+Deliberate non-parities, each pinned by a unit test: a CR or U+2028 inside
+the reviewer's text is not a line break (a JS multiline regex would have made
+it one; grep's `^…$` did not); U+3000 after `VERDICT: PASS` is UNPARSEABLE
+(glibc's `[[:space:]]` may admit it, JS's blank class does not); a mutation
+slug with whitespace shows its first word in the table and the whole in the
+reason, as awk's `$3` and `read -r` did; DEL in a failed test's name is
+escaped `\u007f` in the `.result` line as jq escaped it.
+
+Verified: `bash test-lib.sh` green with cases 107 and 108; 88 unit tests and
+tsc clean; the goldens matched the bash heredoc on the first run; fifteen
+cases run under the previous `launch.sh` and under the new one produced
+nineteen byte-identical review files once `reviewed:`, `timing:` and the
+per-run `base:`/`head:` SHAs are masked; the veto cases green with
+`ts/node_modules` moved away; wall time 2m28s → 2m39s, one more `node` start per round. `jq` calls: one removed (the `.result`
+summary), one added (the round's JSON); the count is unchanged.
