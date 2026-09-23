@@ -46,7 +46,8 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
 | `ACn has no mutation` | no patch for that AC at all | the reviewer — or the AC cannot be instrumented: a story defect |
 | `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
 
-`prompts/README.md` is the contract; `mutation.sh` is the classifier.
+`prompts/README.md` is the contract; `ts/src/classifier.ts` is the classifier
+(`check-mutation.sh` runs it by hand).
 
 ## The decision tree
 

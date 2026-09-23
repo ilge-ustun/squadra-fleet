@@ -232,10 +232,10 @@ eventually; argv was the wrong channel for a payload that grows. The
 symptom — empty output, blank `is_error` — looked like the builder said
 nothing, when the builder was never started.
 **Prevention:** by construction — prompts go to both agents on stdin
-(`printf '%s' … | claude -p`, `… | codex exec`), which is also codex's
-intended mode and removes the L-17 notice at its root. `test-lib.sh`
-case 32 grows a review past the limit on a rerun and asserts the builder
-still receives it.
+(`ts/src/lib/agents.ts` since seam 4; before it `printf '%s' … | claude -p`,
+`… | codex exec`), which is also codex's intended mode and removes the L-17
+notice at its root. `test-lib.sh` case 32 grows a review past the limit on
+a rerun and asserts the builder still receives it.
 
 **Enforced by:** `case_32_huge_review_prompt`
 
@@ -439,3 +439,32 @@ exported would otherwise reproduce this exactly.
 
 **Enforced by:** `case_88_suite_env_is_clean`
 
+
+## Found by the seam-4 plan review (23 Sep)
+
+### L-28 — an unquoted replacement value is a pattern, not a value
+
+`render.sh` substituted each placeholder with `${out//\{\{STORY\}\}/${STORY_TEXT:-}}`.
+bash 5.2 turns `patsub_replacement` on by default, and in an unquoted
+replacement `&` stands for the matched text: `R&D uses &&` reached the
+builder and the reviewer as `R{{STORY}}D uses {{STORY}}{{STORY}}`, `\&`
+became `&`, `\\` became `\`, and the log said `unsubstituted in build-round1.md:
+{{STORY}}` — a warning that looked like a prompt-file typo. Four khaita
+stories (012, 017, 018, 019) contain `&&`; every one of their rounds ran on
+a corrupted prompt. Nobody noticed: the agents read past it, the suite's
+fixture story has no `&`, and case 10 tested the guards, not a value with
+punctuation.
+
+**Lesson:** a substitution mechanism has a grammar on both sides. The
+placeholder side was made inert on purpose (`{{NAME}}`, not `$NAME`); the
+value side was assumed inert and was not. Reproducing a bash construct in
+another language is where such an assumption surfaces — the port's
+differential test put `&` in a value because the port had to decide what
+to do with it.
+
+**Prevention:** `render.sh` quotes every replacement value; `ts/src/lib/render.ts`
+splits and joins, never `String.replace` with a string (whose `$&` is the
+same trap). The differential test renders a value holding `& \& \\ $& $1`
+through both and requires the same bytes.
+
+**Enforced by:** `ts/src/lib/render.test.ts` — the row "a value is inserted literally"

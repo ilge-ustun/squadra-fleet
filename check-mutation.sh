@@ -6,7 +6,7 @@
 #   check-mutation.sh khaita .review-out/mutations/AC*-tdd-*.patch
 #
 # Runs the verdict's own mutation classifier (ts/src/classifier.ts — the
-# same code launch.sh runs through mutation.sh) on a tree someone is still
+# same code the launcher runs in-process) on a tree someone is still
 # working in: the builder's worktree, or a human's checkout. For each patch, with its .test or .cmd
 # beside it: pre-run the selector, apply the patch, run it again, undo the
 # patch with `git apply -R`, and print the class the verdict would print.

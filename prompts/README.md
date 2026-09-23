@@ -1,7 +1,9 @@
 # Prompts
 
-Bodies for the builder and reviewer, rendered by `render_prompt()` in
-`render.sh` and sourced by `launch.sh`.
+Bodies for the builder and reviewer, rendered by `ts/src/lib/render.ts`
+for the launcher and by `render_prompt()` in `render.sh` for
+`write-story.sh` — the two are held equal, byte for byte, by
+`render.test.ts`.
 
 Values are referenced as `{{NAME}}`, never `$NAME`, so these files are inert
 text: nothing expands by accident and a prompt file cannot inject shell.
@@ -21,7 +23,7 @@ Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 
 The reviewer's line `VERDICT: PASS|FAIL|SPEC` is **one input** to the
 verdict, not the verdict. The rule is `ts/src/lib/verdict.ts`, called by
-`launch.sh` once per round:
+the launcher (`ts/src/launch.ts`) once per round:
 
 ```
 machine_pass := baseline green — test, build, lint, run by the harness

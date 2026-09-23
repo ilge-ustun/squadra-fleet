@@ -41,9 +41,10 @@ re-executed under `env -i`. No network, no model.
   `docs/plans/2026-09-23-typescript-migration.md`.
 - **One task, one commit**, the reason in the message, `git status --short`
   shown. A commit carrying three concerns cannot be extracted later (L-10).
-- **Show the `launch.sh` diff before applying it** and only while
-  `status.sh <repo>` shows nothing in flight: bash reads scripts
-  incrementally, so a running launcher would execute the half-edited file.
+- **Show the `ts/src/launch.ts` diff before applying it.** `launch.sh` is a
+  wrapper that execs node, which loads the whole program before it starts,
+  so a running launcher keeps the code it loaded; editing the bash launcher
+  mid-run was never safe, editing the TypeScript is.
 - **`die` over `warn`.** A warning assumes a human is watching; nobody is.
 - **Prompts go to agents on stdin, never argv** — argv has a 128 KB ceiling
   and a round-2 prompt exceeded it (L-18).

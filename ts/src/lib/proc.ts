@@ -49,7 +49,7 @@ export interface BashToOptions {
 
 /** `bash -c <line>` with stdout and stderr both appended to the log file.
  *  Always bash, never /bin/sh: a selector line is a bash contract
- *  (mutation.sh:21-23) and /bin/sh here is dash. Returns the exit status,
+ *  (mutation.sh@8fe954a:21-23) and /bin/sh here is dash. Returns the exit status,
  *  -1 when the process could not be started or died of a signal. */
 export function runBashTo(line: string, o: BashToOptions): number {
   const fd = openSync(o.logFile, 'w');

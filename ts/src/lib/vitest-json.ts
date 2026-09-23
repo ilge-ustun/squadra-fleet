@@ -3,7 +3,7 @@
 // its own evidence — passes through here, so the two cannot disagree. It
 // is also where an adapter for a runner that is not vitest would begin.
 //
-// The rule is mutation.sh:36-39 exactly, including what `jq -e` did with
+// The rule is mutation.sh@8fe954a:36-39 exactly, including what `jq -e` did with
 // input it could not use: an empty or unparseable file, or one without the
 // counts, fell through every test to GREEN. Kept for parity; a stricter
 // reading is a decision for later, made once, here.

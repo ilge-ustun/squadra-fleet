@@ -68,13 +68,14 @@ never runs `npm`. The plan: `docs/plans/2026-09-23-typescript-migration.md`.
 
 ## Working rules
 
-- Never edit `launch.sh` while a launcher is running it — bash reads scripts
-  incrementally. `status.sh <repo>` shows what is live.
+- `launch.sh` is a wrapper that execs node, which loads the whole program
+  before it starts: editing `ts/src/` while a launcher runs is safe (editing
+  the bash launcher never was). `status.sh <repo>` shows what is live.
 - Never run a launcher as a child of an interactive agent session; always
   `setsid nohup bash -c '…' > log 2>&1 < /dev/null &`.
 - Kill by cwd (`procs_in_worktree`) or exact process name, never by a
   `pkill -f` pattern that can match your own command line.
-- Show the `launch.sh` diff before applying it.
+- Show the `ts/src/launch.ts` diff before applying it.
 - Prefer `die` over `warn` — a warning assumes a human is watching.
 - A check that cannot go red is absent, not weak.
 - Prompts go to agents on stdin, never argv.

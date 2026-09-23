@@ -1,4 +1,4 @@
-# Fleet: the migration to TypeScript — plan, and seams 1–3 as built
+# Fleet: the migration to TypeScript — plan, and seams 1–4 as built
 
 Decided by the human on 23 Sep 2026 (`FLEET-HANDOFF.md` §9): the harness
 moves from bash to TypeScript, one seam at a time behind the existing
@@ -31,8 +31,10 @@ Later seams run everything in one process, so these are set now:
   keys as NUL-separated pairs; the contract is not narrowed to `KEY=value`,
   lib.sh's `die` text reaches the caller from that bash's inherited stderr,
   and a caller's environment still wins over the file.
-- The subprocess helper is `runSync`; an async `run` with timeout and
-  kill-after-grace arrives with seam 4 (`AGENT_TIMEOUT`).
+- The subprocess helper is `runSync`; the agent calls use the async `run`
+  (`lib/proc.ts`, seam 4): the child leads its own process group, SIGTERM
+  at `AGENT_TIMEOUT`, SIGKILL 30 s later, the whole group — `timeout -k`'s
+  semantics, so nothing outlives the call in the worktree.
 - Anything larger than a few flags crosses from bash to TS on **stdin as
   JSON**, never argv (L-18, the 128 KB ceiling).
 - Relative imports end in `.ts`; no `enum`, `namespace` or parameter
@@ -48,12 +50,10 @@ Later seams run everything in one process, so these are set now:
 1. **Classifier** — built, below.
 2. **Verdict and the Machine block** — built, below.
 3. **`status.sh` and `check-mutation.sh`** — built, below.
-4. **`launch.sh`**, last, with the agent calls on
-   `@anthropic-ai/claude-agent-sdk` and `@openai/codex-sdk` — the first
-   runtime dependencies. To settle then: the suite's fakes shadow `claude`
-   and `codex` on PATH (L-14); both SDKs spawn those CLIs, so the fakes may
-   still apply through the SDKs' executable-path options, else an injection
-   seam is needed. Also where the story-selection lock and lanes go.
+4. **`launch.sh`** — built, below. The agent calls stay on the `claude` and
+   `codex` CLIs, not the SDKs (the plan had said the SDKs; the decision and
+   its reasons are in the record). Lanes and a story-selection lock are
+   features, not migration, and were left where they were.
 
 `telegram.sh`, `merge.sh`, `reset.sh`, `revert.sh`, `run-queue.sh` and the
 systemd side stay bash indefinitely.
@@ -223,3 +223,105 @@ git calls), 2m29s with `check` — the suite's fixture never carries
 `ts/node_modules`, so every run proves the runtime needs none. No khaita
 run of `check-mutation.sh` this time: the target held no mutation evidence
 and the run would have written `.review-out/` into it.
+
+## Seam 4: the launcher, as built (branch `ts-classifier`, 23 Sep 2026)
+
+```
+ts/src/launch.ts               the story loop, launch.sh's order and its every line of output; the pure parts
+                               (acIds, chooseBuildPrompt, keepEarlierRounds, the run-file shapes, readKnobs) tested alone
+ts/src/bin/launch.ts           the repo through lib/config.ts, claude and codex on PATH, the four directories, the exit
+                               codes; SIGTERM/SIGINT/SIGHUP remove the reviewer worktree and exit 128+n, the agent's
+                               group left alone (L-04), as the bash EXIT trap did
+ts/src/lib/proc.ts             += run: async, the child leads its own process group, SIGTERM at the timeout and SIGKILL
+                               after the grace to the whole group (timeout -k's semantics — checked: neither leaves a
+                               survivor); resolved on close; EPIPE on stdin swallowed
+ts/src/lib/agents.ts           the two CLIs — builderArgv, reviewerArgv, runBuilder (merged output), runReviewer (stderr
+                               to reviewer.stderr), parseBuilderOutput (launch.sh:535-541 as jq 1.7 evaluated it, row by
+                               row), reviewerMessages (the jq filter and jq's stderr line for a non-object). The one file an
+                               SDK seam would replace
+ts/src/lib/render.ts           render_prompt, held equal to render.sh by a differential test (write-story.sh still uses it)
+ts/src/lib/frontmatter.ts      += setStoryField, lib.sh:102-113 byte for byte, differential against it
+ts/src/lib/lock.ts             the fleet lock: flock on a descriptor Node keeps open, the bot's with_lock unchanged
+ts/src/lib/git.ts              += fetch, worktree add/remove, merge-base, rev-parse, diff --name-only, add, commit, push
+ts/src/lib/baseline.ts         run_baseline: the jq -e rule (including jq's ordering), the summary as jq shaped it,
+                               build and lint through `( cmd ) 2>&1 | tail -n 200` under pipefail
+ts/src/lib/scope.ts            check_scope with bashGlobMatch, 36 rows proven against bash's own [[ == ]]
+ts/src/lib/evidence.ts         run_mutations and run_probes in-process; writeResultFile (from the classify verb); RunnerError
+launch.sh                      the wrapper: lib.sh, the node guard, exec
+render.sh                      the replacement side of every ${out//pat/value} quoted (below)
+test/claude, test/codex        FAKE_BUILDER_OUTPUT=garbage|shape, FAKE_REVIEWER=silent; headers corrected
+test-lib.sh                    cases 111, 111b, 112 (characterised before the move), 113 (the loader stub);
+                               FLEET_LAUNCH_OVERRIDE retired
+gone                           mutation.sh, ts/src/bin/verdict.ts, mutation.ts's run-selector and classify verbs
+```
+
+What changed in substance:
+
+- **The agents are still the CLIs.** The plan had said `@anthropic-ai/claude-agent-sdk`
+  and `@openai/codex-sdk`; decided otherwise with the human once the machine
+  was looked at: the Claude SDK does not run the `claude` on PATH but a
+  234 MB CLI it bundles, over a stream-json protocol, with three peer
+  packages; the Codex SDK pins its own `@openai/codex` 0.156.1; both would
+  put `node_modules` in the live checkout and in every fixture copy, and the
+  suite's fakes could no longer shadow the real binaries (L-14) — the sixty
+  launcher cases would have needed an injection seam. Zero runtime
+  dependencies hold; `lib/agents.ts` is the seam an SDK would replace, and
+  the handoff §9 records what a seam 5 would have to prove first.
+- **`render.sh` corrupted every `&`.** Found by the plan review, not by a
+  case: bash 5.2's `patsub_replacement` is on, and an unquoted replacement
+  value turns `&` into the matched text — `R&D uses &&` reached the agent as
+  `R{{STORY}}D uses {{STORY}}{{STORY}}`; khaita stories 012, 017, 018 and 019
+  carried it. The TypeScript substitutes literally and `render.sh` is quoted,
+  so `write-story.sh` is fixed too; the differential test holds both. L-28.
+- **Two paths no case covered were characterised first** (commit 1, before
+  anything moved), and what bash really did there was not what a reading
+  said: a builder printing non-JSON leaves `BUILD_ERR` *empty* (jq fails,
+  stderr dropped) so the "was not JSON" warning never fires; the warning is
+  for JSON of the wrong shape. Cases 111, 111b and 112 pin it as the bash
+  had it; the port reproduces it.
+- **Everything runs in one process.** One node start per round instead of
+  three to six; the suite's wall time 2m29s → 2m16s. The `.result` writer,
+  the reasons reader and the verdict are library calls; the CLI verbs that
+  carried them across the process boundary are gone.
+- **The edit-while-running hazard is gone** for the launcher: `launch.sh`
+  execs node, which loads the whole module graph before `main`.
+
+Deliberate non-parities, each pinned by a unit test: a rendered value is
+inserted literally (`&`, `\&`, `\\`, `$&` survive); a non-numeric
+`MAX_ROUNDS`, `AGENT_TIMEOUT` or `FLEET_LOCK_WAIT` is a die (bash read a name
+as 0, or let `timeout` complain), and `AGENT_TIMEOUT` is seconds only (`0`
+still means none); the KILL path after the grace is reported as a timeout
+where `timeout` returned 137 and bash went on with partial output; a seed
+file whose parent directory is missing in the worktree is a die; the
+blocked notification's 600-byte cut may end in U+FFFD; agent output is
+decoded as UTF-8; the merged builder output is chunk-ordered; the four
+config commands are bash lines (the bash word-split them; identical for
+khaita's values); `test.summary.json` holds an error object where jq failed
+on the shape and bash left an empty file; an object followed by trailing
+garbage from the builder is "not JSON" as a whole; `set_story_field` refuses
+a value with `/ & \` or a newline instead of corrupting the file; the
+`cat: … No such file` line before a die for an unreadable prompt or rules
+file is not reproduced; jq's number literal (`1.50`) is not preserved in
+`is_error`; every directory listing is code-point order under any locale.
+And as before: `next_ready` and `reap_orphans` still consider `TEMPLATE.md`
+(run-queue.sh's own `next_ready` skips it) — parity, a candidate fix outside
+the migration.
+
+Verified: `bash test-lib.sh` 703 → 710 (cases 111, 111b, 112, 113), 2m16s;
+340 unit tests, tsc clean; the four in-process stub constraints (cases 106,
+107, 108, 113) hold with the launcher importing the stubbed files directly.
+Parity beyond the suite: 26 scenarios run under the bash launcher at
+`ede26ca` and under the TypeScript one on the suite's own fixture — PASS,
+FAIL×2, SPEC, blocked, no commit, dirty reviewer, builder and reviewer
+timeouts, scope violation with a red probe, green probes, a resume after
+needs_human, REVIEW_ONLY, a builder handover red and green, the garbage and
+wrong-shape builder outputs, a silent and an unparseable reviewer, a bad
+patch, a mutation for the wrong AC, no ACs, a story model with
+REVIEWER_MODEL, a missing seed file, a failing install, `--reap`, an empty
+queue — 675 files diffed per side (every prompt and argv the fakes
+recorded, `review.md`, every `round-N/*`, `launch.log`, the target's git
+log, the committed and working story, `.runs/<id>.json`), identical once
+shas and the two clock lines are normalised. `launch.sh khaita --reap`
+under the queue unit's exact `PATH`, read-only: exit 0, the checkout
+unchanged. No `sleep` survives the suite (the group kill). The fixture
+never carries `ts/node_modules`, so every run proves the runtime needs none.

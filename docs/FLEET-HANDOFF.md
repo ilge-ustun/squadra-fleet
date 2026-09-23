@@ -52,8 +52,16 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
   closed on the way. Seam 3 — `status.sh` and `check-mutation.sh` as
   wrappers over `ts/src/bin/status.ts` and `mutation.ts check`, with
   `ts/src/lib/config.ts` running `load_repo` for the TypeScript side —
-  followed the same day. `docs/plans/2026-09-23-typescript-migration.md`
-  is the plan for every seam and the record of each built one.
+  followed the same day. Seam 4 — `launch.sh` as a wrapper over
+  `ts/src/bin/launch.ts`, the story loop in Node with the agents still the
+  `claude` and `codex` CLIs (the SDKs were weighed and declined: bundled
+  binaries, runtime dependencies, the fakes could no longer shadow) — the
+  same day, proven by the suite and a 26-scenario old-versus-new diff.
+  Its plan review found that `render.sh` had been corrupting every `&` in
+  a prompt (bash 5.2's `patsub_replacement`; four khaita stories carried
+  it); fixed on both sides, L-28. `mutation.sh` and `bin/verdict.ts` are
+  gone. `docs/plans/2026-09-23-typescript-migration.md` is the plan for
+  every seam and the record of each built one.
 
 Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
 fast-forward. khaita `develop` is at `227b781`.
@@ -69,16 +77,16 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
 ```
 ~/work/fleet/
   lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
-  launch.sh              the launcher          mutation.sh        the classifier's bash face (shim over ts/)
+  launch.sh              the launcher — wrapper over ts/src/bin/launch.ts
   check-mutation.sh      the classifier on a working tree (a builder's, or yours) — wrapper over `mutation.ts check`
   status.sh              what the fleet is doing — wrapper over ts/src/bin/status.ts
-  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/status.ts,
-                         src/status-views.ts, src/lib/{config,verdict,machine-block,review,frontmatter,procs,git}.ts,
-                         src/bin/{mutation,verdict,status}.ts; run by node as is, no build, no runtime deps;
-                         fixtures/verdict/ and fixtures/status/ hold the goldens and their generators
+  ts/                    the TypeScript side (branch ts-classifier): src/launch.ts (the story loop), src/classifier.ts,
+                         src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,lock,config,
+                         verdict,machine-block,review,frontmatter,procs,git,proc,log}.ts, src/bin/{launch,mutation,status}.ts;
+                         run by node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
   run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh revert.sh reset.sh
-  telegram.sh            send | poll           render.sh          render_prompt()
+  telegram.sh            send | poll           render.sh          render_prompt() for write-story.sh (the launcher: ts/src/lib/render.ts)
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
   install-skills.sh      links skills/ into ~/.claude/skills and ~/.codex/skills
@@ -176,7 +184,7 @@ intent → write-story.sh <repo> <id> "<intent>" [--base epic/<name>]
            ★ BASELINE  ★ SCOPE
            reviewer: codex exec on stdin (REVIEWER_MODEL → -m); mutations + optional probes
            ★ tree clean apart from .review-out/, else needs_human
-           ★ MUTATION RUNNER (mutation.sh)  ★ PROBE RUNNER  ★ COMPUTED VERDICT
+           ★ MUTATION RUNNER  ★ PROBE RUNNER (ts/src/lib/evidence.ts)  ★ COMPUTED VERDICT
        → .review/<id>.md + .review/<id>/round-N/ committed; a stop notifies with its command
        → merge.sh <repo> <id>   the queue, on a computed PASS, story → its epic (post-merge baseline)
        → a human: merge.sh --epic / <id> --land, or /merge from the phone (detached)
@@ -192,8 +200,8 @@ final := SPEC if the reviewer said SPEC | PASS if machine_pass ∧ reviewer PASS
 
 **The machine can veto, never grant.** Classes: `RED` `GREEN` `NO_TESTS`
 `PRE_RED` `SELECTOR_INVALID` `PATCH_INVALID` `NO_SELECTOR`; a probe RED
-vetoes. The classifier is `ts/src/classifier.ts` (`mutation.sh` is its bash
-face for `launch.sh`); `check-mutation.sh <repo> <patch…> [--wt <dir>]` runs
+vetoes. The classifier is `ts/src/classifier.ts` (the launcher calls it
+in-process); `check-mutation.sh <repo> <patch…> [--wt <dir>]` runs
 it on a committed working tree, restores with `git apply -R`, exits 0 only
 on all-RED. The Machine block records
 `builder:` and `reviewer:` models.
@@ -285,11 +293,13 @@ none run yet — the next story's round count is the first data point for A2.
   day and peak RSS under 1.2 GB per lane. Needs the selection lock first.
 - **Codex quota.** `REVIEWER_MODEL` exists now; nothing falls back
   automatically when the reviewer's model is out of quota.
-- **The bash ceiling.** `die` inside `$(…)` ends only the subshell (why
-  `classify_mutation` returned through a global — closed by seam 1 for
-  mutations and by seam 2 for probes, where it had been a silent PASS),
-  quoting slips, the edit-while-running hazard, 23 `jq` calls of which 6
-  parse the two CLIs' output. Not a defect today; the reason for §9.
+- **The bash ceiling** was the reason for §9, and seam 4 closed it for the
+  launcher: no `die` inside `$(…)`, no `jq` parsing the CLIs, no
+  edit-while-running hazard (`launch.sh` execs node, which loads everything
+  first). What the bash had hidden and the port found: `render.sh`'s `&`
+  corruption (L-28), the builder's non-JSON output going unwarned, the
+  `.result` writer living in a CLI verb. `telegram.sh`, `merge.sh`,
+  `run-queue.sh` and the small scripts stay bash and keep the ceiling.
 
 ---
 
@@ -298,8 +308,8 @@ none run yet — the next story's round count is the first data point for A2.
 - One task, one commit. `git status --short` with each. `bash test-lib.sh`
   green before every commit; a case observed red first.
 - Edit the fleet in a worktree; fast-forward `main` only with both units
-  inactive. Show the `launch.sh` diff before applying it; never edit it
-  while a launcher runs.
+  inactive. Show the `ts/src/launch.ts` diff before applying it (editing
+  it mid-run is safe since seam 4; it reaches the next launch).
 - Every AC names its instrument and the mutation that turns it red. Bound
   the domain (L-20). Claim only what you instrument (L-25). State the
   instrument's weakness in the story.
@@ -364,9 +374,19 @@ a per-case copy, only the fakes come through `PATH`.
    as is, reached through thin bash entries with the old names so nothing
    downstream (the bot, the units, the skills, the docs) changes.
 
-**Status:** seams 1–3 are built and tested on branch `ts-classifier`, not
-landed: the classifier, the verdict and the round section, `status.sh` and
-`check-mutation.sh` with the config loader. The human decides when the
-branch lands and when seam 4 (`launch.sh`, the agent SDKs, the first
-runtime dependencies) is planned; the next few stories should still measure
-A2's effect on rounds.
+**Status:** all four seams are built and tested on branch `ts-classifier`,
+not landed: the classifier, the verdict and the round section, `status.sh`
+and `check-mutation.sh` with the config loader, and the launcher. Step 2's
+"with the agent calls moved to the SDKs" was weighed at seam 4 and
+declined, with the human: `@anthropic-ai/claude-agent-sdk` runs a 234 MB CLI
+it bundles over a stream-json protocol, not the `claude` on PATH, and needs
+three peer packages; `@openai/codex-sdk` pins its own `@openai/codex`; both
+would put `node_modules` in the live checkout and in every fixture copy,
+and the suite's fakes could no longer shadow the real binaries (L-14). So
+the launcher spawns the CLIs from `ts/src/lib/agents.ts`, the one file an
+SDK seam would replace; zero runtime dependencies hold. A seam 5 would
+first have to show that the fakes can stand in through the SDKs'
+executable-path options with their wire protocols, that subscription OAuth
+works through the bundled CLIs, and what `npm ci` in the live checkout
+costs. The human decides when the branch lands; the next few stories
+should still measure A2's effect on rounds.

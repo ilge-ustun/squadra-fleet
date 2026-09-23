@@ -102,7 +102,7 @@ describe('runMutations — launch.sh:161-183', () => {
     expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log }).map((r) => r.cls)).toEqual(['GREEN', 'PATCH_INVALID']);
   });
 
-  it('a dirty tree is the classifier\'s message and then the launcher\'s, as two lines (mutation.sh:45-46)', () => {
+  it('a dirty tree is the classifier\'s message and then the launcher\'s, as two lines (mutation.sh@14f675e:45-46, the shim)', () => {
     const m = join(ev, 'mutations'); mkdirSync(m);
     markerPatch(m, 'AC1-marker', 'test');
     writeFileSync(join(wt, 'dirty.txt'), 'x\n');
