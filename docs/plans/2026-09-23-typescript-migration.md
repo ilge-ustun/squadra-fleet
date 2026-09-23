@@ -1,4 +1,4 @@
-# Fleet: the migration to TypeScript — plan, and seam 1 as built
+# Fleet: the migration to TypeScript — plan, and seams 1–3 as built
 
 Decided by the human on 23 Sep 2026 (`FLEET-HANDOFF.md` §9): the harness
 moves from bash to TypeScript, one seam at a time behind the existing
@@ -26,9 +26,11 @@ Later seams run everything in one process, so these are set now:
   **argv**, not through the environment: `lib.sh` keeps a target's config
   out of the environment on purpose (`lib.sh:14-18`), and the runner the
   classifier starts must see the environment it saw from bash.
-- `.fleet/config` is sourced bash. When TS needs it (seam 3), `lib/config.ts`
-  shells out to `bash -c 'source lib.sh; load_repo "$1"; declare -p …'` and
-  reads the values back; the contract is not narrowed to `KEY=value`.
+- `.fleet/config` is sourced bash. `lib/config.ts` (seam 3) runs
+  `load_repo` in a child bash that sources the same `lib.sh` and prints the
+  keys as NUL-separated pairs; the contract is not narrowed to `KEY=value`,
+  lib.sh's `die` text reaches the caller from that bash's inherited stderr,
+  and a caller's environment still wins over the file.
 - The subprocess helper is `runSync`; an async `run` with timeout and
   kill-after-grace arrives with seam 4 (`AGENT_TIMEOUT`).
 - Anything larger than a few flags crosses from bash to TS on **stdin as
@@ -45,14 +47,7 @@ Later seams run everything in one process, so these are set now:
 
 1. **Classifier** — built, below.
 2. **Verdict and the Machine block** — built, below.
-3. **`status.sh`.** `ts/src/bin/status.ts` behind a same-name bash wrapper:
-   `lib/config.ts` (above), the frontmatter reader (`lib.sh:89-96`),
-   `procs_in_worktree` (`lib.sh:122-130`), the git queries
-   (`status.sh:63-121, 143-199`). `check-mutation.sh` becomes a five-line
-   wrapper over a `check` verb in the same step, since both need
-   `load_repo`. `merge.sh:92-96` is the only program that parses `--json`;
-   cases 55, 56, 80, 90, 93, 96 and 100 pin the outputs. `--bot` uses the
-   no-colour option already in `log.ts`.
+3. **`status.sh` and `check-mutation.sh`** — built, below.
 4. **`launch.sh`**, last, with the agent calls on
    `@anthropic-ai/claude-agent-sdk` and `@openai/codex-sdk` — the first
    runtime dependencies. To settle then: the suite's fakes shadow `claude`
@@ -99,8 +94,8 @@ What changed in substance, and what did not:
   pinned by a unit test so a later change is a decision, not an accident.
 - `mutation.sh`'s `restore_tree` had no caller outside the file and is not
   exposed by the shim.
-- `check-mutation.sh:40` still checks for `jq`, which it no longer needs;
-  it goes with the seam-3 wrapper.
+- `check-mutation.sh:40` still checked for `jq`, which it no longer needed;
+  it went with the seam-3 wrapper.
 
 Verified before the branch was offered for landing: `bash test-lib.sh`
 green with the new cases 105 and 106; wall time 2m13s → 2m28s on the 2-CPU
@@ -161,3 +156,70 @@ nineteen byte-identical review files once `reviewed:`, `timing:` and the
 per-run `base:`/`head:` SHAs are masked; the veto cases green with
 `ts/node_modules` moved away; wall time 2m28s → 2m39s, one more `node` start per round. `jq` calls: one removed (the `.result`
 summary), one added (the round's JSON); the count is unchanged.
+
+## Seam 3: `status.sh` and `check-mutation.sh`, as built (branch `ts-classifier`, 23 Sep 2026)
+
+```
+ts/src/lib/config.ts           loadRepo: load_repo in a child bash, NUL pairs back, stderr inherited; ConfigError.alreadyReported
+ts/src/lib/frontmatter.ts      frontmatter_field / story_field record by record; `records()` = awk's line rule
+ts/src/lib/procs.ts            procs_in_worktree by /proc/<pid>/cwd
+ts/src/lib/review.ts           the reader of .review/<id>.md: verdict, the last computed line's reasons, the last Machine block
+ts/src/lib/git.ts              += refExists, branchExists, isAncestor, revListCount
+ts/src/status.ts               the walk: order, title, review, worktree, git, landingOf; liveness injected
+ts/src/status-views.ts         the table, the epic block, the phone form, the JSON — from one Status
+ts/src/bin/status.ts           <repo> [--json|--epics|--bot] [--all] [id]; load_repo before the flags, as the bash did
+ts/src/bin/mutation.ts         += check <repo> <patch…> [--wt <dir>] — check-mutation.sh line for line
+ts/fixtures/status/            make-target.sh (one deterministic target, every landing state), gen.sh (runs
+                               git show 14f675e:status.sh — the last bash — under C.UTF-8), ten goldens
+status.sh, check-mutation.sh   wrappers: source lib.sh, require node, exec the bin
+```
+
+What changed in substance:
+
+- **The first entry points that run entirely in Node.** Every caller
+  (`merge.sh --json`, `telegram.sh --bot`, `run-queue.sh`'s closing table,
+  the builder's rules) keeps its command line; nothing downstream moved.
+- **One config loader.** `lib/config.ts` does not parse `.fleet/config`; it
+  asks bash. Cases 109 and 110 replace it with a stub that throws and require
+  both entry points to fail with the stub's text — red under bash, which
+  never loaded it.
+- **The writer and the reader of `.review/<id>.md` share one vocabulary**:
+  `lib/review.ts` splits on the constants `lib/machine-block.ts` exports.
+- **A flag bug the goldens had not caught**, found by the old-vs-new parity
+  script: `--json`, `--epics` and `--bot` are independent flags with a
+  precedence in the bash (`--epics`, then `--json`, then `--bot`, which also
+  shapes the epic block); the first TS kept only the last one. Three goldens
+  pin the combinations now.
+- **A bash quirk, reproduced rather than fixed**: `width_of` counts
+  characters but bash's `printf '%-Ns'` pads to N *bytes*, so a lone `—`
+  cell is two spaces short of its column. The goldens hold it; the renderer
+  copies it; a unit row names it. Fixing the alignment is a later, visible
+  change, not a parity port.
+- **What stays bash, deliberately:** `set_story_field` (the writer),
+  `lib.sh`'s `frontmatter_field` for the scripts that stay bash,
+  `telegram.sh`'s own `/why` awk (proven equal to `lib/review.ts` by the
+  same inputs), `mutation.sh`'s `find_selector`, `porcelain` and
+  `classify_mutation` until seam 4 retires `launch.sh`'s use of them.
+
+Deliberate non-parities, each pinned by a unit test: table widths, story
+order and evidence order are the `C.UTF-8` ones under any locale — the
+systemd units set no `LANG`, where bash padded by bytes, so a khaita title
+with an em dash widened its column by two there and does not now; gawk's
+`[[:space:]]` under `C.UTF-8` strips U+3000 after `key:` and in the title
+prefix, the TS strips ASCII whitespace only (seam 2's choice again); the
+epic state string is not run through printf's `%b`; a `--json` row whose
+verdict holds a quote is kept where jq's hand-built `--argjson` dropped it;
+DEL is emitted raw in the JSON; `--wt` with no value prints the usage, not
+bash's `${2:?}` text.
+
+Verified: `bash test-lib.sh` green with cases 109 and 110 (681); 185 unit
+tests and tsc clean; the ten goldens byte-identical, generated from the
+bash before any TS rendered; 20 of 20 invocations (stdout, stderr, exit
+status) identical between `git show HEAD~1:status.sh` and the wrapper on
+the golden target, including the error paths; on the live khaita registry,
+read-only, every view identical under `C.UTF-8`; wall time 2m39s → 2m24s
+after the `status.sh` swap (the walk in one process beats the bash loop's
+git calls), 2m29s with `check` — the suite's fixture never carries
+`ts/node_modules`, so every run proves the runtime needs none. No khaita
+run of `check-mutation.sh` this time: the target held no mutation evidence
+and the run would have written `.review-out/` into it.

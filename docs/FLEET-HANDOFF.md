@@ -11,7 +11,7 @@ this file is the state, `docs/lessons.md` (L-01 … L-27) the reasons,
 ```bash
 cd ~/work/fleet
 bash status.sh khaita --bot --all     # every story: landing state, round, computed verdict
-bash test-lib.sh                      # the harness's own suite; the count is on its last line (644)
+bash test-lib.sh                      # the harness's own suite; the count is on its last line (681)
 git log --oneline -15
 git -C ~/work/khaita/khaita-app log --oneline develop -15
 systemctl --user is-active fleet-bot.service fleet-queue.service
@@ -49,8 +49,11 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
   the human lands it. Seam 2 — the verdict rule and the round section of
   `.review/<id>.md`, `ts/src/lib/verdict.ts` and `machine-block.ts` — followed
   on the same branch the same day, with the probe runner's silent PASS
-  closed on the way. `docs/plans/2026-09-23-typescript-migration.md`
-  is the plan for every seam and the record of the first.
+  closed on the way. Seam 3 — `status.sh` and `check-mutation.sh` as
+  wrappers over `ts/src/bin/status.ts` and `mutation.ts check`, with
+  `ts/src/lib/config.ts` running `load_repo` for the TypeScript side —
+  followed the same day. `docs/plans/2026-09-23-typescript-migration.md`
+  is the plan for every seam and the record of each built one.
 
 Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
 fast-forward. khaita `develop` is at `227b781`.
@@ -67,12 +70,14 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
 ~/work/fleet/
   lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
   launch.sh              the launcher          mutation.sh        the classifier's bash face (shim over ts/)
-  check-mutation.sh      the classifier on a working tree (a builder's, or yours)
-  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/lib/verdict.ts,
-                         src/lib/machine-block.ts, src/bin/{mutation,verdict}.ts; run by node as is, no build,
-                         no runtime deps; fixtures/verdict/ holds the round section's goldens
+  check-mutation.sh      the classifier on a working tree (a builder's, or yours) — wrapper over `mutation.ts check`
+  status.sh              what the fleet is doing — wrapper over ts/src/bin/status.ts
+  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/status.ts,
+                         src/status-views.ts, src/lib/{config,verdict,machine-block,review,frontmatter,procs,git}.ts,
+                         src/bin/{mutation,verdict,status}.ts; run by node as is, no build, no runtime deps;
+                         fixtures/verdict/ and fixtures/status/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
-  run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh status.sh revert.sh reset.sh
+  run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh revert.sh reset.sh
   telegram.sh            send | poll           render.sh          render_prompt()
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
@@ -187,9 +192,10 @@ final := SPEC if the reviewer said SPEC | PASS if machine_pass ∧ reviewer PASS
 
 **The machine can veto, never grant.** Classes: `RED` `GREEN` `NO_TESTS`
 `PRE_RED` `SELECTOR_INVALID` `PATCH_INVALID` `NO_SELECTOR`; a probe RED
-vetoes. The classifier is `mutation.sh`; `check-mutation.sh <repo> <patch…>
-[--wt <dir>]` runs it on a committed working tree, restores with
-`git apply -R`, exits 0 only on all-RED. The Machine block records
+vetoes. The classifier is `ts/src/classifier.ts` (`mutation.sh` is its bash
+face for `launch.sh`); `check-mutation.sh <repo> <patch…> [--wt <dir>]` runs
+it on a committed working tree, restores with `git apply -R`, exits 0 only
+on all-RED. The Machine block records
 `builder:` and `reviewer:` models.
 
 ### Seams
@@ -358,6 +364,9 @@ a per-case copy, only the fakes come through `PATH`.
    as is, reached through thin bash entries with the old names so nothing
    downstream (the bot, the units, the skills, the docs) changes.
 
-**Status:** seam 1 is built and tested on branch `ts-classifier`, not
-landed. The human decides when it lands and when seam 2 starts; the next
-few stories should still measure A2's effect on rounds.
+**Status:** seams 1–3 are built and tested on branch `ts-classifier`, not
+landed: the classifier, the verdict and the round section, `status.sh` and
+`check-mutation.sh` with the config loader. The human decides when the
+branch lands and when seam 4 (`launch.sh`, the agent SDKs, the first
+runtime dependencies) is planned; the next few stories should still measure
+A2's effect on rounds.

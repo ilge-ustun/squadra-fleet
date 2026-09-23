@@ -168,9 +168,9 @@ committed so it can become the next round's instrument.
 veto, ends the rounds, and goes to a human. `UNPARSEABLE` is the launcher's
 word for a reviewer that ended without a verdict line; it is not-PASS.
 
-**`check-mutation.sh <repo> <patch…> [--wt <dir>]`** runs the same
-classifier on a tree someone is still working in — the builder's worktree,
-or a human's checkout. It refuses an uncommitted tree, applies each patch,
+**`check-mutation.sh <repo> <patch…> [--wt <dir>]`** (a wrapper over
+`mutation.ts check`) runs the same classifier on a tree someone is still
+working in — the builder's worktree, or a human's checkout. It refuses an uncommitted tree, applies each patch,
 runs its selector, undoes the patch with `git apply -R`, prints the class
 the verdict would print, and exits 0 only when every patch is RED. The
 builder's rules tell it to run this on `.review-out/mutations/AC*-tdd-*.patch`
@@ -245,7 +245,7 @@ cd ~/work/fleet && setsid nohup bash -c 'bash launch.sh khaita 0NN; echo "exit=$
 target itself carries, on its integration branch:
 
 ```
-.fleet/config        sourced by lib.sh:load_repo — every key below
+.fleet/config        sourced by lib.sh:load_repo, for the TypeScript side too (ts/src/lib/config.ts runs it) — every key below
 .fleet/rules.md      optional, REPO_RULES: rules rendered into the builder's prompt
 .stories/TEMPLATE.md the shape a story takes; write-story.sh gives it to the agent
 .stories/ .review/ .blocked/   committed fleet state
@@ -397,11 +397,11 @@ commit. `docs/lessons.md` holds the rest.
 ```
 lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
 launch.sh           the launcher              run-queue.sh   the drain
-mutation.sh         the classifier's bash face check-mutation.sh  the same classifier, on a working tree
-ts/                 the TypeScript side: src/classifier.ts, src/lib/verdict.ts, src/lib/machine-block.ts, src/bin/ — run by node as is, no build
+mutation.sh         the classifier's bash face check-mutation.sh  the same classifier, on a working tree (wrapper over mutation.ts check)
+ts/                 the TypeScript side: src/classifier.ts, src/status.ts, src/lib/{config,verdict,machine-block,review}.ts, src/bin/{mutation,verdict,status}.ts — run by node as is, no build
 .nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
 write-story.sh      intent → story            lint-story.sh  mechanical checks against the story's base
-new-epic.sh         an epic branch            status.sh      what the fleet is doing
+new-epic.sh         an epic branch            status.sh      what the fleet is doing (wrapper over ts/src/bin/status.ts)
 merge.sh            story → epic, --land, --epic, MERGE_MODE
 revert.sh           undo a story's merge      reset.sh       back to the queue
 telegram.sh         send | poll — the notifications and the phone commands

@@ -17,7 +17,9 @@ against this checkout.
 - `repos/<name>.env` — the registry. One file per target repo, holding
   **only** `REPO_PATH=/abs/path`. Nothing else may live in it.
 - `<target>/.fleet/config` — the target's own settings, committed there and
-  sourced by `lib.sh:load_repo`: `BASE_BRANCH INSTALL_CMD VITEST_CMD
+  sourced by `lib.sh:load_repo` (the TypeScript side reads it through
+  `ts/src/lib/config.ts`, which runs `load_repo` in a child bash; nothing
+  parses the file): `BASE_BRANCH INSTALL_CMD VITEST_CMD
   BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR`, optional `REPO_RULES` (a markdown
   file, relative to the target, rendered into the agent prompts), optional
   `MERGE_MODE` (`direct`, the default, or `pr` — which requires `PR_CMD`;
