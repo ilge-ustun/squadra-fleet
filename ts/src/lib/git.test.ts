@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './proc.ts';
-import { branchExists, isAncestor, refExists, revListCount } from './git.ts';
+import {
+  add, branchExists, commit as gitCommit, diffNameOnly, fetch, isAncestor, mergeBase, pushQuiet, refExists, revListCount, revParse,
+  stagedIsEmpty, worktreeAdd, worktreeRemoveForce,
+} from './git.ts';
+import { existsSync } from 'node:fs';
 
 // One throwaway repo: base has two commits, story/1 branches from the first
 // and adds one, origin/base is a remote-tracking ref made without a remote.
@@ -66,5 +70,72 @@ describe('the queries status.sh makes', () => {
     expect(revListCount(root, 'story/1..base')).toBe(1);
     expect(revListCount(root, 'origin/base..story/1')).toBe(1);
     expect(revListCount(root, 'nope..base')).toBe(0);
+  });
+});
+
+// The operations launch.sh makes (launch.sh:95-112, 428-449, 573-606), on a
+// second repo with a real bare origin so fetch and push can be exercised.
+describe('the operations the launcher makes', () => {
+  let d2: string;
+  let repo: string;
+  let base1 = '';
+  const ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  function g(args: string[], cwd = repo): string {
+    const r = runSync('git', args, { cwd, env: ENV });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+  beforeAll(() => {
+    d2 = mkdtempSync(join(tmpdir(), 'fleet-git2-'));
+    repo = join(d2, 'repo');
+    runSync('git', ['init', '-q', '--bare', '-b', 'base', join(d2, 'origin.git')]);
+    runSync('git', ['init', '-q', '-b', 'base', repo]);
+    g(['config', 'user.name', 't']); g(['config', 'user.email', 't@t']);
+    writeFileSync(join(repo, 'a'), 'one\n'); g(['add', '-A']); g(['commit', '-qm', 'one']);
+    base1 = g(['rev-parse', 'HEAD']);
+    g(['remote', 'add', 'origin', join(d2, 'origin.git')]);
+    g(['push', '-q', '-u', 'origin', 'base']);
+  });
+  afterAll(() => { rmSync(d2, { recursive: true, force: true }); });
+
+  it('fetch: status back, nothing thrown; revParse; mergeBase and its empty answer', () => {
+    expect(fetch(repo, 'origin')).toBe(0);
+    expect(revParse(repo, 'HEAD')).toBe(base1);
+    expect(mergeBase(repo, 'HEAD', 'origin/base')).toBe(base1);
+    expect(mergeBase(repo, 'HEAD', 'origin/nope')).toBe('');
+  });
+
+  it('worktreeAdd -b from origin/<base>, then by existing branch, then --detach; remove --force', () => {
+    const wt = join(d2, 'wt-1');
+    expect(worktreeAdd(repo, wt, { newBranch: 'story/1', startPoint: 'origin/base' })).toBe(0);
+    expect(existsSync(join(wt, 'a'))).toBe(true);
+    expect(g(['rev-parse', '--abbrev-ref', 'HEAD'], wt)).toBe('story/1');
+    writeFileSync(join(wt, 'b'), 'two\n'); g(['add', '-A'], wt); g(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'two'], wt);
+    const head = g(['rev-parse', 'HEAD'], wt);
+    worktreeRemoveForce(repo, wt);
+    expect(existsSync(wt)).toBe(false);
+    expect(worktreeAdd(repo, wt, { branch: 'story/1' })).toBe(0);
+    expect(g(['rev-parse', 'HEAD'], wt)).toBe(head);
+    const rv = join(d2, 'wt-1-review');
+    expect(worktreeAdd(repo, rv, { detach: head })).toBe(0);
+    expect(g(['rev-parse', 'HEAD'], rv)).toBe(head);
+    expect(diffNameOnly(wt, `${base1}..${head}`)).toBe('b');
+    expect(revListCount(wt, `${base1}..${head}`)).toBe(1);
+    worktreeRemoveForce(repo, rv);
+    worktreeRemoveForce(repo, join(d2, 'never-existed'));       // both streams dropped, nothing thrown
+    expect(worktreeAdd(repo, join(d2, 'wt-x'), { newBranch: 'story/1', startPoint: 'origin/base' })).not.toBe(0);  // branch exists
+  });
+
+  it('add each path separately, stagedIsEmpty, commit, pushQuiet — the status commit (L-02)', () => {
+    expect(stagedIsEmpty(repo)).toBe(true);
+    writeFileSync(join(repo, 'a'), 'changed\n');
+    expect(add(repo, 'a')).toBe(0);
+    expect(add(repo, 'missing-path')).not.toBe(0);           // one missing pathspec fails that add alone
+    expect(stagedIsEmpty(repo)).toBe(false);
+    expect(gitCommit(repo, 'story(1): done')).toBe(0);
+    expect(stagedIsEmpty(repo)).toBe(true);
+    expect(g(['log', '-1', '--format=%s'])).toBe('story(1): done');
+    expect(pushQuiet(repo)).toBe(0);
+    expect(g(['rev-parse', 'base'], join(d2, 'origin.git'))).toBe(g(['rev-parse', 'HEAD']));
   });
 });
