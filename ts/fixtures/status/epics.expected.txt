@@ -1,0 +1,2 @@
+epic/done              1 story, 1 merged  [2min base[0m
+epic/test              2 stories, 1 merged  [33m2 ahead of base[0m  → merge.sh t --epic epic/test
