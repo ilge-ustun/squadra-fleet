@@ -1,0 +1,27 @@
+{
+  "round": "2",
+  "headSha": "430cfc13b2b4328285ddb4c3e4ed53b902194e33",
+  "roundCommits": "0",
+  "reviewedAt": "2026-09-23T12:00:00+02:00",
+  "baseline": {
+    "test": "GREEN",
+    "build": "GREEN",
+    "lint": "GREEN"
+  },
+  "timing": {
+    "build": "456",
+    "base": "61",
+    "review": "145",
+    "mut": "80",
+    "total": "801"
+  },
+  "builderModel": "claude-opus-5",
+  "reviewerModel": "gpt-5-codex",
+  "acs": "AC1 AC2 ",
+  "scope": "CLEAN",
+  "scopeHits": "",
+  "mutRows": "AC1 RED marker\nAC2 RED clock\n",
+  "probeRows": "probe-green.test.tsx GREEN\n",
+  "builderMsg": "fake builder did: commit (call 1)\n$HOME and `backticks` and $(echo not-run) and \\n and \\\\ stay as written\nEOF\nlast line",
+  "reviewerText": "fake review, call 2.\nfinding: none.\nVERDICT: PASS"
+}
