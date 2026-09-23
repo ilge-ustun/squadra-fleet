@@ -1,132 +1,143 @@
-# Fleet handoff — state as of 20 Sep 2026, midday
+# Fleet handoff — state as of 23 Sep 2026
 
 Autonomous coding-agent fleet. Its first and so far only target is
-`khaita-app`. Supersedes every earlier handoff. Read `docs/lessons.md`
-alongside this — L-01 … L-27 hold the findings this only summarises.
-
-**20 Sep, evening:** `docs/plans/2026-09-20-status-merge-epics.md` is
-landed — readable `/status` with titles and a derived landing state,
-`/merge` from the phone, `MERGE_MODE=direct|pr` per repo, epics named at
-creation (`new-epic.sh`), and a `README.md`. Its step 8 (khaita on `pr`
-mode) waits for the human's `glab auth login`. `README.md` is now the map;
-this file is the state.
-
-**22 Sep, afternoon:** from the `/insights` report — `check-mutation.sh`
-(the verdict's classifier, `mutation.sh`, callable by a builder on its own
-`tdd-` evidence; rules.md tells it to), the reviewer's attack and the
-verdict vocabulary in the builder's rules, `REVIEWER_MODEL`, khaita's
-test-environment traps in its `.fleet/rules.md`. And the coordinator as
-five harness-neutral skills (`skills/`, `install-skills.sh`,
-`docs/COORDINATORS.md`), so the fleet can be coordinated from Codex on a
-non-Anthropic model; trials go in `docs/coordinator-trials.md`.
+`khaita-app`. Supersedes every earlier handoff. `README.md` is the map,
+this file is the state, `docs/lessons.md` (L-01 … L-27) the reasons,
+`docs/COORDINATORS.md` the coordinator on other harnesses and models.
 
 **Orient by running things, not by trusting this file.** Numbers in prose rot
 (L-11). The commands that produce them:
 
 ```bash
-bash status.sh khaita             # every story: status, round, computed verdict, epic
-bash test-lib.sh                  # the harness's own suite; the count is on its last line
-git log --oneline -20
-git -C ~/work/khaita/khaita-app log --oneline develop -20
+cd ~/work/fleet
+bash status.sh khaita --bot --all     # every story: landing state, round, computed verdict
+bash test-lib.sh                      # the harness's own suite; the count is on its last line (644)
+git log --oneline -15
+git -C ~/work/khaita/khaita-app log --oneline develop -15
+systemctl --user is-active fleet-bot.service fleet-queue.service
 ```
+
+## What happened since the 20 Sep handoff
+
+- **21–22 Sep — `epic/pwa` built and landed.** Stories 012, 015, 016, 017,
+  018, 019 (the service worker rewritten: no more wrong-document fallback,
+  songs render offline from cached data with provenance, the 4 s timer
+  gone, a generated worker with a build id and versioned caches). Landed
+  into `develop` at `0450c02` with a green post-merge baseline. `epic/pwa`,
+  `epic/offline-pwa`, `epic/ui-polish` are all in `develop`.
+- **22 Sep — two fleet defects found in the field and fixed.**
+  `lint-story.sh` resolved citations against the checkout, not the story's
+  base (case 98). `/merge` from the phone ran inside a two-minute systemd
+  oneshot and was killed mid-flight, leaving worktrees behind; it now
+  detaches and answers when done (case 99).
+- **22 Sep — the `/insights` report, checked against every verdict.** Its
+  patch-mechanics advice was already structural here; what cost rounds was
+  the builder never seeing the reviewer's attack (20 of 24 FAIL rounds since
+  007 were probes RED or mutations surviving). Landed: `mutation.sh` +
+  `check-mutation.sh` (cases 100, 101), the reviewer's checks and the
+  verdict vocabulary in the builder's rules (102), `REVIEWER_MODEL` (103),
+  khaita's test-environment traps in `.fleet/rules.md`.
+- **22 Sep — the coordinator as skills.** Five harness-neutral
+  `skills/*/SKILL.md`, `install-skills.sh` (case 104), `AGENTS.md → CLAUDE.md`
+  in both repos, `docs/COORDINATORS.md`, `docs/coordinator-trials.md`. Both
+  Claude Code and Codex list the five. The coordinator is optional; the
+  fleet is autonomous from `ready` to `on epic`.
+- **22 Sep — `README.md` rewritten** as the complete documentation.
+- **23 Sep — decision: the harness migrates to TypeScript**, one seam at a
+  time, not now. §9.
+
+Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
+fast-forward. khaita `develop` is at `227b781`.
 
 ---
 
-## 0. Where things live (19 Sep 2026)
+## 0. Where things live
 
-The fleet is its own repository, `~/work/fleet` (`github.com/ilge-ustun/squadra-fleet`),
-and takes any repo it is pointed at. It is **never itself a target**.
+The fleet is its own repository, `~/work/fleet`
+(`github.com/ilge-ustun/squadra-fleet`), and takes any repo it is pointed
+at. It is **never itself a target**. The checkout is live: the timers run it.
 
 ```
-~/work/fleet/                       the harness: scripts at the root, prompts/, test/, systemd/
-  lib.sh                            FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
-  repos/<name>.env                  the registry — REPO_PATH=/abs/path and nothing else
-  .env.fleet  .bot-offset           machine-local, gitignored: the bot's token and cursor
+~/work/fleet/
+  lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
+  launch.sh              the launcher          mutation.sh        the classifier, shared
+  check-mutation.sh      the classifier on a working tree (a builder's, or yours)
+  run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh status.sh revert.sh reset.sh
+  telegram.sh            send | poll           render.sh          render_prompt()
+  prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
+  skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
+  install-skills.sh      links skills/ into ~/.claude/skills and ~/.codex/skills
+  test-lib.sh test/      the suite and the fakes (claude, codex, vitest, curl, npm)
+  systemd/               the two timer pairs, live since 20 Sep
+  repos/<name>.env       the registry — REPO_PATH=/abs/path and nothing else
+  .env.fleet .bot-offset machine-local, gitignored: the bot's token and cursor
+  AGENTS.md → CLAUDE.md  the same rules for Codex and Claude Code
+  docs/                  this file, lessons.md, COORDINATORS.md, coordinator-trials.md, plans/
 
-<target>/.fleet/config              the target's own settings, committed there, sourced by load_repo:
-                                    BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD
-                                    SEED_FILES PROBE_DIR, optional REPO_RULES (a markdown snippet
-                                    rendered into the agents' rules), optional MERGE_MODE
-                                    (direct, the default, or pr) with PR_CMD — README.md
-<target>/.stories .review .blocked  committed state, on the target's integration branch
-<target>/.runs .review-out          machine-local, gitignored in the target
+<target>/.fleet/config       BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES
+                             PROBE_DIR, optional REPO_RULES MERGE_MODE PR_CMD
+<target>/.fleet/rules.md     rendered into the builder's rules ({{REPO_RULES}})
+<target>/.stories .review .blocked   committed state, on the integration branch
+<target>/.runs .review-out           machine-local, gitignored
+<target>/AGENTS.md → CLAUDE.md
 ```
 
-Every entry point names its repo first: `launch.sh khaita 014`,
-`status.sh khaita`, `merge.sh khaita 014`, `new-epic.sh khaita search`,
-`run-queue.sh khaita` or `run-queue.sh --all`. Telegram commands too:
-`/promote khaita 013`, `/merge khaita epic/ui-polish`. A
-variable in the caller's environment wins over `.fleet/config`; a missing
-file or key is a `die`. Two registered repos may not share a parent
-directory (their `../wt-<id>` worktrees would collide) — `load_repo` refuses.
-`.fleet/*` is always scope-denied to a builder, because the harness sources it.
+Every entry point names its repo first. A variable in the caller's
+environment wins over `.fleet/config`; a missing file or key is a `die`. Two
+registered repos may not share a parent directory. `.fleet/*` is always
+scope-denied to a builder.
 
-**Runner contract, stated as a limitation:** `VITEST_CMD` must accept
-`<selector> --reporter json --outputFile <f>` and write vitest's JSON shape
-(`numTotalTests`, `numFailedTests`); the baseline and the mutation runner read
-that. Another runner needs an adapter, not just a different command string.
+**Runner contract, a limitation:** `VITEST_CMD` must accept
+`<selector> --reporter json --outputFile <f>` and write vitest's JSON shape.
+Another runner needs an adapter (§9 is where that adapter would be written).
 
 ---
 
-## 1. Branches
+## 1. Branches (khaita)
 
 ```
-main                        5a16624
-└── develop                 ← integration. FLEET STATE LIVES HERE ONLY.
-     │                        Fast-forwards to main. The checkout sits here.
-     ├── epic/offline-pwa   ← stories 012, 013 target this
-     ├── epic/search        ← nothing yet (items 4, 5 in §6)
-     ├── epic/ui-polish     ← story 011 merged here
-     └── epic/shazam        ← nothing yet; a project, not a story
-          └── story/NNN     ← the launcher cuts these from the story's base:
+main
+└── develop  227b781        ← integration. FLEET STATE LIVES HERE ONLY. The checkout sits here.
+     ├── epic/offline-pwa   013            — in develop
+     ├── epic/ui-polish     011            — in develop
+     ├── epic/pwa           012, 015–019   — in develop at 0450c02
+     ├── epic/search        nothing yet
+     └── epic/shazam        nothing yet; a project, not a story
 ```
 
-`develop` carries `.stories/`, `.review/`, `.fleet/`. Epic branches carry
-**product code only** — a story branch never receives fleet state, because
-the story text reaches both agents in their prompt rather than as a file in
-the worktree (§3). The harness itself is not in the target at all (§0). Epics drift from `develop` as fleet work
-continues; that is normal and merges cleanly.
-
-A story names its epic with `base:` in frontmatter. Omitted, it uses the
-target's `BASE_BRANCH` (`develop`, in khaita's `.fleet/config`).
-
-`develop` was brought up to date on 18 Sep with `git merge -s ours` from the
-PWA line, **not** a force-push: its twelve stale commits (Feb–May 2026) stay
-reachable, nothing was rewritten, and no `--force` was needed. `feat/pwa`
-still exists, identical to `develop`.
+Epic branches carry product code only; a story branch never receives fleet
+state, because the story text reaches the agents in their prompt. No
+worktrees exist; nothing is in flight. **`develop` has not been deployed
+since `epic/pwa` landed** — §6 item 1.
 
 ---
 
 ## 2. Infrastructure
 
-**VPS:** Ubuntu 24.04, 2 CPU / 3.9 GB / 60 GB + 8 GB swap, `179.237.101.204`.
+**VPS:** Ubuntu 24.04, 2 CPU / 3.8 GB / 60 GB + 8 GB swap, `179.237.101.204`.
 Users `ubuntu` (admin), `fleet` (agents, `~/work/khaita/khaita-app`), `hermes`.
 
-**Installed under `fleet`:** Claude Code 2.1.263 (`~/.local/bin/claude`),
-Codex 0.153.4 and Node 24 under nvm, jq. Neither agent is on a systemd unit's
-default PATH — `systemd/fleet-queue.service` sets it explicitly. `gh` 2.101.0
-and `glab` 1.118.0 are in `~/.local/bin` since 20 Sep (release tarballs,
-checksums verified); neither is logged in yet — that is the human's
-`gh auth login --with-token` / `glab auth login --hostname gitlab.com --token`.
+**Installed under `fleet`:** Claude Code 2.1.274, Codex 0.153.4, Node 24
+under nvm, jq, `gh` 2.101 and `glab` 1.118 in `~/.local/bin` (neither
+logged in — the human's step). No Gemini CLI, no OpenCode, no local models
+(the RAM rules them out).
 
-**Remotes and keys (20 Sep):** this repo pushes to
-`github.com/ilge-ustun/squadra-fleet` through a write-enabled deploy key,
-`~/.ssh/id_squadra_fleet`, bound to the host alias `github.com-squadra-fleet`
-in `~/.ssh/config` so it is never offered elsewhere. khaita keeps its GitLab
-deploy key (`~/.ssh/id_deploy`). Deploy keys can push; they cannot open a
-pull request — that is what the `gh`/`glab` tokens in the plan are for.
+**Remotes and keys:** this repo pushes to `squadra-fleet` through a
+write-enabled deploy key bound to the host alias `github.com-squadra-fleet`.
+khaita keeps its GitLab deploy key. Deploy keys push; they cannot open a
+request — that is what the `gh`/`glab` tokens are for.
 
-**Memory, measured:** an interactive Claude Code session on this host is
-**~530 MB**; Hermes ~694 MB; system ~120 MB. ~1.4 GB is committed before the
-fleet starts and a Next build peaks near 1.4 GB. **Never run the launcher as a
-child of the session driving it** — the tool's own low-memory policy killed one
-mid-builder on 17 Sep. Detached, always:
+**Memory, measured:** an interactive Claude Code session is ~530 MB; a Next
+build peaks near 1.4 GB. **Never run a launcher as a child of the session
+driving it** — the session's low-memory policy killed one mid-builder on
+17 Sep. Detached, always:
 
 ```bash
 cd ~/work/fleet && setsid nohup bash -c 'bash launch.sh khaita 0NN; echo "exit=$?"' > log 2>&1 < /dev/null &
 ```
 
-Two agents plus a Next build at once left ~1.0 GB free. It held, but only just.
+A coordinator on any harness starts no launcher at all: it promotes, and
+the queue timer or a human's `/run` does the rest.
 
 ---
 
@@ -135,265 +146,198 @@ Two agents plus a Next build at once left ~1.0 GB free. It held, but only just.
 ### Pipeline
 
 ```
-intent (a sentence)
-  → write-story.sh <repo> <id> "<intent>"
-                          Opus 5, read-only worktree at the epic's tip,
-                          writes .stories/<id>.md at status: draft
-  → lint-story.sh <repo> <id>
-                          mechanical: cited paths exist and lines are in range,
-                          ACs are **ACn-headed, base: is a real branch; warns on
-                          an unquantified every/all/any and on baseline ACs
-  → a human reads it and sets status: ready
-        — at a terminal, or /promote <repo> <id> from a phone
-  → launch.sh <repo> <id>  (or run-queue.sh <repo>|--all for the whole queue)
-       zero **ACn headings → needs_human before any agent runs
-       worktree ../wt-<id> cut from origin/<base:>, SEED_FILES copied in
-       builder (claude -p, prompt on stdin, AGENT_TIMEOUT)
-         → hands over .review-out/mutations/ACn-tdd-*  (its "observed red")
-       postcondition: commits OR handed-over evidence; .blocked/ checked first
-       clean reviewer worktree detached at the builder's head
-       ★ BASELINE   VITEST_CMD (JSON) / BUILD_CMD / LINT_CMD → evidence
-       ★ SCOPE      changed paths vs scope_deny globs, .fleet/* always → evidence
-       reviewer (codex exec, prompt on stdin, AGENT_TIMEOUT)
-         → .review-out/mutations/ACn-* and optional .review-out/probes/*
-       ★ reviewer's tree must be clean apart from .review-out/, else needs_human
-       ★ MUTATION RUNNER  per patch: pre-run green? apply, run, classify,
-                          restore, verify clean
-       ★ PROBE RUNNER     each probe run against the tree as it stands
-       ★ COMPUTE VERDICT
-  → .review/<id>.md + .review/<id>/round-N/ committed with the status
-       stopped (needs_human | blocked) → the launcher notifies, with the
-                                          command that answers it
-  → merge.sh <repo> <id>   (the QUEUE calls this on a computed PASS; a
-                            hand-run launcher never changes a branch)
-       refuses anything but a computed PASS on an epic/* base
-       merges in a throwaway worktree, runs the baseline on the MERGED result,
-       and pushes only if that is green (MERGE_MODE=direct); with
-       MERGE_MODE=pr it pushes the branch and runs PR_CMD instead — the
-       host merges, nothing is recorded
-       → notifies: "merged → epic/x  ·  undo: /revert <repo> <id>"
-  → a human lands on the integration branch, never the queue:
-       merge.sh <repo> --epic epic/x       an epic      — /merge <repo> epic/x
-       merge.sh <repo> <id> --land         a story based on it — /merge <repo> <id>
-       same baseline; main/master refused with or without --land
+intent → write-story.sh <repo> <id> "<intent>" [--base epic/<name>]
+           Opus 5, throwaway worktree at the epic's tip, writes .stories/<id>.md at draft
+       → lint-story.sh <repo> <id> [--strict]
+           citations resolved against the story's BASE; **ACn headings; base is BASE_BRANCH or epic/*
+       → the coordinator (optional) reads, edits, lints, commits `story(<id>): draft`
+       → a human sets status: ready — /promote <repo> <id>
+       → the queue (every 15 min) → launch.sh <repo> <id>
+           worktree ../wt-<id> from origin/<base>, SEED_FILES copied in
+           builder: claude -p on stdin; rules carry the reviewer's checks, the verdict
+             vocabulary, and `check-mutation.sh` to run on its own ACn-tdd-* evidence
+           postcondition: commits or handed-over evidence; .blocked/ checked first
+           reviewer worktree detached at the builder's head
+           ★ BASELINE  ★ SCOPE
+           reviewer: codex exec on stdin (REVIEWER_MODEL → -m); mutations + optional probes
+           ★ tree clean apart from .review-out/, else needs_human
+           ★ MUTATION RUNNER (mutation.sh)  ★ PROBE RUNNER  ★ COMPUTED VERDICT
+       → .review/<id>.md + .review/<id>/round-N/ committed; a stop notifies with its command
+       → merge.sh <repo> <id>   the queue, on a computed PASS, story → its epic (post-merge baseline)
+       → a human: merge.sh --epic / <id> --land, or /merge from the phone (detached)
 ```
 
 ### The verdict
 
 ```
-machine_pass := baseline green ∧ scope CLEAN
-              ∧ every **ACn has ≥1 mutation ∧ every mutation RED
-              ∧ no probe RED
-final := SPEC if the reviewer said SPEC
-       | PASS if machine_pass ∧ the reviewer said PASS
-       | FAIL otherwise, every failing condition named on `computed:`
+machine_pass := baseline green ∧ scope CLEAN ∧ every **ACn has ≥1 mutation
+              ∧ every mutation RED ∧ no probe RED
+final := SPEC if the reviewer said SPEC | PASS if machine_pass ∧ reviewer PASS | FAIL otherwise
 ```
 
-**The machine can veto, never grant.** Mutation classes: `RED` (a real
-failure), `GREEN` (survived — for that behaviour the instrument is absent),
-`NO_TESTS` (zero collected: the mutation broke compilation; never RED),
-`PRE_RED` (already failing unmutated), `SELECTOR_INVALID` (collected no tests
-even unmutated), `PATCH_INVALID`, `NO_SELECTOR`. **A
-probe is the inverse — RED means it found something, so RED vetoes.** Probes
-are optional: requiring one is a check that cannot go red.
-
-### Files
-
-```
-lib.sh                 sourced first by every script: FLEET_HOME, load_repo,
-                       story_field/set_story_field, procs_in_worktree, log/warn/die
-launch.sh              the launcher; <repo> --reap runs reap_orphans and exits
-run-queue.sh           drains every ready story of <repo>, or --all; reaps first; --max N
-write-story.sh         intent → draft story (STORY_MODEL, default claude-opus-5)
-lint-story.sh          mechanical story checks; --strict makes warnings fatal
-status.sh              read-only; the epics, then one line per story with its
-                       title and derived landing state; --json, --epics, --bot
-new-epic.sh            origin/epic/<name> from the integration branch — the one
-                       way an epic is created; write-story --base and lint-story
-                       accept nothing but epic/*
-merge.sh               story → its epic, or --epic <name> / <id> --land → the
-                       integration branch (a human's call); post-merge baseline
-                       before any push; records the merge sha in the story;
-                       MERGE_MODE=pr opens a request through PR_CMD instead
-revert.sh              undoes that merge by story id
-reset.sh               clears a story back to the queue; refuses if live or
-                       unmerged without --force
-telegram.sh            send | poll — the notification and the control plane
-test-lib.sh            the suite; fake agents in test/; re-executes under env -i
-render.sh              render_prompt(); {{STORY}} {{INTENT}} {{STORY_BASE}}
-                       {{REPO_RULES}} {{VITEST_CMD}} …
-prompts/*.md           rules, build-round{1,2}, build-after-spec, review,
-                       write-story, README (the verdict contract)
-repos/<name>.env       the registry (§0)
-systemd/               two timer + oneshot pairs (queue, bot), NOT installed —
-                       see its README, and .env.fleet for the bot's token
-<target>/.fleet/       config (+ rules.md) — the target's side of the contract (§0)
-<target>/.stories/<id>.md       spec; frontmatter status/round/base/scope_deny/model,
-                                plus merged: written by merge.sh
-<target>/.review/<id>.md        summary; `verdict:` on line 3; ### Machine per round
-<target>/.review/<id>/round-N/  committed evidence: baseline, scope, mutations, probes,
-                                reviewer.md, reviewer.stderr, builder.md/.json
-<target>/.runs/                 raw JSON and logs — machine-local, gitignored
-```
+**The machine can veto, never grant.** Classes: `RED` `GREEN` `NO_TESTS`
+`PRE_RED` `SELECTOR_INVALID` `PATCH_INVALID` `NO_SELECTOR`; a probe RED
+vetoes. The classifier is `mutation.sh`; `check-mutation.sh <repo> <patch…>
+[--wt <dir>]` runs it on a committed working tree, restores with
+`git apply -R`, exits 0 only on all-RED. The Machine block records
+`builder:` and `reviewer:` models.
 
 ### Seams
 
-Fleet-level, `${X:-default}` in the scripts: `BUILDER_MODEL` `STORY_MODEL`
-`REVIEWER_MODEL` (empty: codex's own default; else `codex exec -m`) `MAX_TURNS` `MAX_ROUNDS` `AGENT_TIMEOUT` `PUSH_STATUS` `REVIEW_ONLY`
-`FLEET_NOTIFY_CMD` `AUTO_MERGE` `FLEET_LOCK_WAIT` `QUEUE_START_CMD`
-`FLEET_REGISTRY_DIR`.
-
-Per-target, from `.fleet/config` with **no** fleet-level default: `BASE_BRANCH`
-`INSTALL_CMD` `VITEST_CMD` `BUILD_CMD` `LINT_CMD` `SEED_FILES` `PROBE_DIR`
-`REPO_RULES`. The caller's environment overrides the file.
-
-A story's `model:` overrides `BUILDER_MODEL` for that story alone.
-
-`REVIEW_ONLY=1` skips the builder and the commit postcondition — for when
-`needs_human` was a spec defect rather than a build defect. It earned itself
-on story 008 the day it landed.
+Fleet-level: `BUILDER_MODEL` (`claude-sonnet-4-6`; a story's `model:`
+overrides) `STORY_MODEL` (`claude-opus-5`) `REVIEWER_MODEL` (empty = codex's
+default) `MAX_TURNS` (60) `MAX_ROUNDS` (2) `AGENT_TIMEOUT` (1800) `PUSH_STATUS`
+`REVIEW_ONLY` `AUTO_MERGE` `FLEET_NOTIFY_CMD` `FLEET_LOCK_WAIT` `QUEUE_START_CMD`
+`FLEET_REGISTRY_DIR`. Per-target, from `.fleet/config`, no fleet default.
 
 ---
 
 ## 4. Unattended
 
-`run-queue.sh <repo>` drains one repo's queue: reaps orphans first, runs every
-`ready` story, and a stopped story does not stop the queue. Guards: `--max`
-(default 20), and it stops if a story returns to `ready` without finishing.
-`run-queue.sh --all` does that for every registered repo, one process each.
-
-**Crash resume works and is tested** (`test-lib` case 42). A power cut leaves a
-story at `in_progress` with a worktree holding the builder's commits; the next
-drain reaps it, reuses the worktree, and continues rounds from the frontmatter
-rather than restarting at one.
-
-**`AGENT_TIMEOUT`** (1800s) wraps both agent calls in `timeout -k 30`. On
-timeout the story goes to `needs_human` naming the timeout. Children may
-outlive the kill (L-04) — the next run's `procs_in_worktree` finds them and
-refuses to start, which is correct.
-
-**Notifications and the control plane.** `telegram.sh` is both: the fleet
-sends through `FLEET_NOTIFY_CMD` (the launcher when a story stops, the queue
-when one merges), and reads commands back by polling `getUpdates` — a pull,
-because the box has no public endpoint. Commands:
-`/status <repo>` `/why <repo> <id>` `/promote <repo> <id>` `/answer <repo>
-<id> <text>` `/merge <repo> <id>|epic/<name>` `/revert <repo> <id>` `/run`.
-`/status` arrives as a code block with titles, split over several messages
-when it cannot fit. Only messages from `TELEGRAM_CHAT_ID` are acted on
-and nobody else gets a reply at all. The token
-goes in `.env.fleet` at the fleet repo root, never in a target — a target's
-seed files are copied into every agent worktree.
-
-Nothing in the notifier can fail a run. Unconfigured, it warns and returns 0.
-
-**systemd is live since 20 Sep 11:45.** Both pairs are symlinked from
-`~/work/fleet/systemd` into `~/.config/systemd/user`, `Linger=yes`, the queue
-timer fires every 15 min running `run-queue.sh --all --max 5`, the bot polls
-every minute. `.env.fleet` holds the @BotFather token and chat id (mode 600).
-`journalctl --user -u fleet-queue --since today` is where a drain's story is.
+`run-queue.sh --all --max 5` every 15 minutes: reaps orphans, runs every
+`ready` story lowest id first, merges each computed PASS into its epic. A
+stopped story does not stop the queue. Crash resume is tested (case 42).
+`AGENT_TIMEOUT` wraps both agent calls. The bot polls every minute:
+`/status /status-all /why /promote /answer /merge /revert /run /repo /help`;
+only `TELEGRAM_CHAT_ID` is answered. `/merge` detaches and reports when the
+post-merge baseline ends. Nothing in the notifier can fail a run.
 
 ---
 
 ## 5. Stories
 
-Run `bash status.sh khaita` rather than trusting this table.
+Run `bash status.sh khaita --bot --all` rather than trusting this table.
 
-| id | what | state |
+| id | what | outcome |
 |---|---|---|
-| 002, 003 | favourite icon fill; mykhaita tab wrap | done, merged |
-| 004 | offline collection loading | **retired 18 Sep** — superseded, not completed. Its three findings were extracted into 005/006/009; its remaining work rested on a primary-lease theory its own reviewer refuted from the SDK source and the browser evidence contradicts. See the story's Retired section. |
-| 005 | Firestore persistence was never enabled | done by hand, `round: 0` |
-| 006 | an empty snapshot wrote `undefined` | done |
-| 007 | `public/sw.js` had no instrument that could go red | done, **merged over a FAIL** by human decision; reasons and per-round tallies in the story's Outcome section. 8 rounds. |
-| 008 | argument-sensitive stubs | done, PASS in 3 |
-| 009 | the collection page's test mocked away the collection | done, PASS in 1 |
-| 010 | "still loading" vs "loaded and empty" | done, PASS in 3 |
-| 011 | theme toggle icons | done, PASS in 1, **merged into `epic/ui-polish`** |
-| 012 | "new version available" | **draft** — needs a decision, §6. **Reproduced live on 20 Sep:** a stale `ThemeSwitch` chunk served by `sw.js`'s cache survived a `.next` wipe in dev — exactly the stale-asset mechanism the story describes |
-| 013 | offline chip stuck on | done, **PASS in 1**, **the first round run from `~/work/fleet` and the first auto-merge** — promoted from the phone, drained by the timer, merged into `epic/offline-pwa` at `23e5751` with a green post-merge baseline. **Human-verified in a browser on 20 Sep** (short blip, long outage, lie-fi): working. Analysis of the round is in this session's log; the review is `.review/013.md`. Left behind: the `../wt-013` worktree, harmless |
-| 014 | the queue refreshes from origin | done, **PASS in 4**, merged into `develop`. Round 3 was vetoed by the harness's own bug (L-27); round 4 was `REVIEW_ONLY=1` and all ten mutations went RED |
+| 002–003, 005–006, 008–010 | early fixes, the instruments, loading vs empty | landed on `develop` |
+| 004 | offline collection loading | retired 18 Sep; findings extracted into 005/006/009 |
+| 007 | `sw.js` had no instrument that could go red | landed over a FAIL by human decision, 8 rounds |
+| 011 | theme toggle icons | `epic/ui-polish`, R1, in develop |
+| 013 | offline chip stuck on | `epic/offline-pwa`, R1, in develop; the first auto-merge |
+| 014 | the queue refreshes from origin | develop, R4 (round 3 was the harness's own bug, L-27) |
+| 012 | the update banner and a build-stamped registration | `epic/pwa`, R8 — six rounds were reviewer probes |
+| 015 | offline, an unvisited URL rendered another page's document | R5 |
+| 016 | a song URL is a dead end offline though the device holds the song | R4, opus |
+| 017 | the 4 s timer replaced by `fromCache`-driven states | R2, opus; the writer found the listener lacked `includeMetadataChanges` |
+| 018 | a partially-held song shows what it has, with provenance | R2, opus |
+| 019 | generated worker, build id, versioned caches | R2, opus; in develop at `0450c02` |
 
-**Round yield is governed by the bounded domain, not the AC count** (L-20):
-5 unbounded ACs → 8 rounds; 2 ACs with one unbounded "every" → 3; 2 bounded
-ACs → 1; 013's 3 bounded ACs → 1. Its round cost: builder 468 s and $1.39
-(34 turns), reviewer 155 s, 7 mutations all RED in 30 s, 1 probe GREEN.
+Rounds per story since the builder's rules gained the reviewer's attack:
+none run yet — the next story's round count is the first data point for A2.
 
 ---
 
 ## 6. What needs a human, in order
 
-1. **Log `glab` in** (`glab auth login --hostname gitlab.com --token`, a
-   project access token on khaita-app with `api` scope, Developer role), then
-   step 8 of the plan: `MERGE_MODE=pr` and the `PR_CMD` from `README.md` in
-   khaita's `.fleet/config`, and one `/merge` by hand to see the URL come
-   back. `gh auth login --with-token` likewise when a GitHub target exists.
-2. **Land `epic/ui-polish`** (011, waiting since 18 Sep) and
-   **`epic/offline-pwa`** (013, verified) into `develop`:
-   `bash merge.sh khaita --epic epic/ui-polish`, same for `epic/offline-pwa`.
-   Both run the post-merge baseline. From the phone: `/merge khaita epic/…`.
-3. **Story 012** — its root cause is that `public/sw.js` bytes never change on
-   deploy, so no new worker installs and the banner is **unreachable**, not
-   badly made. Now observed for real (§5). Fixing it properly means versioning
-   or stamping `sw.js` at build time, which also fixes `/manifest.json` and
-   the icons never refreshing for returning users. That reaches into how the
-   app builds. Read its ACs before promoting; add the 20 Sep observation to
-   its Evidence.
-4. **The remaining khaita items** — mobile search and lyrics-language defaults
-   on `epic/search`; "shazam" needs decomposing before it is a story.
+1. **Deploy khaita** — `npm run deploy` from `develop`, human only. This is
+   the first deploy carrying the generated worker: expected on a phone that
+   has the old build — the worker is replaced by byte comparison, the
+   "new version available" banner shows, and `khaita-shell-v1` is retired on
+   activation. If the banner does not show, story 019's Human verification
+   section says what to look at.
+2. **Log `glab` in** (`glab auth login --hostname gitlab.com --token`, a
+   project token on khaita-app, `api` scope, Developer role), then
+   `MERGE_MODE=pr` and the `PR_CMD` from `README.md` in khaita's
+   `.fleet/config`, and one `/merge` to see the URL come back.
+3. **The first coordinator trial on Codex.** Before it: from inside a
+   `codex -C ~/work/khaita/khaita-app --add-dir ~/work/khaita --add-dir
+   ~/work/fleet -s workspace-write -c sandbox_workspace_write.network_access=true`
+   session, check once that `git push` and `bash write-story.sh` work. Then
+   the protocol in `docs/COORDINATORS.md`; the row goes in
+   `docs/coordinator-trials.md`. A good first intent: the asset cache in
+   khaita's worker grows across deploys (item 4).
+4. **Next khaita stories:** the unbounded asset cache (`khaita-assets` is
+   never retired; 019's known follow-up); mobile search and
+   lyrics-language defaults on `epic/search`; "shazam" needs decomposing.
 
 ---
 
 ## 7. Harness gaps still open
 
-- **Auto-merge has run once** (013 → `epic/offline-pwa`, 20 Sep) and did
-  what the suite said it would. One data point; the next few are still worth
-  reading in the journal.
-- **The bot is live and has handled `/promote`.** `/status` is a code block
-  with titles since 20 Sep; `/merge` exists but has not yet been sent for
-  real — the first one is item 2 above, and worth reading in the journal.
-- **`.blocked/` has never fired from a builder** in fourteen stories. The
-  story-writer escalates instead — 011 raised a product question and refused to
-  decide — and intake is arguably the right place for it (L-24). The path is
-  covered by `test-lib`; the field has never exercised it.
-- **The harness is verified by hand.** Since 19 Sep it is its own repo and
-  never a target, so no round can touch it and the self-test branch is gone
-  (L-26, L-27). `bash test-lib.sh` before every commit there is the whole of
-  the discipline; nothing enforces it.
+- **A lock around story selection.** A manual `launch.sh` and a queue drain
+  can both claim the same story. The queue lock covers drains only.
+- **Pre-commit hooks in the builder session** (second wave): a
+  `PreToolUse` hook on `git commit` running `VITEST_CMD` would have saved
+  019's round 1 (baseline test and build RED). Decide after a few stories
+  show whether A2 already brought rounds down.
 - **`next_ready` in `launch.sh` does not skip `TEMPLATE.md`** while
-  `run-queue.sh` does, and khaita's template says `status: ready`. A bare
-  `launch.sh khaita` with nothing ready would pick the template. Pre-existing;
-  worth its own story.
-- **Epics are only branch names, by design now.** `status.sh` derives
-  `awaiting merge` / `on epic` / `landed`, `new-epic.sh` creates them, and
-  the name is enforced at creation. Stories 002 and 003 show `done`, not
-  `landed`: they were merged by hand, their branches are gone and no
-  `merged:` sha was recorded — the derivation has nothing to read.
-- **Lanes.** One, still. The lock (C4) makes two safe; whether two fit is a
-  memory question, and the timing line now in every Machine block is what will
-  answer it. The trigger, stated in advance: ≥3 stories `ready` for a day, and
-  peak RSS under 1.2 GB per lane.
+  `run-queue.sh` does. Pre-existing; worth its own story.
+- **`.blocked/` has never fired from a builder** in nineteen stories; the
+  writer escalates instead. Covered by `test-lib`, never exercised.
+- **Lanes.** One. The trigger, stated in advance: ≥3 stories `ready` for a
+  day and peak RSS under 1.2 GB per lane. Needs the selection lock first.
+- **Codex quota.** `REVIEWER_MODEL` exists now; nothing falls back
+  automatically when the reviewer's model is out of quota.
+- **The bash ceiling.** `die` inside `$(…)` ends only the subshell (why
+  `classify_mutation` returns through a global), quoting slips, the
+  edit-while-running hazard, 22 `jq` calls parsing two CLIs' output. Not a
+  defect today; the reason for §9.
 
 ---
 
 ## 8. Conventions worth preserving
 
-- One task, one commit. Show `git status --short` with each.
-- **Show the `launch.sh` diff before applying it.**
-- Every AC names its instrument and the mutation that turns it red.
-- **Bound the domain of every AC** (L-20) and **claim only what you instrument**
-  (L-25).
-- State the instrument's weakness in the story rather than letting the reviewer
-  find it.
-- Read the current file, never a diff hunk (L-09).
-- A check that cannot go red is absent, not weak — and a check that cries wolf
-  is worse than no check (`lint-story`'s first version: 20 false positives,
-  zero findings).
-- Prompts on stdin, never argv (L-18).
-- Kill by cwd or by exact process name, never by a `pkill -f` pattern that can
-  match your own command line.
-- Never edit `launch.sh` while a launcher is running it.
-- `bash test-lib.sh` green before every commit in the fleet repo.
-- Never suppress stderr on a step that can fail meaningfully; stderr is
-  evidence (`reviewer.stderr`).
-- `--sandbox danger-full-access` for Codex: bwrap cannot create net namespaces
-  here; isolation comes from the worktree and the unprivileged user.
+- One task, one commit. `git status --short` with each. `bash test-lib.sh`
+  green before every commit; a case observed red first.
+- Edit the fleet in a worktree; fast-forward `main` only with both units
+  inactive. Show the `launch.sh` diff before applying it; never edit it
+  while a launcher runs.
+- Every AC names its instrument and the mutation that turns it red. Bound
+  the domain (L-20). Claim only what you instrument (L-25). State the
+  instrument's weakness in the story.
+- Read the current file, never a diff hunk (L-09). Prompts on stdin (L-18).
+- A check that cannot go red is absent, not weak; a check that cries wolf is
+  worse than none.
+- Kill by cwd or exact name, never `pkill -f`. Never suppress stderr on a
+  step that can fail meaningfully.
+- Tokens are the human's: `.env.fleet` mode 600 at the fleet root, CLI
+  logins in the CLIs' own config, never in a target or a repo.
+- A coordinator starts no launcher, promotes nothing, lands nothing.
+
+---
+
+## 9. Future: migration to TypeScript
+
+**Decision (the human's, 23 Sep 2026): the harness moves from bash to
+TypeScript.** Reason: the fleet will mainly build web apps, and TypeScript
+is the human's main language — one toolchain across harness and targets.
+
+**For it:** one language and one toolchain (tsc, eslint, vitest) shared
+with the targets, so a builder can be given a story about the harness
+itself without switching worlds; compile-time types on the two agent event
+streams and on verdict states — the class of bug the harness has actually
+had; async and streams as the language default, which is what parallel
+lanes need; the Anthropic and OpenAI agent SDKs in TS replace `claude -p |
+jq` and `codex exec --json | jq`, contracts instead of parsed stdout; Node
+is already on the box; the file is read whole before it runs, so the
+edit-while-running hazard disappears.
+
+**Against it:** ~2,700 lines of working, 644-assertion-tested bash would be
+rewritten, and rewrites regress; Node must exist on every box that runs the
+fleet, where bash always does; `subprocess`-style glue (git, npm, worktrees)
+is one pipe in bash and several lines with `execa`; async stack traces are
+harder to read than `set -x`; the pull of a framework that hides the
+control flow the bash version makes explicit.
+
+**How, when it starts — not a rewrite:**
+
+1. Keep `test-lib.sh` as the acceptance layer. It tests scripts through
+   `PATH` with fakes; a TS entry point with the same CLI passes the same
+   cases unchanged. Add vitest unit tests beside the TS code.
+2. One seam at a time, behind the existing contract, each landing green:
+   the classifier (`mutation.sh` + `check-mutation.sh` — newest, most
+   self-contained, and where a non-vitest runner adapter would live) →
+   verdict computation and the Machine block → `status.sh` → `launch.sh`
+   last, with the agent calls moved to the SDKs. `telegram.sh`, `merge.sh`,
+   `reset.sh`, `revert.sh` and the systemd side stay bash indefinitely.
+3. No framework. Standard library, `execa` at most; the control flow stays
+   as readable as the bash it replaces.
+4. Layout: `~/work/fleet/ts/` with its own `package.json`, built to
+   `dist/`, invoked by thin bash wrappers with the old names so nothing
+   downstream (the bot, the units, the skills, the docs) changes.
+
+**Trigger:** the first story that needs what bash is worst at — parallel
+lanes with the selection lock, or a second target whose runner is not
+vitest. Until then, no migration work; the current harness is sound and its
+next few stories should measure A2's effect on rounds.
