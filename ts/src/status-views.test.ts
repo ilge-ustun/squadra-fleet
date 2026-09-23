@@ -29,14 +29,17 @@ afterAll(() => {
 });
 
 const noProcs = { procsInWorktree: () => [] as string[] };
-function view(mode: ViewOptions['mode'], all = false, one?: string): ViewOptions {
-  return { mode, all, one, repoName: cfg.name, baseBranch: cfg.baseBranch };
+type Flags = Partial<Pick<ViewOptions, 'json' | 'epics' | 'bot'>>;
+const MODES: Record<string, Flags> = { default: {}, epics: { epics: true }, bot: { bot: true }, json: { json: true } };
+function view(mode: string, all = false, one?: string): ViewOptions {
+  const flags = mode.split('+').reduce<Flags>((f, m) => ({ ...f, ...MODES[m] }), {});
+  return { json: false, epics: false, bot: false, ...flags, all, one, repoName: cfg.name, baseBranch: cfg.baseBranch };
 }
 function golden(name: string): string {
   return readFileSync(join(FIXTURES, `${name}.expected.txt`), 'utf8');
 }
 
-describe('the seven views, byte for byte against the bash status.sh', () => {
+describe('the ten views, byte for byte against the bash status.sh', () => {
   it.each([
     ['default', 'default', false, undefined],
     ['epics', 'epics', false, undefined],
@@ -45,6 +48,9 @@ describe('the seven views, byte for byte against the bash status.sh', () => {
     ['json', 'json', false, undefined],
     ['one', 'default', false, '900'],
     ['bot-one', 'bot', false, '900'],
+    ['epics-bot', 'epics+bot', false, undefined],
+    ['json-bot', 'json+bot', false, undefined],
+    ['epics-json', 'epics+json', false, undefined],
   ] as const)('%s', (name, mode, all, one) => {
     const st = statusOf(cfg, one === undefined ? {} : { one }, noProcs);
     expect(renderStatus(st, view(mode, all, one))).toBe(golden(name));

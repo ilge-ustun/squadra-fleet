@@ -2629,6 +2629,42 @@ STUB
   assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the survivor is still in the table"
 }
 
+# One config loader. status.sh (and, from case 110, check-mutation.sh) run
+# as `node ts/src/bin/<x>.ts`, and the only way from there to the target's
+# .fleet/config is ts/src/lib/config.ts — which runs lib.sh's load_repo in a
+# child bash. Replace that module with one that throws and the entry point
+# must fail with its text; a bash status.sh never loads it and would answer
+# as usual. Then, with the real module, the things the wrapper must keep:
+# success is silent on stderr (telegram.sh merges stderr into the reply),
+# load_repo runs before the flag loop (an unknown repo exits 1 even with a
+# bad flag; a bad flag alone exits 2). Red while status.sh is bash.
+config_stub() {                       # config_stub — ts/src/lib/config.ts that throws on load
+  cat > "$FLEET/ts/src/lib/config.ts" <<'STUB'
+export class ConfigError extends Error { readonly alreadyReported = false; }
+export function loadRepo(_home: string, _name: string, _o?: unknown): never {
+  throw new Error('fleet-test: config stub reached');
+}
+STUB
+}
+case_109_status_through_the_loader() {
+  CASE="109 status.sh reaches the target through ts/src/lib/config.ts"; fixture c109
+  config_stub
+  local out rc err
+  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json 2>&1 )"; rc=$?
+  assert_contains "$out" "fleet-test: config stub reached" "status.sh --json went through the loader"
+  assert_eq "$rc" 1 "and failed with it"
+  fixture c109b
+  err="$FX/status.err"
+  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json "$STORY" 2>"$err" )"; rc=$?
+  assert_eq "$rc" 0 "the real loader: --json exits 0"
+  assert_eq "$(jq -r '.[0].id' <<< "$out")" "$STORY" "and names the story"
+  assert_eq "$(cat "$err")" "" "nothing on stderr on success"
+  ( cd "$FX" && bash "$FLEET/status.sh" t -x >/dev/null 2>&1 ); assert_eq "$?" 2 "an unknown flag exits 2"
+  ( cd "$FX" && bash "$FLEET/status.sh" nope -x >/dev/null 2>&1 ); assert_eq "$?" 1 "an unknown repo exits 1 before the flags are read"
+  out="$( cd "$FX" && bash "$FLEET/status.sh" nope 2>&1 )"
+  assert_contains "$out" "unknown repo 'nope'" "lib.sh's own die text reaches the caller"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2675,7 +2711,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
        case_103_reviewer_model case_104_install_skills
        case_105_fixture_excludes_node_modules case_106_one_classifier
-       case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict)
+       case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
+       case_109_status_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

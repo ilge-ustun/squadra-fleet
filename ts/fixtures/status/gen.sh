@@ -6,7 +6,7 @@
 # 14f675e. This runs that version — never the TypeScript, whatever
 # status.sh is today — on make-target.sh's target, under the suite's
 # locale (test-lib.sh:58: C.UTF-8, where bash counts characters), and
-# writes <view>.expected.txt. status-views.test.ts compares the TypeScript
+# writes <view>.expected.txt (ten views). status-views.test.ts compares the TypeScript
 # against these byte for byte.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,4 +29,7 @@ run bot-all --bot --all
 run json --json
 run one 900
 run bot-one --bot 900
+run epics-bot --epics --bot                  # the flags are independent: --epics wins, --bot shapes it
+run json-bot --json --bot
+run epics-json --epics --json
 echo "goldens written from status.sh@$BASH_STATUS_SHA"

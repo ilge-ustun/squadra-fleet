@@ -21,10 +21,14 @@ const ESC = {
 type Palette = { [K in keyof typeof ESC]: string };
 const NONE: Palette = { red: '', grn: '', ylw: '', dim: '', rst: '' };
 
-export type Mode = 'default' | 'epics' | 'bot' | 'json';
-
+/** status.sh:37-47,123-124,240,247: the three are independent flags. --epics
+ *  wins (the block and nothing else), then --json, then --bot; --bot also
+ *  turns colour off and puts the epic block in its phone form, even under
+ *  --epics. */
 export interface ViewOptions {
-  mode: Mode;
+  json: boolean;
+  epics: boolean;
+  bot: boolean;
   all: boolean;
   one: string | undefined;
   repoName: string;
@@ -56,7 +60,7 @@ export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): strin
   let out = '';
   for (const e of epics) {
     const word = e.total === 1 ? 'story' : 'stories';
-    if (o.mode === 'bot') {
+    if (o.bot) {
       out += `${e.name}\n  ${e.total} ${word}, ${e.merged} merged\n`;
       out += e.ahead > 0 ? `  ${e.ahead} ahead of ${o.baseBranch} → /merge ${o.repoName} ${e.name}\n` : `  in ${o.baseBranch}\n`;
       continue;
@@ -142,10 +146,10 @@ export function renderJson(rows: StoryRow[]): string {
 
 /** The whole of stdout for one invocation. */
 export function renderStatus(st: Status, o: ViewOptions): string {
-  const p: Palette = o.mode === 'bot' ? NONE : { ...ESC };
-  if (o.mode === 'epics') return renderEpics(st.epics, o, p) ?? 'no story names an epic\n';
-  if (o.mode === 'json') return renderJson(st.stories);
+  const p: Palette = o.bot ? NONE : { ...ESC };
+  if (o.epics) return renderEpics(st.epics, o, p) ?? 'no story names an epic\n';
+  if (o.json) return renderJson(st.stories);
   const epics = renderEpics(st.epics, o, p);
   const head = epics === undefined ? '' : `${epics}\n`;
-  return head + (o.mode === 'bot' ? renderBot(st.stories, st.detail, o) : renderTable(st.stories, st.detail, p));
+  return head + (o.bot ? renderBot(st.stories, st.detail, o) : renderTable(st.stories, st.detail, p));
 }
