@@ -673,75 +673,26 @@ while (( ROUND < ROUND_CEILING )); do
   run_mutations "$REVIEWER_WT" "$EVIDENCE_DIR"
   run_probes "$REVIEWER_WT" "$EVIDENCE_DIR"
   T_MUT=$(( SECONDS - T0 ))
-  MUT_TABLE="$(printf '%s' "$MUT_ROWS" | awk 'NF { printf "%-4s %-13s %s\n", $1, $2, $3 }')"
-  PROBE_TABLE="$(printf '%s' "$PROBE_ROWS" | awk 'NF { printf "%-13s %s\n", $2, $1 }')"
-
-  if   echo "$REVIEW_TEXT" | grep -qE '^VERDICT: PASS[[:space:]]*$'; then VERDICT="PASS"
-  elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: FAIL[[:space:]]*$'; then VERDICT="FAIL"
-  elif echo "$REVIEW_TEXT" | grep -qE '^VERDICT: SPEC[[:space:]]*$'; then VERDICT="SPEC"
-  else VERDICT="UNPARSEABLE"; fi
-
   # ── verdict ────────────────────────────────────────────────────────────────
   #
-  # The reviewer's line is one input. The machine may veto a PASS; it never
-  # grants one, and it never touches SPEC (the story is wrong, not the build).
-  #   baseline   test, build, lint all green
-  #   coverage   every AC in the story has at least one mutation
-  #   D1         every mutation is RED — a survivor means the instrument is
-  #              absent or the mutation is wrong, and either needs a human
-  MODEL_VERDICT="$VERDICT"
-  MACHINE_REASONS=""
-  [[ "$BASE_TEST"  == GREEN ]] || MACHINE_REASONS+="baseline test $BASE_TEST; "
-  [[ "$BASE_BUILD" == GREEN ]] || MACHINE_REASONS+="baseline build $BASE_BUILD; "
-  [[ "$BASE_LINT"  == GREEN ]] || MACHINE_REASONS+="baseline lint $BASE_LINT; "
-  [[ "$SCOPE" == CLEAN ]] || MACHINE_REASONS+="scope $SCOPE: ${SCOPE_HITS}; "
-  for ac in $AC_IDS; do
-    grep -q "^$ac " <<< "$MUT_ROWS" || MACHINE_REASONS+="$ac has no mutation; "
-  done
-  while read -r ac cls slug; do
-    [[ -n "$ac" && "$cls" != RED ]] && MACHINE_REASONS+="$ac $slug $cls; "
-  done <<< "$MUT_ROWS"
-  # A probe is the inverse of a mutation: RED means it FOUND something.
-  while read -r pname pcls; do
-    [[ -n "$pname" && "$pcls" == RED ]] && MACHINE_REASONS+="probe $pname RED; "
-  done <<< "$PROBE_ROWS"
-  if [[ -n "$MACHINE_REASONS" && "$VERDICT" == "PASS" ]]; then
-    VERDICT="FAIL"
-    warn "machine veto: $MACHINE_REASONS"
-  fi
-
-
-  cat >> "$REVIEW_FILE.new" <<EOF
-
-## Round $ROUND — $VERDICT
-
-head: $HEAD_SHA
-commits this round: $ROUND_COMMITS
-reviewed: $(date -Iseconds)
-
-### Machine
-
-baseline: test $BASE_TEST | build $BASE_BUILD | lint $BASE_LINT
-timing:   builder ${T_BUILD}s | baseline ${T_BASE}s | reviewer ${T_REVIEW}s | mutations ${T_MUT}s | total $(( SECONDS - T_ROUND ))s
-builder:  $BUILDER_MODEL
-reviewer: codex${REVIEWER_MODEL:+ $REVIEWER_MODEL}
-acs:      $AC_IDS
-scope:    $SCOPE${SCOPE_HITS:+ $SCOPE_HITS}
-model:    $MODEL_VERDICT
-computed: $VERDICT${MACHINE_REASONS:+ — $MACHINE_REASONS}
-${MUT_TABLE:+mutations:
-$MUT_TABLE
-}${PROBE_TABLE:+probes:
-$PROBE_TABLE}
-
-### Builder said
-
-$BUILD_MSG
-
-### Reviewer
-
-$REVIEW_TEXT
-EOF
+  # The rule is ts/src/lib/verdict.ts and the section's text is
+  # ts/src/lib/machine-block.ts; this hands over what the round produced and
+  # takes back one line. The builder's and reviewer's texts are the evidence
+  # files written above. The reviewer's line is one input; the machine may
+  # veto a PASS and never grants one.
+  VERDICT_LINE="$(jq -n --arg round "$ROUND" --arg head "$HEAD_SHA" --arg commits "$ROUND_COMMITS" \
+      --arg bt "$BASE_TEST" --arg bb "$BASE_BUILD" --arg bl "$BASE_LINT" \
+      --arg tb "$T_BUILD" --arg tbase "$T_BASE" --arg trev "$T_REVIEW" --arg tmut "$T_MUT" --arg ttot "$(( SECONDS - T_ROUND ))" \
+      --arg builder "$BUILDER_MODEL" --arg reviewer "$REVIEWER_MODEL" --arg acs "$AC_IDS" \
+      --arg scope "$SCOPE" --arg hits "$SCOPE_HITS" --arg mut "$MUT_ROWS" --arg probes "$PROBE_ROWS" --arg ev "$EVIDENCE_DIR" \
+      '{round:$round, headSha:$head, roundCommits:$commits, baseline:{test:$bt,build:$bb,lint:$bl},
+        timing:{build:$tb,base:$tbase,review:$trev,mut:$tmut,total:$ttot}, builderModel:$builder, reviewerModel:$reviewer,
+        acs:$acs, scope:$scope, scopeHits:$hits, mutRows:$mut, probeRows:$probes, evidenceDir:$ev}' \
+    | node "$FLEET_HOME/ts/src/bin/verdict.ts" --append "$REVIEW_FILE.new")" \
+    || die "round $ROUND: the verdict could not be computed — its message is above"
+  IFS=$'\t' read -r VERDICT MODEL_VERDICT MACHINE_REASONS <<< "$VERDICT_LINE"
+  case "$VERDICT" in PASS|FAIL|SPEC|UNPARSEABLE) ;; *) die "round $ROUND: not a verdict: '$VERDICT'" ;; esac
+  [[ "$MODEL_VERDICT" == PASS && "$VERDICT" == FAIL ]] && warn "machine veto: $MACHINE_REASONS"
 
   # What the next round's builder reads is the review so far — Machine block
   # and prose — exactly what a restart reloads from the file. One path.

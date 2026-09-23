@@ -2609,6 +2609,26 @@ case_107_probe_runner_failure_is_not_a_pass() {
   assert_grep 'probe runner' "$LOG" "the log says which runner failed"
 }
 
+# One verdict. The rule — reasons, veto — is ts/src/lib/verdict.ts and
+# nothing else; the launcher only carries the answer. Replace that file with
+# a rule that says PASS to everything and a round the real rule would veto
+# (a GREEN mutation under a reviewer PASS) must come out PASS, done, with an
+# empty computed line. Red while launch.sh still vetoes in bash.
+case_108_one_verdict() {
+  CASE="108 the launcher's verdict is computed by ts/src/lib/verdict.ts"; fixture c108
+  cat > "$FLEET/ts/src/lib/verdict.ts" <<'STUB'
+export function computeVerdict(_i: unknown): { model: 'PASS'; computed: 'PASS'; reasons: string[] } {
+  return { model: 'PASS', computed: 'PASS', reasons: [] };
+}
+STUB
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$RC" 0 "the launcher finished"
+  assert_eq "$(field status)" done "the stub's PASS stood"
+  assert_eq "$(review_line 3)" "verdict: PASS" "verdict line"
+  assert_grep '^computed: PASS$' "$REPO/.review/$STORY.md" "no reasons, no veto"
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the survivor is still in the table"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2655,7 +2675,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
        case_103_reviewer_model case_104_install_skills
        case_105_fixture_excludes_node_modules case_106_one_classifier
-       case_107_probe_runner_failure_is_not_a_pass)
+       case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
