@@ -2762,6 +2762,29 @@ case_112_reviewer_without_a_message() {
   assert_eq "$(cat "$ev/reviewer.md")" "(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)" "reviewer.md is the placeholder"
 }
 
+# One loader for the launcher too. launch.sh is `node ts/src/bin/launch.ts`
+# from seam 4 on, and its only way to the target's .fleet/config is
+# ts/src/lib/config.ts. With the stub in place the launcher must fail with
+# the stub's text before any agent runs; a bash launch.sh sources lib.sh,
+# reaches config.ts only through `mutation.ts classify`, whose import the
+# stub satisfies, and would run the story to done. Then the real thing: a
+# PASS run whose log carries no bin-level error and no stack frame. Red
+# while launch.sh is bash.
+case_113_launch_through_the_loader() {
+  CASE="113 launch.sh reaches the target through ts/src/lib/config.ts"; fixture c113
+  config_stub
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 1 "the stub's throw ends the launcher"
+  assert_grep 'fleet-test: config stub reached' "$LOG" "with its text"
+  assert_eq "$(calls claude)" 0 "before any agent ran"
+  fixture c113b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the real loader: a PASS run"
+  assert_eq "$(field status)" done "ends done"
+  assert_not_grep 'launch\.ts:' "$LOG" "no bin-level error in the log"
+  assert_not_grep '^ +at ' "$LOG" "no stack frames"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2811,7 +2834,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
        case_109_status_through_the_loader case_110_check_through_the_loader
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
-       case_112_reviewer_without_a_message)
+       case_112_reviewer_without_a_message case_113_launch_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
