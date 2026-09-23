@@ -32,3 +32,37 @@ export function isSelectorKind(s: string): s is SelectorKind {
 export function isRestore(s: string): s is Restore {
   return s === 'checkout' || s === 'reverse';
 }
+
+/** What a round concludes — the reviewer's word, and the machine's. */
+export type Verdict = 'PASS' | 'FAIL' | 'SPEC' | 'UNPARSEABLE';
+
+export type Colour = 'GREEN' | 'RED';
+
+/** The three baseline runs on the reviewer's tree. */
+export interface Baseline {
+  test: Colour;
+  build: Colour;
+  lint: Colour;
+}
+
+/** One line of launch.sh's MUT_ROWS: "ACn CLASS slug". cls is a string
+ *  because NO_SELECTOR, or nothing at all, can arrive from the bash side. */
+export interface MutRow {
+  ac: string;
+  cls: string;
+  slug: string;
+}
+
+/** One line of PROBE_ROWS: "name CLASS". */
+export interface ProbeRow {
+  name: string;
+  cls: string;
+}
+
+export function isVerdict(s: string): s is Verdict {
+  return s === 'PASS' || s === 'FAIL' || s === 'SPEC' || s === 'UNPARSEABLE';
+}
+
+export function isColour(s: string): s is Colour {
+  return s === 'GREEN' || s === 'RED';
+}
