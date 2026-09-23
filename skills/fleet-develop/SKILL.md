@@ -25,10 +25,19 @@ re-executed under `env -i`. No network, no model.
   behaviour a script already has, so red means running the case against a
   copy with the block deleted: `FLEET_LAUNCH_OVERRIDE=<file>`,
   `FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE` substitute that copy into
-  the fixture. A new feature is red because it is absent. A case never
-  seen red is not a case; it has passed by accident before.
+  the fixture; `FLEET_TS_OVERRIDE=<dir>` lays a directory over `ts/src/`
+  (one file or many). A new feature is red because it is absent. A case
+  never seen red is not a case; it has passed by accident before.
 - **`bash test-lib.sh` green before every commit**; the count is on the
   last line. `bash test-lib.sh <substring>` runs a subset while iterating.
+- **The TypeScript side too:** `cd ts && npm ci && npm run check && npm test`
+  green before every commit that touches `ts/`, its unit tests red first.
+  `npm test` goes through esbuild, which accepts syntax Node's type
+  stripper rejects — `npm run check` (tsc, `erasableSyntaxOnly`) and the
+  suite (real `node`) are the proofs. `ts/node_modules` is for tsc and
+  vitest in a worktree only; nothing needs it at run time and the live
+  checkout never runs `npm`. Seams and rules:
+  `docs/plans/2026-09-23-typescript-migration.md`.
 - **One task, one commit**, the reason in the message, `git status --short`
   shown. A commit carrying three concerns cannot be extracted later (L-10).
 - **Show the `launch.sh` diff before applying it** and only while

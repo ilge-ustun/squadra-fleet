@@ -47,8 +47,21 @@ Nothing runs this for you. TDD is mandatory: write the failing case, run it,
 SEE IT FAIL, then change the script. Most cases characterise behaviour the
 scripts already have, so "see it fail" means running the case against a copy
 with the block deleted: `FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
-`FLEET_LIB_OVERRIDE` substitute that copy into the fixture. A case that has
+`FLEET_LIB_OVERRIDE` substitute that copy into the fixture;
+`FLEET_TS_OVERRIDE` lays a directory over `ts/src/`. A case that has
 never been observed red is not a case.
+
+The TypeScript side (`ts/`, run by `node` as is — no build) has vitest
+unit tests beside each module, red first too:
+
+```bash
+cd ts && npm ci && npm run check && npm test   # tsc --noEmit, then vitest
+```
+
+`npm test` compiles through esbuild, which accepts syntax Node rejects;
+`npm run check` and `bash test-lib.sh` (real `node`) are the proofs.
+Nothing under `ts/` needs `node_modules` at run time; the live checkout
+never runs `npm`. The plan: `docs/plans/2026-09-23-typescript-migration.md`.
 
 ## Working rules
 

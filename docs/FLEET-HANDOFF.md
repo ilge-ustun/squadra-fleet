@@ -44,7 +44,10 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
   fleet is autonomous from `ready` to `on epic`.
 - **22 Sep — `README.md` rewritten** as the complete documentation.
 - **23 Sep — decision: the harness migrates to TypeScript**, one seam at a
-  time, not now. §9.
+  time. §9. The same day, seam 1 — the classifier — was built on branch
+  `ts-classifier` (worktree `../fleet-wt-ts-classifier`), suite 654, **not
+  landed**: the human lands it. `docs/plans/2026-09-23-typescript-migration.md`
+  is the plan for every seam and the record of the first.
 
 Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
 fast-forward. khaita `develop` is at `227b781`.
@@ -60,8 +63,11 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
 ```
 ~/work/fleet/
   lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
-  launch.sh              the launcher          mutation.sh        the classifier, shared
+  launch.sh              the launcher          mutation.sh        the classifier's bash face (shim over ts/)
   check-mutation.sh      the classifier on a working tree (a builder's, or yours)
+  ts/                    the TypeScript side (branch ts-classifier): src/classifier.ts, src/lib/,
+                         src/bin/mutation.ts; run by node as is, no build, no runtime deps
+  .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
   run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh status.sh revert.sh reset.sh
   telegram.sh            send | poll           render.sh          render_prompt()
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
@@ -270,9 +276,10 @@ none run yet — the next story's round count is the first data point for A2.
 - **Codex quota.** `REVIEWER_MODEL` exists now; nothing falls back
   automatically when the reviewer's model is out of quota.
 - **The bash ceiling.** `die` inside `$(…)` ends only the subshell (why
-  `classify_mutation` returns through a global), quoting slips, the
-  edit-while-running hazard, 22 `jq` calls parsing two CLIs' output. Not a
-  defect today; the reason for §9.
+  `classify_mutation` returned through a global — closed for it by seam 1,
+  still open for `run_probes`' `$(run_selector …)` at `launch.sh:260` until
+  seam 2), quoting slips, the edit-while-running hazard, 23 `jq` calls of
+  which 6 parse the two CLIs' output. Not a defect today; the reason for §9.
 
 ---
 
@@ -320,24 +327,33 @@ is one pipe in bash and several lines with `execa`; async stack traces are
 harder to read than `set -x`; the pull of a framework that hides the
 control flow the bash version makes explicit.
 
-**How, when it starts — not a rewrite:**
+**Refined on 23 Sep, with the human, when seam 1 was built** (the full
+plan and the record: `docs/plans/2026-09-23-typescript-migration.md`): no
+`dist/` — Node 24 strips types as it loads, so bash calls
+`node ts/src/bin/<name>.ts` and `tsc --noEmit` only type-checks; zero
+runtime dependencies (`node:child_process`, `node:fs`), devDependencies
+only, and the fixture copy excludes `ts/node_modules` so every suite run
+proves it; and a correction — the suite runs scripts by absolute path into
+a per-case copy, only the fakes come through `PATH`.
 
-1. Keep `test-lib.sh` as the acceptance layer. It tests scripts through
-   `PATH` with fakes; a TS entry point with the same CLI passes the same
-   cases unchanged. Add vitest unit tests beside the TS code.
+**How — not a rewrite:**
+
+1. Keep `test-lib.sh` as the acceptance layer. It runs each script by
+   absolute path into a copy of the tree, with fakes on `PATH`; a bash entry
+   point of the same name that calls `node` passes the same cases
+   unchanged. Add vitest unit tests beside the TS code.
 2. One seam at a time, behind the existing contract, each landing green:
    the classifier (`mutation.sh` + `check-mutation.sh` — newest, most
    self-contained, and where a non-vitest runner adapter would live) →
    verdict computation and the Machine block → `status.sh` → `launch.sh`
    last, with the agent calls moved to the SDKs. `telegram.sh`, `merge.sh`,
    `reset.sh`, `revert.sh` and the systemd side stay bash indefinitely.
-3. No framework. Standard library, `execa` at most; the control flow stays
-   as readable as the bash it replaces.
-4. Layout: `~/work/fleet/ts/` with its own `package.json`, built to
-   `dist/`, invoked by thin bash wrappers with the old names so nothing
+3. No framework, no runtime dependencies; the control flow stays as
+   readable as the bash it replaces.
+4. Layout: `~/work/fleet/ts/` with its own `package.json`, run by `node`
+   as is, reached through thin bash entries with the old names so nothing
    downstream (the bot, the units, the skills, the docs) changes.
 
-**Trigger:** the first story that needs what bash is worst at — parallel
-lanes with the selection lock, or a second target whose runner is not
-vitest. Until then, no migration work; the current harness is sound and its
-next few stories should measure A2's effect on rounds.
+**Status:** seam 1 is built and tested on branch `ts-classifier`, not
+landed. The human decides when it lands and when seam 2 starts; the next
+few stories should still measure A2's effect on rounds.

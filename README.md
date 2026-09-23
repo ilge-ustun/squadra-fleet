@@ -53,7 +53,7 @@ replaceable at that seam.
 | story writer | `write-story.sh`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `claude-opus-5` | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
 | builder | `launch.sh`: `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `claude-sonnet-4-6`; a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `check-mutation.sh` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | `launch.sh`: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head: reads files, runs the suite, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
-| the machine | `launch.sh`, `mutation.sh` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
+| the machine | `launch.sh`, `ts/src/classifier.ts` through `mutation.sh` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
 | the human | terminal or phone | — | promotes, lands, answers blocks, deploys, holds every token | — |
 
@@ -145,7 +145,7 @@ selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
 The reviewer writes at least one per criterion; the builder writes its own
 as `ACn-tdd-<slug>` — the failing test it observed, handed over instead of
 described. The harness runs every one in a clean tree with the classifier
-in `mutation.sh`:
+in `ts/src/classifier.ts` (bash reaches it through `mutation.sh`):
 
 | class | meaning | who fixes it |
 |---|---|---|
@@ -382,7 +382,11 @@ Worktrees are siblings of the target: `../wt-<id>` for a builder,
 that has never been observed red is not a case — a new feature is red
 because it is absent, a characterisation is red by running it against a
 copy with the block deleted (`FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
-`FLEET_LIB_OVERRIDE`). The checkout at `~/work/fleet` is live — the timers
+`FLEET_LIB_OVERRIDE`; `FLEET_TS_OVERRIDE` lays a directory over `ts/src/`).
+The TypeScript side has its own unit tests beside the code: `cd ts && npm ci
+&& npm run check && npm test`, green before every commit too; nothing under
+`ts/` needs `node_modules` at run time, so the live checkout never runs
+`npm`. The checkout at `~/work/fleet` is live — the timers
 execute it — so every change is made in a worktree and fast-forwarded in
 when both units are inactive. Never edit `launch.sh` while a launcher is
 running it. `die` over `warn`. Prompts on stdin, never argv. One task, one
@@ -393,7 +397,9 @@ commit. `docs/lessons.md` holds the rest.
 ```
 lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
 launch.sh           the launcher              run-queue.sh   the drain
-mutation.sh         the classifier            check-mutation.sh  the same classifier, on a working tree
+mutation.sh         the classifier's bash face check-mutation.sh  the same classifier, on a working tree
+ts/                 the TypeScript side: src/classifier.ts, src/lib/, src/bin/mutation.ts — run by node as is, no build
+.nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
 write-story.sh      intent → story            lint-story.sh  mechanical checks against the story's base
 new-epic.sh         an epic branch            status.sh      what the fleet is doing
 merge.sh            story → epic, --land, --epic, MERGE_MODE
