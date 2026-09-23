@@ -487,7 +487,13 @@ mutation_case() {                     # mutation_case <name> <label> <expected-c
   assert_contains "$(tracked)" ".review/$STORY/round-1/mutations/$mut.result" "result committed"
   assert_grep "^${mut%%-*} +$cls +${mut#*-}" "$REPO/.review/$STORY.md" "row in the Machine table"
 }
-case_18_mutation_red()      { mutation_case c18 "18 mutation caught → RED"                 RED          AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker; }
+case_18_mutation_red() {
+  mutation_case c18 "18 mutation caught → RED" RED AC1-marker FAKE_MUTATIONS=patch FAKE_VITEST=marker
+  # Line 2 of the .result: the mutated run's counts and failed tests, the bytes
+  # `jq -c` wrote and the classifier writes now. Red with the line deleted.
+  assert_eq "$(sed -n 2p "$REPO/.review/$STORY/round-1/mutations/AC1-marker.result")" \
+    '{"numTotalTests":2,"numFailedTests":1,"failed":["fake suite a"]}' "the .result second line"
+}
 case_19_mutation_green()    { mutation_case c19 "19 mutation survives → GREEN"             GREEN        AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=pass; }
 case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation → NO_TESTS" NO_TESTS     AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker-notests; }
 case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }

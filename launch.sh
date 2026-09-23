@@ -159,7 +159,7 @@ run_baseline() {                      # run_baseline <worktree> <evidence-dir> �
 # judgment on its own evidence before the verdict does.
 
 run_mutations() {                     # run_mutations <wt> <evidence-dir> → MUT_ROWS (one "ACn CLASS slug" per line)
-  local wt="$1" mdir="$2/mutations" p name ac slug kind cls raw
+  local wt="$1" mdir="$2/mutations" p name ac slug cls raw
   MUT_ROWS=""
   [[ -d "$mdir" ]] || return 0
 
@@ -168,19 +168,15 @@ run_mutations() {                     # run_mutations <wt> <evidence-dir> → MU
     name="$(basename "$p" .patch)"; ac="${name%%-*}"; slug="${name#*-}"
     raw="$REPO_ROOT/.runs/$STORY_ID-round$ROUND-$name"
 
+    # The classifier writes the .result itself: the class, then the failed
+    # tests of the mutated run when there was one.
     if find_selector "$p"; then
-      kind="$SEL_KIND"
-      classify_mutation "$wt" "$p" "$SEL_KIND" "$SEL_FILE" "$raw" checkout
+      classify_mutation "$wt" "$p" "$SEL_KIND" "$SEL_FILE" "$raw" checkout "$mdir/$name.result"
       cls="$MUT_CLASS"
     else
-      kind=""; cls=NO_SELECTOR
+      cls=NO_SELECTOR
+      echo "$cls" > "$mdir/$name.result"
     fi
-
-    {
-      echo "$cls"
-      [[ "$kind" == test && -f "$raw-mut.json" ]] && \
-        jq -c '{numTotalTests, numFailedTests, failed: [.testResults[].assertionResults[] | select(.status=="failed") | .fullName]}' "$raw-mut.json"
-    } > "$mdir/$name.result"
     MUT_ROWS+="$ac $cls $slug"$'\n'
     log "mutation $name: $cls"
   done

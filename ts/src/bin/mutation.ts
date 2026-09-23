@@ -6,17 +6,22 @@
 //   run-selector <selector-file> --wt <dir> --kind test|cmd --raw <prefix> --vitest-cmd <cmd>
 //       → RED | GREEN | NO_TESTS
 //   classify <patch> --wt <dir> --kind test|cmd --selector <file> --raw <prefix>
-//            --restore checkout|reverse --vitest-cmd <cmd>
+//            --restore checkout|reverse --vitest-cmd <cmd> [--result <file>]
 //       → RED | GREEN | NO_TESTS | PRE_RED | SELECTOR_INVALID | PATCH_INVALID
+//         --result writes the evidence file: the class on line 1 and, for a
+//         .test that reached the mutated run, the failed tests on line 2
 //         a dirty tree before or after: the porcelain on stderr, exit 1, nothing on stdout
 //
 // VITEST_CMD comes as an argument, not from the environment: lib.sh keeps
 // the target's config out of the environment on purpose (lib.sh:14-18), and
 // the runner this starts must see the same environment it saw from bash.
+import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DirtyTreeError, classifyMutation, runSelector } from '../classifier.ts';
 import { dieMessage, out } from '../lib/log.ts';
 import { isRestore, isSelectorKind } from '../lib/types.ts';
+import { resultSummaryLine } from '../lib/result-summary.ts';
+import { readVitestJson } from '../lib/vitest-json.ts';
 
 const USAGE =
   'usage: mutation.ts run-selector <selector-file> --wt <dir> --kind test|cmd --raw <prefix> --vitest-cmd <cmd>\n' +
@@ -75,7 +80,7 @@ function main(argv: readonly string[]): number {
       return 0;
     }
     case 'classify': {
-      const p = parse(rest, ['wt', 'kind', 'selector', 'raw', 'restore', 'vitest-cmd']);
+      const p = parse(rest, ['wt', 'kind', 'selector', 'raw', 'restore', 'vitest-cmd', 'result']);
       const [patch] = p.positional;
       if (patch === undefined || p.positional.length !== 1) throw new UsageError(USAGE);
       const kind = need(p, 'kind');
@@ -91,6 +96,11 @@ function main(argv: readonly string[]): number {
         restore,
         vitestCmd: need(p, 'vitest-cmd'),
       });
+      const result = p.flags.get('result');
+      if (result !== undefined) {
+        const line2 = r.mutJsonPath === undefined ? undefined : resultSummaryLine(readVitestJson(r.mutJsonPath));
+        writeFileSync(resolve(result), `${r.cls}\n${line2 === undefined ? '' : `${line2}\n`}`);
+      }
       out(`${r.cls}\n`);
       return 0;
     }

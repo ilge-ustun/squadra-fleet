@@ -6,8 +6,9 @@
 #
 # A mutation is ACn-<slug>.patch with a .test (vitest selector) or .cmd (any
 # command) beside it. Raw runner output lands at <raw-prefix>-pre.*,
-# <raw-prefix>-apply.log and <raw-prefix>-mut.* — launch.sh reads -mut.json
-# for the .result file.
+# <raw-prefix>-apply.log and <raw-prefix>-mut.*; with a seventh argument the
+# classifier also writes the .result evidence file (class, then the failed
+# tests of the mutated run).
 #
 # Needs die and VITEST_CMD from the caller (lib.sh, load_repo), and node on
 # PATH: .nvmrc names the version, the systemd units carry its bin directory,
@@ -37,10 +38,11 @@ find_selector() {                     # find_selector <patch> → SEL_KIND SEL_F
 # tree, a missing node) is an exit status this function sees in the parent
 # shell and turns into a die that ends the caller. Inside $(…) a die would
 # have ended only the subshell.
-classify_mutation() {                 # classify_mutation <wt> <patch> <kind> <selector-file> <raw-prefix> <restore> → MUT_CLASS
+classify_mutation() {                 # classify_mutation <wt> <patch> <kind> <selector-file> <raw-prefix> <restore> [result-file] → MUT_CLASS
   : "${VITEST_CMD:?classify_mutation needs VITEST_CMD — load_repo first}"
   local name; name="$(basename "$2" .patch)"
-  MUT_CLASS="$(node "$FLEET_MUTATION_CLI" classify "$2" --wt "$1" --kind "$3" --selector "$4" --raw "$5" --restore "$6" --vitest-cmd "$VITEST_CMD")" \
+  local -a result=(); [[ -n "${7:-}" ]] && result=(--result "$7")
+  MUT_CLASS="$(node "$FLEET_MUTATION_CLI" classify "$2" --wt "$1" --kind "$3" --selector "$4" --raw "$5" --restore "$6" --vitest-cmd "$VITEST_CMD" "${result[@]}")" \
     || die "mutation runner: $name — the classifier failed (node $(node --version)); its message is above"
   case "$MUT_CLASS" in
     RED|GREEN|NO_TESTS|PRE_RED|SELECTOR_INVALID|PATCH_INVALID) ;;
