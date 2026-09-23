@@ -20,7 +20,7 @@
 // VITEST_CMD comes as an argument, not from the environment: lib.sh keeps
 // the target's config out of the environment on purpose (lib.sh:14-18), and
 // the runner this starts must see the same environment it saw from bash.
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { DirtyTreeError, classifyMutation, findSelector, runSelector } from '../classifier.ts';
 import { ConfigError, loadRepo } from '../lib/config.ts';
@@ -28,8 +28,7 @@ import { porcelain } from '../lib/git.ts';
 import { dieMessage, out, warn } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
 import { isRestore, isSelectorKind } from '../lib/types.ts';
-import { resultSummaryLine } from '../lib/result-summary.ts';
-import { readVitestJson } from '../lib/vitest-json.ts';
+import { writeResultFile } from '../lib/evidence.ts';
 
 const USAGE =
   'usage: mutation.ts run-selector <selector-file> --wt <dir> --kind test|cmd --raw <prefix> --vitest-cmd <cmd>\n' +
@@ -183,10 +182,7 @@ function main(argv: readonly string[]): number {
         vitestCmd: need(p, 'vitest-cmd'),
       });
       const result = p.flags.get('result');
-      if (result !== undefined) {
-        const line2 = r.mutJsonPath === undefined ? undefined : resultSummaryLine(readVitestJson(r.mutJsonPath));
-        writeFileSync(resolve(result), `${r.cls}\n${line2 === undefined ? '' : `${line2}\n`}`);
-      }
+      if (result !== undefined) writeResultFile(resolve(result), r.cls, r.mutJsonPath);
       out(`${r.cls}\n`);
       return 0;
     }
