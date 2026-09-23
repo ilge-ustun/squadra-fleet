@@ -2665,6 +2665,42 @@ case_109_status_through_the_loader() {
   assert_contains "$out" "unknown repo 'nope'" "lib.sh's own die text reaches the caller"
 }
 
+# The same loader for check-mutation.sh: `node ts/src/bin/mutation.ts check`
+# reaches VITEST_CMD and REPO_ROOT through ts/src/lib/config.ts. With the
+# stub it must fail with the stub's text (a bash check-mutation.sh sources
+# lib.sh and never loads it — it would print RED and exit 0). Then the real
+# thing: a RED run is silent on stderr, and any -flag but --wt is usage,
+# exit 1, as the bash had it. Red while check-mutation.sh is bash.
+case_110_check_through_the_loader() {
+  CASE="110 check-mutation.sh reaches the target through ts/src/lib/config.ts"; fixture c110
+  local m="$REPO/.review-out/mutations" out rc err
+  mutation_patch() {                  # mutation_patch — AC1-tdd-marker.patch and its .test under $m
+    mkdir -p "$m"
+    printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+    git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+    git -C "$REPO" checkout -q -- src/marker.txt
+    printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
+  }
+  mutation_patch; config_stub
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "fleet-test: config stub reached" "check-mutation.sh went through the loader"
+  assert_eq "$rc" 1 "and failed with it"
+  fixture c110b; m="$REPO/.review-out/mutations"; mutation_patch
+  err="$FX/check.err"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>"$err" )"; rc=$?
+  assert_eq "$out" "RED AC1-tdd-marker" "the real loader: the class line and nothing else on stdout"
+  assert_eq "$rc" 0 "exit 0 on all RED"
+  assert_eq "$(cat "$err")" "" "nothing on stderr on success"
+  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" -x 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "an unknown flag is a die"
+  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "no patch is a die"
+  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2712,7 +2748,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_103_reviewer_model case_104_install_skills
        case_105_fixture_excludes_node_modules case_106_one_classifier
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
-       case_109_status_through_the_loader)
+       case_109_status_through_the_loader case_110_check_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
