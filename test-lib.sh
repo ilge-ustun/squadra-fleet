@@ -2701,6 +2701,67 @@ case_110_check_through_the_loader() {
   assert_contains "$out" "usage: check-mutation.sh" "with the usage"
 }
 
+# Two paths of the builder block no case exercised, characterised before the
+# launcher moves to TypeScript (seam 4) so the move cannot change them. What
+# bash does when `claude` prints something other than its JSON object: jq's
+# `has("is_error")` fails on non-JSON, so BUILD_ERR is EMPTY — not
+# "parse-failed" — the warning does not fire, builder.json keeps the raw text
+# (the `|| printf` fallback), and builder.md is the empty BUILD_MSG. Red when
+# that fallback (launch.sh: `|| printf '%s\n' "$BUILD_OUT" > …/builder.json`)
+# is deleted: builder.json is then empty.
+case_111_builder_output_not_json() {
+  CASE="111 builder output that is not JSON is kept raw, silently"; fixture c111
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" done "the round went on to the reviewer"
+  assert_not_grep 'builder output was not JSON' "$LOG" "the warning is for JSON of the wrong shape, not for non-JSON"
+  assert_eq "$(cat "$ev/builder.json")" "not json {" "builder.json holds the raw output"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/builder.json" "and is committed"
+  assert_eq "$(stat -c %s "$ev/builder.md")" 1 "builder.md is one empty line (BUILD_MSG is empty)"
+  # The empty BUILD_ERR is visible in the one message that prints it.
+  fixture c111n
+  run "$STORY" FAKE_BUILDER=nocommit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
+  assert_eq "$RC" 1 "no commit is still the die"
+  assert_contains "$(cat "$LOG")" "produced no commits (is_error=). Said: " "is_error is empty, not parse-failed, and Said is empty"
+}
+
+# JSON that is not the CLI's object — no is_error key — is the path the
+# warning was written for: BUILD_ERR is "parse-failed", the first 20 lines
+# are shown, builder.json is jq's pretty print, builder.md says "no result
+# field". Red when the warning block (launch.sh: `if [[ "$BUILD_ERR" ==
+# "parse-failed" ]] … fi`) is deleted.
+case_111b_builder_output_wrong_shape() {
+  CASE="111b builder JSON of the wrong shape is warned about"; fixture c111b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=shape
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" done "the round went on"
+  assert_grep 'builder output was not JSON' "$LOG" "the warning"
+  assert_grep '^\{"unexpected":"shape"\}$' "$LOG" "followed by the raw output"
+  assert_eq "$(cat "$ev/builder.md")" "no result field" "builder.md"
+  assert_eq "$(cat "$ev/builder.json")" $'{\n  "unexpected": "shape"\n}' "builder.json is the pretty print"
+}
+
+# The reviewer's stream without any agent_message: the raw JSONL is kept as
+# evidence, reviewer.md carries the placeholder, and the verdict rule reads
+# that placeholder as UNPARSEABLE. Red when the empty-REVIEW_TEXT block
+# (launch.sh: `if [[ -z "$REVIEW_TEXT" ]]; then … fi`) is deleted:
+# reviewer.raw.jsonl is never written and reviewer.md is an empty line.
+case_112_reviewer_without_a_message() {
+  CASE="112 a reviewer that says nothing leaves its raw stream and an UNPARSEABLE round"; fixture c112
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=silent MAX_ROUNDS=1
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code (the ceiling, not a die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_eq "$(review_line 3)" "verdict: UNPARSEABLE" ".review line 3"
+  assert_grep 'reviewer produced no agent_message' "$LOG" "the warning"
+  assert_file "$ev/reviewer.raw.jsonl" "the raw stream is kept"
+  assert_grep '"type":"turn.completed"' "$ev/reviewer.raw.jsonl" "and is the stream"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.raw.jsonl" "committed with the round"
+  assert_eq "$(cat "$ev/reviewer.md")" "(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)" "reviewer.md is the placeholder"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2748,7 +2809,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_103_reviewer_model case_104_install_skills
        case_105_fixture_excludes_node_modules case_106_one_classifier
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
-       case_109_status_through_the_loader case_110_check_through_the_loader)
+       case_109_status_through_the_loader case_110_check_through_the_loader
+       case_111_builder_output_not_json case_111b_builder_output_wrong_shape
+       case_112_reviewer_without_a_message)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
