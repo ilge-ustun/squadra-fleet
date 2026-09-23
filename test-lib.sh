@@ -25,12 +25,16 @@
 # substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of repo/,
 # exactly as in production (launch.sh: "$REPO_ROOT/../wt-$STORY_ID").
 #
-# Observing red. Most cases characterise behaviour launch.sh already has, so
-# "see it fail first" means: run the case against a copy of launch.sh with
-# the named block deleted. FLEET_LAUNCH_OVERRIDE=<file> substitutes that
-# copy into the fixture; the real launch.sh is never modified.
-# FLEET_RENDER_OVERRIDE does the same for render.sh. Each case's comment
-# names the block whose deletion turns it red.
+# Observing red. Most cases characterise behaviour the scripts already have,
+# so "see it fail first" means: run the case against a copy with the named
+# block deleted. FLEET_RENDER_OVERRIDE=<file> and FLEET_LIB_OVERRIDE=<file>
+# substitute that copy into the fixture; FLEET_TS_OVERRIDE=<dir> lays a
+# directory over ts/src/, and a case may write a stub straight into the
+# fixture's ts/src/lib/ after `fixture` (cases 106-110, 113). The real
+# scripts are never modified. Each case's comment names the block whose
+# deletion turns it red. (The launcher was bash until seam 4; its override,
+# FLEET_LAUNCH_OVERRIDE, went with it — overriding a four-line wrapper
+# proves nothing.)
 #
 # Two guards, both learned the expensive way on the first run (17 Sep): the
 # fakes were named fake-claude/fake-codex, so `claude` resolved to the REAL
@@ -53,10 +57,9 @@ fi
 # turn correct cases into failures that look like findings. An allowlist,
 # not a drop-list: a drop-list must grow with every new seam and the once it
 # is forgotten the symptom is indistinguishable from a real failure. The
-# four override seams are the red-observation mechanism and must survive.
+# three override seams are the red-observation mechanism and must survive.
 if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
-       FLEET_LAUNCH_OVERRIDE="${FLEET_LAUNCH_OVERRIDE:-}" \
        FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
        FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
        FLEET_TS_OVERRIDE="${FLEET_TS_OVERRIDE:-}" \
@@ -119,7 +122,6 @@ fixture() {                           # fixture <case-name> [story-status] → F
   # copy with a block deleted in place of a script (or, for TypeScript, lay a
   # directory over ts/src/) so a case can be observed red.
   copy_fleet "$FLEET_HOME" "$FLEET"
-  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$FLEET/launch.sh"
   [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
   [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
   [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"

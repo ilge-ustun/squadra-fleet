@@ -1,76 +1,32 @@
-// mutation.ts — the classifier's command line. Two verbs for the bash that
-// still drives the verdict, one line of stdout each, the class and nothing
-// else, so `MUT_CLASS="$(node … classify …)"` in mutation.sh gets exactly
-// the class or a non-zero status; and `check`, what check-mutation.sh is.
+// mutation.ts — the classifier's command line: `check`, what check-mutation.sh
+// is. The verdict's own use of the classifier is in-process since seam 4
+// (ts/src/lib/evidence.ts); the `run-selector` and `classify` verbs that
+// served the bash launcher are gone with it.
 //
-//   run-selector <selector-file> --wt <dir> --kind test|cmd --raw <prefix> --vitest-cmd <cmd>
-//       → RED | GREEN | NO_TESTS
-//   classify <patch> --wt <dir> --kind test|cmd --selector <file> --raw <prefix>
-//            --restore checkout|reverse --vitest-cmd <cmd> [--result <file>]
-//       → RED | GREEN | NO_TESTS | PRE_RED | SELECTOR_INVALID | PATCH_INVALID
-//         --result writes the evidence file: the class on line 1 and, for a
-//         .test that reached the mutated run, the failed tests on line 2
-//         a dirty tree before or after: the porcelain on stderr, exit 1, nothing on stdout
 //   check <repo> <patch…> [--wt <dir>]
 //       → one line per patch, `CLASS name`; exit 0 only when every patch is RED
 //         (check-mutation.sh's header says the rest: the tree must be clean
 //         and must be the named repo's checkout or one of its worktrees;
 //         raw runner output lands in <tree>/.review-out/checks/)
 //
-// VITEST_CMD comes as an argument, not from the environment: lib.sh keeps
-// the target's config out of the environment on purpose (lib.sh:14-18), and
-// the runner this starts must see the same environment it saw from bash.
+// VITEST_CMD comes from the target's config through lib/config.ts, never
+// from the environment: lib.sh keeps the target's config out of the
+// environment on purpose (lib.sh:14-18).
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import { DirtyTreeError, classifyMutation, findSelector, runSelector } from '../classifier.ts';
+import { DirtyTreeError, classifyMutation, findSelector } from '../classifier.ts';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { porcelain } from '../lib/git.ts';
 import { dieMessage, out, warn } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
-import { isRestore, isSelectorKind } from '../lib/types.ts';
-import { writeResultFile } from '../lib/evidence.ts';
 
-const USAGE =
-  'usage: mutation.ts run-selector <selector-file> --wt <dir> --kind test|cmd --raw <prefix> --vitest-cmd <cmd>\n' +
-  '       mutation.ts classify <patch> --wt <dir> --kind test|cmd --selector <file> --raw <prefix> --restore checkout|reverse --vitest-cmd <cmd>';
-
+const USAGE = 'usage: mutation.ts check <repo> <patch…> [--wt <dir>]';
 const CHECK_USAGE = 'usage: check-mutation.sh <repo> <patch…> [--wt <dir>]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 class UsageError extends Error {}
 /** lib.sh's die: the message on stderr, exit 1. */
 class DieError extends Error {}
-
-interface Parsed {
-  positional: string[];
-  flags: Map<string, string>;
-}
-
-/** `--name value` pairs and positionals; every flag takes one value. */
-function parse(argv: readonly string[], allowed: readonly string[]): Parsed {
-  const positional: string[] = [];
-  const flags = new Map<string, string>();
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i] ?? '';
-    if (a.startsWith('--')) {
-      const name = a.slice(2);
-      const value = argv[i + 1];
-      if (!allowed.includes(name)) throw new UsageError(`unknown option --${name}\n${USAGE}`);
-      if (value === undefined) throw new UsageError(`--${name} needs a value\n${USAGE}`);
-      flags.set(name, value);
-      i++;
-    } else {
-      positional.push(a);
-    }
-  }
-  return positional.length === 0 ? { positional, flags } : { positional, flags };
-}
-
-function need(p: Parsed, name: string): string {
-  const v = p.flags.get(name);
-  if (v === undefined || v === '') throw new UsageError(`--${name} is required\n${USAGE}`);
-  return v;
-}
 
 /** check-mutation.sh, line for line (its header is the contract). */
 function check(argv: readonly string[]): number {
@@ -145,50 +101,8 @@ function check(argv: readonly string[]): number {
 
 function main(argv: readonly string[]): number {
   const [verb, ...rest] = argv;
-  switch (verb) {
-    case 'check':
-      return check(rest);
-    case 'run-selector': {
-      const p = parse(rest, ['wt', 'kind', 'raw', 'vitest-cmd']);
-      const [selectorFile] = p.positional;
-      if (selectorFile === undefined || p.positional.length !== 1) throw new UsageError(USAGE);
-      const kind = need(p, 'kind');
-      if (!isSelectorKind(kind)) throw new UsageError(`--kind must be test or cmd, not '${kind}'`);
-      const cls = runSelector({
-        wt: resolve(need(p, 'wt')),
-        kind,
-        selectorFile: resolve(selectorFile),
-        rawPrefix: resolve(need(p, 'raw')),
-        vitestCmd: need(p, 'vitest-cmd'),
-      });
-      out(`${cls}\n`);
-      return 0;
-    }
-    case 'classify': {
-      const p = parse(rest, ['wt', 'kind', 'selector', 'raw', 'restore', 'vitest-cmd', 'result']);
-      const [patch] = p.positional;
-      if (patch === undefined || p.positional.length !== 1) throw new UsageError(USAGE);
-      const kind = need(p, 'kind');
-      if (!isSelectorKind(kind)) throw new UsageError(`--kind must be test or cmd, not '${kind}'`);
-      const restore = need(p, 'restore');
-      if (!isRestore(restore)) throw new UsageError(`--restore must be checkout or reverse, not '${restore}'`);
-      const r = classifyMutation({
-        wt: resolve(need(p, 'wt')),
-        patch: resolve(patch),
-        kind,
-        selectorFile: resolve(need(p, 'selector')),
-        rawPrefix: resolve(need(p, 'raw')),
-        restore,
-        vitestCmd: need(p, 'vitest-cmd'),
-      });
-      const result = p.flags.get('result');
-      if (result !== undefined) writeResultFile(resolve(result), r.cls, r.mutJsonPath);
-      out(`${r.cls}\n`);
-      return 0;
-    }
-    default:
-      throw new UsageError(USAGE);
-  }
+  if (verb !== 'check') throw new UsageError(USAGE);
+  return check(rest);
 }
 
 try {

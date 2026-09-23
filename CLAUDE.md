@@ -48,10 +48,11 @@ bash test-lib.sh blocked    # cases whose name contains "blocked"
 Nothing runs this for you. TDD is mandatory: write the failing case, run it,
 SEE IT FAIL, then change the script. Most cases characterise behaviour the
 scripts already have, so "see it fail" means running the case against a copy
-with the block deleted: `FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
-`FLEET_LIB_OVERRIDE` substitute that copy into the fixture;
-`FLEET_TS_OVERRIDE` lays a directory over `ts/src/`. A case that has
-never been observed red is not a case.
+with the block deleted: `FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE`
+substitute that copy into the fixture; `FLEET_TS_OVERRIDE` lays a directory
+over `ts/src/`, or the case writes a stub into the fixture's `ts/src/lib/`
+after `fixture` (cases 106-110, 113). A case that has never been observed
+red is not a case.
 
 The TypeScript side (`ts/`, run by `node` as is — no build) has vitest
 unit tests beside each module, red first too:

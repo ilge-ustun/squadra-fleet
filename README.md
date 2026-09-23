@@ -381,8 +381,9 @@ Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `env -i`); its last line is the count. Green before every commit; a case
 that has never been observed red is not a case — a new feature is red
 because it is absent, a characterisation is red by running it against a
-copy with the block deleted (`FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
-`FLEET_LIB_OVERRIDE`; `FLEET_TS_OVERRIDE` lays a directory over `ts/src/`).
+copy with the block deleted (`FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE`;
+`FLEET_TS_OVERRIDE` lays a directory over `ts/src/`, or a case writes a stub
+into the fixture's `ts/src/lib/` after `fixture`).
 The TypeScript side has its own unit tests beside the code: `cd ts && npm ci
 && npm run check && npm test`, green before every commit too; nothing under
 `ts/` needs `node_modules` at run time, so the live checkout never runs
