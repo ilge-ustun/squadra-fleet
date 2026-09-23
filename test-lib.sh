@@ -53,12 +53,13 @@ fi
 # turn correct cases into failures that look like findings. An allowlist,
 # not a drop-list: a drop-list must grow with every new seam and the once it
 # is forgotten the symptom is indistinguishable from a real failure. The
-# three override seams are the red-observation mechanism and must survive.
+# four override seams are the red-observation mechanism and must survive.
 if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
        FLEET_LAUNCH_OVERRIDE="${FLEET_LAUNCH_OVERRIDE:-}" \
        FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
        FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
+       FLEET_TS_OVERRIDE="${FLEET_TS_OVERRIDE:-}" \
        FLEET_TEST_CLEAN=1 bash "$0" "$@"
 fi
 
@@ -97,20 +98,31 @@ shadow_check() {                      # shadow_check <fleet-copy> — die unless
   done
 }
 
+# The fleet under test is a copy of a working tree, minus its git metadata,
+# its real registry (a typo'd name in a case must never reach a real
+# checkout), anything machine-local, and ts/node_modules: the TypeScript
+# side's devDependencies (tsc, vitest) are tens of megabytes that would be
+# copied once per case, and nothing under ts/ may need them at run time —
+# their absence in every fixture is what proves that.
+copy_fleet() {                        # copy_fleet <src> <dst>
+  mkdir -p "$2"
+  tar -C "$1" --exclude=./.git --exclude=./repos --exclude=./ts/node_modules -cf - . | tar -C "$2" -xf -
+  rm -rf "$2/.env.fleet" "$2/.bot-offset"
+}
+
 fixture() {                           # fixture <case-name> [story-status] → FX FLEET REPO TRACE
   FX="$TMP/$1"; FLEET="$FX/fleet"; REPO="$FX/repo"; TRACE="$FX/trace"
   local status="${2:-ready}"
   mkdir -p "$TRACE"; : > "$TRACE/calls"
 
-  # The fleet under test: this working tree, minus its git metadata, its real
-  # registry (a typo'd name in a case must never reach a real checkout) and
-  # anything machine-local. One registry entry, t, names the target below.
-  mkdir -p "$FLEET"
-  cp -r "$FLEET_HOME/." "$FLEET"
-  rm -rf "$FLEET/.git" "$FLEET/repos" "$FLEET/.env.fleet" "$FLEET/.bot-offset"
+  # One registry entry, t, names the target below. The override seams put a
+  # copy with a block deleted in place of a script (or, for TypeScript, lay a
+  # directory over ts/src/) so a case can be observed red.
+  copy_fleet "$FLEET_HOME" "$FLEET"
   [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$FLEET/launch.sh"
   [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
   [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
+  [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"
   mkdir -p "$FLEET/repos"
   printf 'REPO_PATH=%s\n' "$REPO" > "$FLEET/repos/t.env"
 
@@ -2526,6 +2538,26 @@ case_104_install_skills() {
   assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "and leaves it alone"
 }
 
+# The fixture is a copy of the working tree, once per case. ts/node_modules
+# must not come along (size, and the proof that nothing under ts/ needs it at
+# run time); everything else must. Exercised on a synthetic tree so it can go
+# red whether or not anything is installed here. Red while copy_fleet is cp -r.
+case_105_fixture_excludes_node_modules() {
+  CASE="105 the fixture carries no ts/node_modules"; fixture c105
+  local src="$FX/src-tree" dst="$FX/dst-tree"
+  mkdir -p "$src/ts/node_modules/typescript" "$src/ts/src/lib" "$src/.git" "$src/repos"
+  printf 'x\n' > "$src/ts/node_modules/typescript/package.json"
+  printf 'export {}\n' > "$src/ts/src/lib/a.ts"
+  printf '# lib\n' > "$src/lib.sh"; printf 'token\n' > "$src/.env.fleet"
+  copy_fleet "$src" "$dst"
+  assert_no_file "$dst/ts/node_modules/typescript/package.json" "node_modules left behind"
+  [[ -d "$dst/ts/node_modules" ]] && fail "ts/node_modules directory copied" || ok
+  assert_file "$dst/ts/src/lib/a.ts" "ts/src copied"
+  assert_file "$dst/lib.sh" "scripts copied"
+  assert_no_file "$dst/.env.fleet" "machine-local token not copied"
+  [[ -d "$dst/.git" || -d "$dst/repos" ]] && fail ".git or repos copied" || ok
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2570,7 +2602,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
-       case_103_reviewer_model case_104_install_skills)
+       case_103_reviewer_model case_104_install_skills
+       case_105_fixture_excludes_node_modules)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
