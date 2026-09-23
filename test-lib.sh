@@ -2558,6 +2558,34 @@ case_105_fixture_excludes_node_modules() {
   [[ -d "$dst/.git" || -d "$dst/repos" ]] && fail ".git or repos copied" || ok
 }
 
+# One classifier. The verdict (launch.sh) and a builder's own check
+# (check-mutation.sh) both reach ts/src/lib/vitest-json.ts, the one place a
+# runner's JSON becomes a class. Replace that file with a stub that answers
+# GREEN to everything: a marker mutation the fake runner would catch must
+# then come out GREEN from both, and the veto must follow. Red while either
+# caller still classifies in bash.
+case_106_one_classifier() {
+  CASE="106 the verdict and check-mutation.sh share one classifier"; fixture c106
+  cat > "$FLEET/ts/src/lib/vitest-json.ts" <<'STUB'
+import type { RunClass } from './types.ts';
+export function classFromVitestJson(_text: string | undefined): RunClass { return 'GREEN'; }
+export function readVitestJson(_path: string): string | undefined { return ''; }
+STUB
+  local m="$REPO/.review-out/mutations" out rc
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation.sh gives the stub's answer"
+  assert_eq "$rc" 1 "and exits 1"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the verdict gives the stub's answer"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "and the veto follows"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2603,7 +2631,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
        case_103_reviewer_model case_104_install_skills
-       case_105_fixture_excludes_node_modules)
+       case_105_fixture_excludes_node_modules case_106_one_classifier)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
