@@ -17,14 +17,20 @@ export interface RunOptions {
   cwd?: string;
   /** Text for the child's stdin; absent means /dev/null. */
   input?: string;
+  /** The child's whole environment; absent means this process's. */
+  env?: NodeJS.ProcessEnv;
+  /** 'inherit' passes the child's stderr through to ours (a bash `die` that
+   *  should reach the terminal unchanged); the result's stderr is then ''. */
+  stderr?: 'inherit';
 }
 
 /** Run a program with an argument array (no shell), capturing both streams. */
 export function runSync(cmd: string, args: readonly string[], o: RunOptions = {}): RunResult {
   const r = spawnSync(cmd, args, {
     ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+    ...(o.env !== undefined ? { env: o.env } : {}),
     encoding: 'utf8',
-    stdio: [o.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    stdio: [o.input !== undefined ? 'pipe' : 'ignore', 'pipe', o.stderr ?? 'pipe'],
     ...(o.input !== undefined ? { input: o.input } : {}),
   });
   return {

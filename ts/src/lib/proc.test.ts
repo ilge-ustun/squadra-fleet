@@ -54,3 +54,19 @@ describe('runBashTo', () => {
     }
   });
 });
+
+describe('runSync options for the config loader', () => {
+  it('env replaces the environment the child sees', () => {
+    const r = runSync('bash', ['-c', 'echo "${FLEET_T_A:-unset}|${HOME:-nohome}"'], {
+      env: { PATH: process.env['PATH'] ?? '', FLEET_T_A: 'a' },
+    });
+    expect(r.stdout).toBe('a|nohome\n');
+  });
+
+  it("stderr: 'inherit' passes the child's stderr through and captures nothing", () => {
+    const r = runSync('bash', ['-c', 'echo out; exit 0'], { stderr: 'inherit' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('out\n');
+    expect(r.stderr).toBe('');
+  });
+});
