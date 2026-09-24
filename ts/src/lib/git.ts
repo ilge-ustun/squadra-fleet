@@ -3,7 +3,7 @@
 // cwd. Where the bash let git's stderr through to the log (a hook's output,
 // `Preparing worktree …`, a fatal), so does the call here; where it dropped
 // it (`push -q 2>/dev/null`, `worktree remove … 2>/dev/null`), so does this.
-import { runSync, type RunResult } from './proc.ts';
+import { runSync, runToFile, type RunResult } from './proc.ts';
 
 /** `git status --porcelain` minus the untracked .review-out/ line: the one
  *  thing a tree under review is allowed to carry (mutation.sh@8fe954a:27). Empty
@@ -81,9 +81,10 @@ export function worktreeAdd(root: string, path: string, o: WorktreeAddOptions): 
 }
 
 /** `git worktree remove <path> --force 2>/dev/null`: both streams dropped,
- *  nothing thrown — cleanup_reviewer runs on every exit. */
-export function worktreeRemoveForce(root: string, path: string): void {
-  runSync('git', ['-C', root, 'worktree', 'remove', path, '--force']);
+ *  nothing thrown — cleanup_reviewer runs on every exit. The status is
+ *  returned for merge.sh:253, which tells the human when it failed. */
+export function worktreeRemoveForce(root: string, path: string): number {
+  return runSync('git', ['-C', root, 'worktree', 'remove', path, '--force']).status;
 }
 
 /** `git merge-base <a> <b>`; '' when git cannot answer (the bash logged
@@ -123,4 +124,80 @@ export function commit(root: string, msg: string): number {
 /** `git push -q 2>/dev/null`. */
 export function pushQuiet(root: string): number {
   return runSync('git', ['-C', root, 'push', '-q']).status;
+}
+
+// ── landing's operations (merge.sh, revert.sh, reset.sh — seam 5) ────────────
+
+/** `git push -q origin <src>:refs/heads/<dst>`, stderr through (merge.sh:143,205;
+ *  revert.sh:57) — the one push whose refusal a human must read. */
+export function pushRef(root: string, src: string, dstBranch: string): number {
+  return runSync('git', ['-C', root, 'push', '-q', 'origin', `${src}:refs/heads/${dstBranch}`], { stderr: 'inherit' }).status;
+}
+
+/** `git merge --no-ff <ref> -m <msg> > log 2>&1` in the throwaway worktree
+ *  (merge.sh:167): git's whole account goes to the file, nothing to the terminal. */
+export function mergeNoFf(wt: string, ref: string, msg: string, logFile: string): number {
+  return runToFile('git', ['-C', wt, 'merge', '--no-ff', ref, '-m', msg], { logFile });
+}
+
+/** `git merge --abort 2>/dev/null`: both streams dropped, nothing thrown. */
+export function mergeAbort(wt: string): void {
+  runSync('git', ['-C', wt, 'merge', '--abort']);
+}
+
+/** `git revert -m 1 --no-edit <sha> > log 2>&1` (revert.sh:51): -m 1 keeps
+ *  the side that was merged into, i.e. the epic without the story. */
+export function revertMerge(wt: string, sha: string, logFile: string): number {
+  return runToFile('git', ['-C', wt, 'revert', '-m', '1', '--no-edit', sha], { logFile });
+}
+
+/** `git revert --abort 2>/dev/null`. */
+export function revertAbort(wt: string): void {
+  runSync('git', ['-C', wt, 'revert', '--abort']);
+}
+
+/** `git branch -f <name> <sha> >/dev/null 2>&1` (merge.sh:214, revert.sh:60):
+ *  non-zero when the branch is checked out somewhere, which the caller warns about. */
+export function branchForce(root: string, name: string, sha: string): number {
+  return runSync('git', ['-C', root, 'branch', '-f', name, sha]).status;
+}
+
+/** `git branch -D <name> >/dev/null` (reset.sh:77), stderr through. */
+export function branchDelete(root: string, name: string): number {
+  return runSync('git', ['-C', root, 'branch', '-D', name], { stderr: 'inherit' }).status;
+}
+
+/** `git worktree prune` (reset.sh:74). */
+export function worktreePrune(root: string): void {
+  runSync('git', ['-C', root, 'worktree', 'prune'], { stderr: 'inherit' });
+}
+
+/** The `branch refs/heads/…` lines of `git worktree list --porcelain`: every
+ *  ref some worktree has checked out (merge.sh:211's `grep -qx "branch …"`);
+ *  a detached worktree contributes none. */
+export function worktreeCheckedOutBranches(root: string): string[] {
+  const r = runSync('git', ['-C', root, 'worktree', 'list', '--porcelain']);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split('\n')
+    .filter((l) => l.startsWith('branch '))
+    .map((l) => l.slice('branch '.length));
+}
+
+/** `git ls-files --error-unmatch -- <path> >/dev/null 2>&1` (reset.sh:93): does
+ *  git know the path, so that `add -A` on it cannot fail (L-02). */
+export function lsFilesTracked(root: string, path: string): boolean {
+  return runSync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', path]).status === 0;
+}
+
+/** `git add -A -- <path>` (reset.sh:94): stages a deletion as well as a change. */
+export function addAll(root: string, path: string): number {
+  return runSync('git', ['-C', root, 'add', '-A', '--', path], { stderr: 'inherit' }).status;
+}
+
+/** `git --no-pager log --oneline <range>` (reset.sh:63), trailing newlines
+ *  stripped; '' when git cannot answer. */
+export function logOneline(root: string, range: string): string {
+  const r = runSync('git', ['-C', root, '--no-pager', 'log', '--oneline', range], { stderr: 'inherit' });
+  return r.status === 0 ? r.stdout.replace(/\n+$/, '') : '';
 }

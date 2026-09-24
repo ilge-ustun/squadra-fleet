@@ -65,3 +65,59 @@ export function setStoryField(root: string, id: string, key: string, value: stri
     writeFileSync(f, `---\n${key}: ${value}\n---\n\n${text.replace(/\n+$/, '')}\n`);
   }
 }
+
+// ── the writers landing needs (seam 5) ───────────────────────────────────────
+//
+// The sed lines they replace searched the whole file: merge.sh:229-233
+// (`grep -q '^merged:'`, `0,/^merged:.*/`), revert.sh:67 (`/^merged:/d`),
+// reset.sh:83 (`0,/^status:.*/`, `0,/^round:.*/`). A `merged:` or `status:`
+// in a story's prose was edited too. These three touch the record only — the
+// lines between a `---` on line 1 and the next `---` — a deliberate
+// non-parity, pinned in frontmatter.test.ts.
+
+/** The index range of the record's lines: [1, end), end being the closing
+ *  `---` or the file's end; undefined when line 1 is not `---`. */
+function recordRange(lines: readonly string[]): number | undefined {
+  if (lines[0] !== '---') return undefined;
+  const close = lines.indexOf('---', 1);
+  return close === -1 ? lines.length : close;
+}
+
+/** sed's first-match substitution (`0,/^key:.*\/s//key: value/`) within the
+ *  record: the first `key:` line becomes `key: value`; nothing is inserted
+ *  when there is none. True when the file was written. */
+export function replaceFrontmatterField(file: string, key: string, value: string): boolean {
+  const lines = readFileSync(file, 'utf8').split('\n');
+  const end = recordRange(lines);
+  if (end === undefined) return false;
+  const i = lines.slice(0, end).findIndex((l, n) => n > 0 && l.startsWith(`${key}:`));
+  if (i === -1) return false;
+  lines[i] = `${key}: ${value}`;
+  writeFileSync(file, lines.join('\n'));
+  return true;
+}
+
+/** `sed -i "/^key:/d"` within the record: every `key:` line goes. Returns
+ *  how many went; the file is written only when one did. */
+export function deleteFrontmatterField(file: string, key: string): number {
+  const lines = readFileSync(file, 'utf8').split('\n');
+  const end = recordRange(lines);
+  if (end === undefined) return 0;
+  const kept = lines.filter((l, n) => !(n > 0 && n < end && l.startsWith(`${key}:`)));
+  const n = lines.length - kept.length;
+  if (n > 0) writeFileSync(file, kept.join('\n'));
+  return n;
+}
+
+/** merge.sh:228-234: under a `---` first line, the record's first `merged:`
+ *  line becomes `merged: <sha>` (an empty one replaced in place, not doubled
+ *  as set_story_field would), else `merged: <sha>` is inserted after line 1.
+ *  No frontmatter: nothing recorded, false — the caller warns as the bash did. */
+export function recordMergedSha(file: string, sha: string): boolean {
+  if (replaceFrontmatterField(file, 'merged', sha)) return true;
+  const lines = readFileSync(file, 'utf8').split('\n');
+  if (recordRange(lines) === undefined) return false;
+  lines.splice(1, 0, `merged: ${sha}`);
+  writeFileSync(file, lines.join('\n'));
+  return true;
+}

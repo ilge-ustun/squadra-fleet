@@ -7,33 +7,19 @@
 // the reviewer worktree is removed and the process ends with 128+signal, as
 // the bash EXIT trap did — the agent's process group is left alone, as bash
 // left it (L-04).
-import { constants } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
+import { Die } from '../lib/die.ts';
+import { installExitHooks } from '../lib/exit-hooks.ts';
 import { dieMessage } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
-import { Die, launch } from '../launch.ts';
+import { launch } from '../launch.ts';
 
 const USAGE = 'usage: launch.sh <repo> [story-id|--reap]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
-const exitHooks: Array<() => void> = [];
-const runHooks = (): void => {
-  for (const h of exitHooks.splice(0)) {
-    try {
-      h();
-    } catch {
-      /* cleanup is best effort, as the trap's was */
-    }
-  }
-};
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
-  process.on(sig, () => {
-    runHooks();
-    process.exit(128 + constants.signals[sig]);
-  });
-}
+const onExit = installExitHooks();
 
 const onPath = (name: string): boolean => runSync('bash', ['-c', 'command -v "$1"', '_', name]).status === 0;
 
@@ -45,7 +31,7 @@ async function main(argv: readonly string[]): Promise<number> {
     if (!onPath(tool)) throw new Die(`${tool} not on PATH`);
   }
   for (const d of ['.stories', '.review', '.runs', '.blocked']) mkdirSync(`${cfg.root}/${d}`, { recursive: true });
-  return launch(cfg, { fleetHome: FLEET_HOME, argv: rest, env: process.env, onExit: (fn) => exitHooks.push(fn) });
+  return launch(cfg, { fleetHome: FLEET_HOME, argv: rest, env: process.env, onExit });
 }
 
 main(process.argv.slice(2)).then(

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { baselineColour, runBaseline } from './baseline.ts';
+import { baselineColour, runBaseline, runMergeBaseline } from './baseline.ts';
+import { readdirSync, realpathSync } from 'node:fs';
 
 // launch.sh:129-152 — the harness runs the suite, the build and the lint in
 // the clean reviewer tree, before the reviewer is asked anything.
@@ -116,5 +117,63 @@ describe('runBaseline', () => {
     run({ buildCmd: 'pwd -P' });
     expect(readFileSync(join(ev, 'baseline/build.log'), 'utf8').trim()).toBe(readFileSync(join(ev, 'baseline/build.log'), 'utf8').trim());
     expect(readFileSync(join(ev, 'baseline/build.log'), 'utf8')).toMatch(/\/wt\n$/);
+  });
+});
+
+// merge.sh:186-193 — the post-merge baseline: the same three commands in the
+// merge worktree, but whole logs under .runs/<logid>-merge-*.log (no tail),
+// no summary file, and the install step outside (merge.ts runs it first,
+// with its own log and die, as launch.ts does).
+describe('runMergeBaseline', () => {
+  let dir: string; let wt: string; let runs: string;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fleet-mbaseline-'));
+    wt = join(dir, 'wt'); runs = join(dir, 'runs');
+    mkdirSync(join(wt, 'src'), { recursive: true }); mkdirSync(runs); mkdirSync(join(dir, 'trace'));
+    writeFileSync(join(wt, 'src/marker.txt'), 'm\n');
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) saved[k] = process.env[k];
+    process.env['FAKE_TRACE_DIR'] = join(dir, 'trace');
+  });
+  afterEach(() => {
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const run = (o: { vitestCmd?: string; buildCmd?: string; lintCmd?: string } = {}) =>
+    runMergeBaseline({
+      wt, rawJson: join(runs, '900-merge-baseline.json'),
+      testLog: join(runs, '900-merge-test.log'), buildLog: join(runs, '900-merge-build.log'), lintLog: join(runs, '900-merge-lint.log'),
+      vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true',
+    });
+
+  it('all green: the three colours, the four files under .runs and nothing else — no summary', () => {
+    process.env['FAKE_VITEST'] = 'pass';
+    expect(run()).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+    expect(readdirSync(runs).sort()).toEqual(['900-merge-baseline.json', '900-merge-build.log', '900-merge-lint.log', '900-merge-test.log']);
+    expect(readFileSync(join(runs, '900-merge-build.log'), 'utf8')).toBe('');
+  });
+
+  it('a failing suite, zero tests, and a runner that writes no JSON (a stale raw file removed first): RED', () => {
+    process.env['FAKE_VITEST'] = 'fail';
+    expect(run().test).toBe('RED');
+    process.env['FAKE_VITEST'] = 'notests';
+    expect(run().test).toBe('RED');
+    writeFileSync(join(runs, '900-merge-baseline.json'), '{"numTotalTests":2,"numFailedTests":0}');
+    expect(run({ vitestCmd: 'true' }).test).toBe('RED');
+    expect(existsSync(join(runs, '900-merge-baseline.json'))).toBe(false);
+  });
+
+  it('build and lint: the status is the command\'s, the whole of both streams in the log (no tail — runBaseline keeps 200)', () => {
+    process.env['FAKE_VITEST'] = 'pass';
+    expect(run({ buildCmd: 'seq 1 300; echo err >&2; exit 1', lintCmd: 'false' })).toEqual({ test: 'GREEN', build: 'RED', lint: 'RED' });
+    const log = readFileSync(join(runs, '900-merge-build.log'), 'utf8').split('\n');
+    expect(log.length).toBe(302);
+    expect(log[0]).toBe('1');
+    expect(log[300]).toBe('err');
+  });
+
+  it('runs in the worktree, each command a bash line', () => {
+    process.env['FAKE_VITEST'] = 'pass';
+    expect(run({ buildCmd: `test "$(pwd -P)" = "${realpathSync(wt)}"`, lintCmd: 'cd src && test -f marker.txt' })).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
   });
 });
