@@ -55,8 +55,32 @@ Later seams run everything in one process, so these are set now:
    its reasons are in the record). Lanes and a story-selection lock are
    features, not migration, and were left where they were.
 
-`telegram.sh`, `merge.sh`, `reset.sh`, `revert.sh`, `run-queue.sh` and the
-systemd side stay bash indefinitely.
+The plan first said "`telegram.sh`, `merge.sh`, `reset.sh`, `revert.sh`,
+`run-queue.sh` and the systemd side stay bash indefinitely". **Reversed by
+the human on 24 Sep 2026**, after the first real stories ran on the
+TypeScript fleet: the migration continues, in this order.
+
+5. **`merge.sh`, then `revert.sh` and `reset.sh`** — landing, where
+   correctness matters most. `status.ts` in-process instead of
+   `status.sh --json | jq`, `baselineColour` for the post-merge baseline,
+   `git.ts`, `procs.ts`, `frontmatter.ts`. No fleet lock inside the three
+   (the bash never took one; the bot holds it around them).
+6. **`run-queue.sh`** — one `nextReady`, shared with the launcher, which
+   settles the `TEMPLATE.md` disagreement. The process boundary between the
+   queue and a story's launcher stays: it isolates memory and a die.
+7. **Story authoring**: `lint-story.sh`, `write-story.sh`, `new-epic.sh`.
+   `render.sh` retires with `write-story.sh`, its last user. The citation
+   checks against a story's base are the delicate part.
+8. **`telegram.sh`** — the hard part is testing: the bot's `curl` is faked
+   on PATH, Node's `fetch` bypasses PATH, so the suite needs a new seam (an
+   API base URL pointing at a local fake server) before anything moves.
+   `flock` becomes `lock.ts`.
+
+Small ones any time: `install-skills.sh`, `update-agents.sh`, the wrappers.
+
+Stays bash: `lib.sh`'s `load_repo` as the `.fleet/config` contract (a
+target's config is sourced bash; `config.ts` reads it through a child
+bash), `test-lib.sh` as the acceptance layer, and the systemd units.
 
 ## Seam 1: the classifier, as built (branch `ts-classifier`, 23 Sep 2026)
 
