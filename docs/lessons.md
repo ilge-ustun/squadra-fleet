@@ -492,3 +492,37 @@ log; a case removes `.runs/` before an `--epic` merge and before a revert.
 
 **Enforced by:** `case_125_merge_through_the_loader` (125b, red under the bash: a
 checkout without `.runs/` merges), `case_126_revert_through_the_loader` (126b).
+
+### L-30 — a glob that includes a placeholder is a bug waiting for the placeholder to look real
+
+`run-queue.sh`'s `next_ready` explicitly skipped `TEMPLATE.md`
+(`[[ "$id" == "TEMPLATE" ]] && continue`); `launch.ts`'s own `nextReady`,
+ported from `launch.sh`'s original glob, did not — a comment even recorded
+the choice: "the bash glob did not skip it." The gap sat unnoticed because
+nothing had ever set `TEMPLATE.md`'s own `status:` to `ready`. But
+`TEMPLATE.md`'s frontmatter is not a comment — it is the real file every
+`write-story.sh` copies from, and its `status: ready` line is the
+placeholder text itself, never meant to be edited, sitting in every target
+repo including khaita's. A bare `launch.sh <repo>` (no story id — a human
+testing something by hand, not a path the queue or the bot ever calls)
+picks `argv[0] || nextReady()`: with nothing else ready, `nextReady()`
+found `TEMPLATE`, and the launcher ran the whole pipeline against it,
+leaving it `needs_human` with a builder's mutations in its frontmatter.
+
+**Lesson:** a glob or a loop over "every story" is a claim about what
+counts as a story. When one entry is a template, a fixture, or otherwise
+not real data, the code that iterates "every story" must say so at the
+point of iteration — not rely on every value that entry could ever hold
+being obviously wrong. `TEMPLATE.md`'s placeholder frontmatter meeting the
+literal condition for "ready" was not a contrived edge case; it was the
+file as shipped.
+
+**Prevention:** the exclusion moved to one place, `status.ts`'s
+`storyIds`, and every chooser of "the next story" — the launcher's bare
+invocation, the queue's drain — reads through it. There is now one
+`nextReady`, not two that could drift again.
+
+**Enforced by:** `case_128_bare_launch_never_picks_template` (red against
+real `launch.ts` before the fix: a bare launch with `TEMPLATE.md` at
+`status: ready` and nothing else ready actually ran the pipeline against
+it, leaving it `needs_human`).

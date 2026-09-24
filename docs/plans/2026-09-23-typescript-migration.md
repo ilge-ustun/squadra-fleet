@@ -1,4 +1,4 @@
-# Fleet: the migration to TypeScript — plan, and seams 1–4 as built
+# Fleet: the migration to TypeScript — plan, and seams 1–6 as built
 
 Decided by the human on 23 Sep 2026 (`FLEET-HANDOFF.md` §9): the harness
 moves from bash to TypeScript, one seam at a time behind the existing
@@ -60,14 +60,11 @@ The plan first said "`telegram.sh`, `merge.sh`, `reset.sh`, `revert.sh`,
 the human on 24 Sep 2026**, after the first real stories ran on the
 TypeScript fleet: the migration continues, in this order.
 
-5. **`merge.sh`, then `revert.sh` and `reset.sh`** — landing, where
-   correctness matters most. `status.ts` in-process instead of
-   `status.sh --json | jq`, `baselineColour` for the post-merge baseline,
-   `git.ts`, `procs.ts`, `frontmatter.ts`. No fleet lock inside the three
-   (the bash never took one; the bot holds it around them).
-6. **`run-queue.sh`** — one `nextReady`, shared with the launcher, which
-   settles the `TEMPLATE.md` disagreement. The process boundary between the
-   queue and a story's launcher stays: it isolates memory and a die.
+5. **`merge.sh`, then `revert.sh` and `reset.sh`** — built, below.
+6. **`run-queue.sh`** — built, below. One `nextReady`, shared with the
+   launcher, settled the `TEMPLATE.md` disagreement. The process boundary
+   between the queue and a story's launcher stayed: it isolates memory and
+   a die.
 7. **Story authoring**: `lint-story.sh`, `write-story.sh`, `new-epic.sh`.
    `render.sh` retires with `write-story.sh`, its last user. The citation
    checks against a story's base are the delicate part.
@@ -453,3 +450,74 @@ record's push was refused and the human's `git pull --ff-only` failed
 fast-forwarded to the merge before the record (`currentBranch`,
 `mergeFfOnly`, `porcelain`); a dirty one keeps the warning and the local
 record. Case 120c (red against the port as merged), 120d for the dirty tree.
+
+## Seam 6: `run-queue.sh`, as built (branch `ts-landing-6`, 24 Sep 2026)
+
+```
+ts/src/run-queue.ts            runQueue (the drain loop, the closing table), refreshFromOrigin, runAll (--all's
+                               registry walk), and their pure parts: readMax, formatRanLine, registeredRepos
+ts/src/bin/run-queue.ts        argv → --all or loadRepo → the module; Die and ConfigError as the other bins; no
+                               exit hooks — run-queue.sh never trapped a signal
+ts/src/status.ts               += nextReady: the one choice, shared with the launcher (below)
+ts/src/launch.ts               its own private nextReady deleted; the bare-launch path calls status.ts's
+ts/src/lib/git.ts              += upstreamBranch, gitDir, fetchQuiet, mergeNoEditQuiet — refresh_from_origin's needs
+ts/src/lib/proc.ts             += runInherit: stdio fully inherited, for the queue's own calls into launch.sh
+                               and merge.sh, whose every log line is the point
+run-queue.sh                   wrapper: source lib.sh, require node, exec the bin
+test-lib.sh                    case 128 (the nextReady fix, red before it — bundled in the same commit, not
+                               split, since a red case cannot be committed alone under the suite-green rule);
+                               129-131 (the loop guards and refresh resilience, characterised before the port,
+                               each seen red against a scratch copy with the guard defeated)
+```
+
+What changed in substance:
+
+- **One `nextReady`, not two that disagreed.** `run-queue.sh`'s own
+  `next_ready` (`:60-68`) explicitly skipped `TEMPLATE.md`; `launch.ts`'s
+  private `nextReady` did not — it was built on `storyFiles()`, a deliberate
+  copy of the bash launcher's original, non-skipping glob (seam 4's own
+  comment said so). Not hypothetical: khaita's real `TEMPLATE.md` carries
+  `status: ready` in its own frontmatter (the placeholder value, never
+  edited), so a bare `launch.sh <repo>` — a human testing something by hand,
+  not a path the queue or the bot ever calls — would pick `TEMPLATE` and
+  actually run the pipeline against it, leaving it `needs_human` (case 128,
+  red before this seam, verified against real `launch.ts`). Fixed by moving
+  the choice into `status.ts`'s `nextReady`, built on `storyIds` (already
+  `TEMPLATE`-excluding), and pointing both the launcher and the queue at it.
+- **Each story stays a separate process.** `runQueue` never calls `launch()`
+  or `merge()` in-process; it shells to `bash launch.sh`/`bash merge.sh` with
+  `runInherit` (stdio fully inherited, a new `proc.ts` primitive — neither
+  `runSync`, which always captures stdout, nor `runToFile`, which redirects
+  to a log, fits a child whose output is meant to reach the terminal as it
+  happens). `--all` still re-execs the bash wrapper once per registered
+  repo, for the same reason: the process boundary isolates one story's or
+  one repo's crash or `Die` from the rest of the drain — the plan's own
+  seam-6 entry had already decided this before the port began.
+- **A no-op scrape, dropped.** `run-queue.sh:138` awk-scraped `computed:`'s
+  reasons out of the review file into `$reasons` — read by nothing
+  afterward, in the bash itself. Not ported.
+- **Two parity gaps, found by the old-vs-new diff, not by any test-lib
+  case** (none happened to assert the absence of either): `LOG_TAG=queue`
+  (`run-queue.sh:30`) prefixes every one of the queue's own log/warn lines
+  `[queue] ` — not inherited by the launch.sh/merge.sh children it starts
+  (an unexported bash variable, and each is a fresh process here too), so
+  only the queue's own lines carry it; the port had passed no tag at all
+  until fixed. `refresh_from_origin`'s merge (`:94`) redirects only stderr
+  (`2>/dev/null`), so git's own stdout — `Already up to date.`, a merge
+  summary — reached the log; `mergeNoEditQuiet` had captured and dropped
+  both streams until fixed to print captured stdout through.
+
+Verified: `bash test-lib.sh` 884/884 (cases 128-131 new, seen red first;
+41, 41b, 69-71, 87, 91d, 99 pass unmodified against the real port); 446 unit
+tests (433 before), tsc clean. Parity beyond the suite: 9 scenarios — an
+empty queue, a PASS auto-merge, a computed FAIL, `AUTO_MERGE=0`, the
+`--max` ceiling, `TEMPLATE.md` at `status: ready` with nothing else ready,
+`refresh_from_origin` with no upstream, with a fetch failure, and `--all`
+over two repos — run under the pre-seam-6 bash (`git show main:run-queue.sh`
+at `main`'s tip before this branch) and under the TypeScript port, on
+identical fixtures: byte-identical (stdout+stderr+exit) after normalising
+shas, timestamps and the fixture's own path, and after the two fixes above.
+The fixture never carries `ts/node_modules`.
+
+Next: seam 7, story authoring — `lint-story.sh`, `write-story.sh`,
+`new-epic.sh`; `render.sh` retires with `write-story.sh`, its last user.
