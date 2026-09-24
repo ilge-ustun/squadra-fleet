@@ -50,6 +50,26 @@ systemctl --user enable --now fleet-queue.timer
 systemctl --user enable --now fleet-bot.timer
 ```
 
+### The agent updater (a third pair)
+
+The fleet names models by alias (`sonnet`, `opus`, `haiku`, codex's own
+default), and an alias is only as new as the CLI resolving it. Claude Code
+updates itself; codex, an npm global under nvm, does not.
+`fleet-agents-update.timer` runs `update-agents.sh` on Sundays at 04:30: it
+runs `claude update` and `npm install -g @openai/codex@latest`, and does
+nothing (exit 0) while `fleet-queue.service` is active.
+
+```bash
+ln -sf ~/work/fleet/systemd/fleet-agents-update.service ~/.config/systemd/user/
+ln -sf ~/work/fleet/systemd/fleet-agents-update.timer   ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-agents-update.timer
+```
+
+The models each round actually ran on are in the review's Machine block
+(`builder:  sonnet → claude-sonnet-5`, `reviewer: codex → gpt-6-astra`), so
+a release that changes behaviour shows up in the verdicts' history.
+
 ### Before the bot pair will do anything
 
 Create the bot with **@BotFather** on Telegram (`/newbot`), then send it any

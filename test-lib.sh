@@ -2848,6 +2848,34 @@ case_116_lint_story_model() {
   lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
 }
 
+# 24 Sep. Aliases only track new releases if the CLIs themselves are new:
+# Claude Code updates itself, codex (an npm global under nvm) never does.
+# update-agents.sh updates both, and only while the queue is idle — a codex
+# replaced under a running reviewer is a dead round.
+#
+# Red while update-agents.sh does not exist.
+case_117_update_agents() {
+  CASE="117 update-agents.sh updates both CLIs, never under a running queue"; fixture c117
+  local B="$FX/bin" out rc
+  mkdir -p "$B"
+  printf '#!/usr/bin/env bash\necho "claude $*" >> "%s/calls"\necho 9.9.9\n' "$TRACE" > "$B/claude"
+  printf '#!/usr/bin/env bash\necho "codex $*" >> "%s/calls"\necho codex-cli 9.9.9\n' "$TRACE" > "$B/codex"
+  printf '#!/usr/bin/env bash\necho "npm $*" >> "%s/calls"\n' "$TRACE" > "$B/npm"
+  chmod +x "$B/claude" "$B/codex" "$B/npm"
+  upd() { out="$( env PATH="$B:$PATH" FLEET_QUEUE_ACTIVE_CMD="$1" bash "$FLEET/update-agents.sh" 2>&1 )"; rc=$?; }
+
+  upd true
+  assert_eq "$rc" 0 "a running queue is not a failure"
+  assert_contains "$out" "queue is running" "it says why it did nothing"
+  assert_not_grep '^claude update' "$TRACE/calls" "claude untouched"
+  assert_not_grep '^npm ' "$TRACE/calls" "codex untouched"
+
+  upd false
+  assert_eq "$rc" 0 "idle: exit 0"
+  assert_grep '^claude update$' "$TRACE/calls" "claude updated"
+  assert_grep '^npm install -g @openai/codex@latest' "$TRACE/calls" "codex updated to latest"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2899,7 +2927,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
        case_112_reviewer_without_a_message case_113_launch_through_the_loader
        case_114_haiku_builds_one_round case_115_block_records_the_models_used
-       case_116_lint_story_model)
+       case_116_lint_story_model case_117_update_agents)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

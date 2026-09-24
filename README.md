@@ -226,6 +226,7 @@ answered by `telegram.sh poll` every minute.
 | `revert.sh <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
 | `reset.sh <repo> <id> [--force] [--draft]` | | back to the queue |
 | `install-skills.sh` | | link `skills/` into `~/.claude/skills` and `~/.codex/skills` |
+| `update-agents.sh` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
 | `test-lib.sh [substring]` | | the harness's own suite |
 
 A merge from the phone is detached: the bot acknowledges it immediately and
