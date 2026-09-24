@@ -70,11 +70,11 @@ checkout, which is usually `develop`):
 9. **model:** in the frontmatter names the builder's model, as an alias
    only (`lint-story.sh` refuses anything else), so a new release is
    picked up with no edit: omit it for the default (`sonnet`) on a bounded
-   story; `haiku` for a small, fully specified one (one or two files, one
-   or two ACs, every instrument spelled out; it builds round 1 only, then
-   the default takes over); `opus` for design-heavy or diagnose-first
-   stories (service-worker rewrites, state machines, an unknown cause).
-   `fable` only after a trial is recorded in `docs/coordinator-trials.md`.
+   story; `opus` for design-heavy or diagnose-first stories (service-worker
+   rewrites, state machines, an unknown cause). `fable` only after a trial
+   is recorded in `docs/coordinator-trials.md`. (`haiku` was retired 24 Sep
+   2026 — both real trials, khaita 021 and 025, needed round-2 escalation
+   on round 1, so the cheap tier never once saved a round.)
 
 Hand-edit what the review found. Keep the writer's citations unless you
 verified a replacement. After any edit:
