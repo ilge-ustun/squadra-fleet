@@ -1849,6 +1849,13 @@ case_84_prompts_carry_the_targets_facts() {
   assert_eq "$(field status)" done "the round completes"
   assert_not_grep '{{REPO_RULES}}' "$TRACE/claude-prompt-1" "no leftover placeholder"
   assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
+
+  # 24 Sep: 025's round 1 passed its tests and failed the baseline on a
+  # type error that only the build reports; the builder had never been told
+  # the build or the lint exist. Red while the rules name only the tests.
+  CASE="84d the builder is told to run the baseline's three commands"; fixture c84d
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep "baseline, on your final commit: $FLEET/test/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
 }
 
 # One fleet, many repos. `--all` walks the registry and drains each repo in
