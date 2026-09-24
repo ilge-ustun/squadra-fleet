@@ -3,7 +3,7 @@ import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { procsInWorktree } from './procs.ts';
-import { run, runBashTo, runSync, runToFile } from './proc.ts';
+import { run, runBashTo, runInherit, runSync, runToFile } from './proc.ts';
 
 describe('runSync', () => {
   it('returns the exit status and both streams', () => {
@@ -146,6 +146,24 @@ describe('run', () => {
     const r = await run('bash', ['-c', 'sleep 0.2; echo done'], { cwd: dir, timeoutSec: 0, stderr: 'merge' });
     expect(r.timedOut).toBe(false);
     expect(r.stdout).toBe('done\n');
+  });
+});
+
+describe('runInherit', () => {
+  it('the exit status, -1 when the program cannot start', () => {
+    expect(runInherit('bash', ['-c', 'exit 0'])).toBe(0);
+    expect(runInherit('bash', ['-c', 'exit 7'])).toBe(7);
+    expect(runInherit('/nonexistent/prog', [])).toBe(-1);
+  });
+
+  it('cwd and env reach the child, as with the other run* calls', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fleet-proc-inherit-'));
+    runInherit('bash', ['-c', 'pwd > out; echo "$FLEET_T_B" >> out'], {
+      cwd: d,
+      env: { PATH: process.env['PATH'] ?? '', FLEET_T_B: 'b' },
+    });
+    expect(readFileSync(join(d, 'out'), 'utf8')).toBe(`${d}\nb\n`);
+    rmSync(d, { recursive: true, force: true });
   });
 });
 

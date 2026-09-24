@@ -80,6 +80,20 @@ export function runToFile(cmd: string, args: readonly string[], o: ToFileOptions
   }
 }
 
+/** Run a program with stdio fully inherited: the child's stdout and stderr
+ *  reach ours as they happen, interleaved as they would in a shell — the
+ *  queue's own calls into launch.sh and merge.sh, whose every log line is
+ *  the point (run-queue.sh:107,130,146). Returns the exit status, -1 when
+ *  it could not start or died of a signal. */
+export function runInherit(cmd: string, args: readonly string[], o: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): number {
+  const r = spawnSync(cmd, args, {
+    ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+    ...(o.env !== undefined ? { env: o.env } : {}),
+    stdio: 'inherit',
+  });
+  return r.status ?? -1;
+}
+
 export interface AsyncRunOptions {
   cwd?: string;
   /** Text for the child's stdin (the prompt — on stdin, never argv, L-18). */

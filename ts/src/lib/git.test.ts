@@ -8,6 +8,7 @@ import {
   stagedIsEmpty, worktreeAdd, worktreeRemoveForce,
   addAll, branchDelete, branchForce, logOneline, lsFilesTracked, mergeAbort, mergeNoFf, pushRef, revertAbort, revertMerge,
   worktreeCheckedOutBranches, worktreePrune, currentBranch, mergeFfOnly,
+  fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch,
 } from './git.ts';
 import { existsSync, readFileSync } from 'node:fs';
 
@@ -300,6 +301,79 @@ describe('currentBranch and mergeFfOnly', () => {
     const div = g(['rev-parse', 'HEAD']);
     expect(mergeFfOnly(repo, 'ahead')).not.toBe(0);
     expect(g(['rev-parse', 'HEAD'])).toBe(div);
+    expect(g(['status', '--porcelain'])).toBe('');
+  });
+});
+
+describe('the queue\'s refresh_from_origin operations (seam 6)', () => {
+  let d5: string;
+  let bare: string;
+  let clone: string;
+  const ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  function g(args: string[], cwd = clone): string {
+    const r = runSync('git', args, { cwd, env: ENV });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+  beforeAll(() => {
+    d5 = mkdtempSync(join(tmpdir(), 'fleet-git5-'));
+    bare = join(d5, 'origin.git');
+    clone = join(d5, 'clone');
+    runSync('git', ['init', '-q', '--bare', '-b', 'base', bare]);
+    runSync('git', ['clone', '-q', bare, clone]);
+    g(['config', 'user.name', 't']); g(['config', 'user.email', 't@t']);
+    writeFileSync(join(clone, 'a'), 'one\n'); g(['add', '-A']); g(['commit', '-qm', 'one']);
+    g(['push', '-q', '-u', 'origin', 'base']);
+  });
+  afterAll(() => { rmSync(d5, { recursive: true, force: true }); });
+
+  it('upstreamBranch: the tracking branch\'s short name, \'\' with none', () => {
+    expect(upstreamBranch(clone)).toBe('origin/base');
+    const lone = join(d5, 'lone');
+    runSync('git', ['init', '-q', '-b', 'base', lone]);
+    expect(upstreamBranch(lone)).toBe('');
+  });
+
+  it('gitDir: the absolute .git dir; <root>/.git when git cannot answer', () => {
+    expect(existsSync(gitDir(clone))).toBe(true);
+    expect(gitDir(join(d5, 'nowhere'))).toBe(join(d5, 'nowhere', '.git'));
+  });
+
+  it('fetchQuiet: 0 on a real remote, non-zero when it cannot be reached', () => {
+    expect(fetchQuiet(clone, 'origin')).toBe(0);
+    const unreachable = join(d5, 'gone.git');
+    g(['remote', 'set-url', 'origin', unreachable]);
+    expect(fetchQuiet(clone, 'origin')).not.toBe(0);
+    g(['remote', 'set-url', 'origin', bare]);
+  });
+
+  it('mergeNoEditQuiet: fast-forwards on a clean merge, fails (untouched) on a conflict', () => {
+    const other = join(d5, 'other');
+    runSync('git', ['clone', '-q', bare, other]);
+    function o(args: string[]): string {
+      const r = runSync('git', args, { cwd: other, env: ENV });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+      return r.stdout.trim();
+    }
+    o(['config', 'user.name', 't']); o(['config', 'user.email', 't@t']);
+    o(['commit', '--allow-empty', '-qm', 'from elsewhere']);
+    o(['push', '-q']);
+    expect(fetchQuiet(clone, 'origin')).toBe(0);
+    const before = g(['rev-parse', 'HEAD']);
+    expect(mergeNoEditQuiet(clone, 'origin/base')).toBe(0);
+    expect(g(['rev-parse', 'HEAD'])).not.toBe(before);
+
+    // Now a real conflict: both sides touch 'a'.
+    writeFileSync(join(other, 'a'), 'from elsewhere\n');
+    o(['commit', '-qam', 'conflicting']);
+    o(['push', '-q']);
+    writeFileSync(join(clone, 'a'), 'from clone\n');
+    g(['commit', '-qam', 'conflicting too']);
+    const stuck = g(['rev-parse', 'HEAD']);
+    expect(fetchQuiet(clone, 'origin')).toBe(0);
+    expect(mergeNoEditQuiet(clone, 'origin/base')).not.toBe(0);
+    mergeAbort(clone);
+    expect(g(['rev-parse', 'HEAD'])).toBe(stuck);
     expect(g(['status', '--porcelain'])).toBe('');
   });
 });

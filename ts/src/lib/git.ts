@@ -214,3 +214,30 @@ export function currentBranch(root: string): string {
 export function mergeFfOnly(root: string, ref: string): number {
   return runSync('git', ['-C', root, 'merge', '-q', '--ff-only', ref]).status;
 }
+
+// ── the queue's operations (run-queue.sh:79-100 — seam 6) ────────────────────
+
+/** `git rev-parse --abbrev-ref @{u} 2>/dev/null`: the upstream's short name,
+ *  '' when there is none (run-queue.sh:81). */
+export function upstreamBranch(root: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
+/** `git rev-parse --absolute-git-dir 2>/dev/null`, `<root>/.git` on failure
+ *  (run-queue.sh:85) — where MERGE_HEAD/rebase-merge would live. */
+export function gitDir(root: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir']);
+  return r.status === 0 ? r.stdout.trim() : `${root}/.git`;
+}
+
+/** `git fetch <remote> 2>/dev/null` (run-queue.sh:90): both streams dropped,
+ *  a refresh's fetch failure is a warning, not a die. */
+export function fetchQuiet(root: string, remote: string): number {
+  return runSync('git', ['-C', root, 'fetch', remote]).status;
+}
+
+/** `git merge --no-edit <ref> 2>/dev/null` (run-queue.sh:94). */
+export function mergeNoEditQuiet(root: string, ref: string): number {
+  return runSync('git', ['-C', root, 'merge', '--no-edit', ref]).status;
+}
