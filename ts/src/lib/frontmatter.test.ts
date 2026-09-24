@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './proc.ts';
-import { frontmatterField, setStoryField, storyField } from './frontmatter.ts';
+import { deleteFrontmatterField, frontmatterField, recordMergedSha, replaceFrontmatterField, setStoryField, storyField } from './frontmatter.ts';
 
 const FLEET_HOME = join(import.meta.dirname, '../../..');
 
@@ -113,5 +113,98 @@ describe('setStoryField — lib.sh:102-113, byte for byte', () => {
     for (const v of ['a/b', 'a&b', 'a\\b', 'a\nb']) {
       expect(() => tsWrite('---\nstatus: ready\n---\n', 'status', v)).toThrow(/set_story_field/);
     }
+  });
+});
+
+// The writers landing needs (seam 5), each against the sed line it replaces
+// as the oracle — on inputs where the key lives in the frontmatter, the same
+// bytes out. The deliberate non-parity, pinned in the last rows of each: the
+// sed lines searched the whole file (`0,/^merged:.*/`, `/^merged:/d`), so a
+// `merged:` or `status:` in the story's body was edited too; these touch the
+// record between the `---` lines only.
+describe('the frontmatter writers of merge.sh, revert.sh and reset.sh', () => {
+  function withFile(text: string, f: (p: string) => void): string {
+    const p = join(mkdtempSync(join(dir, 'w-')), 's.md');
+    writeFileSync(p, text);
+    f(p);
+    return readFileSync(p, 'utf8');
+  }
+  const sed = (p: string, expr: string): void => {
+    const r = runSync('sed', ['-i', expr, p], { env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' } });
+    if (r.status !== 0) throw new Error(r.stderr);
+  };
+  // merge.sh:228-234: record only when line 1 is `---`; replace the first
+  // `merged:` anywhere, else insert after line 1.
+  const bashRecord = (p: string, sha: string): void => {
+    const r = runSync('bash', ['-c',
+      'f="$1"; sha="$2"; if awk \'NR==1 && $0=="---"\' "$f" | grep -q .; then if grep -q "^merged:" "$f"; then sed -i "0,/^merged:.*/s//merged: $sha/" "$f"; else sed -i "1a merged: $sha" "$f"; fi; fi',
+      '_', p, sha], { env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' } });
+    if (r.status !== 0) throw new Error(r.stderr);
+  };
+
+  describe('replaceFrontmatterField — reset.sh:83\'s `0,/^key:.*/s//key: v/`, first line in the record, nothing inserted', () => {
+    it.each([
+      ['present', '---\nstatus: needs_human\nround: 2\n---\n\n# S\n', 'status', 'ready', true],
+      ['the second key', '---\nstatus: needs_human\nround: 2\n---\n\n# S\n', 'round', '0', true],
+      ['present twice: the first', '---\nround: 2\nround: 3\n---\n', 'round', '0', true],
+      ['present but empty: replaced in place', '---\nmerged:\n---\n', 'merged', 'abc1234', true],
+      ['absent: nothing written', '---\nstatus: x\n---\n', 'round', '0', false],
+      ['no final newline', '---\nstatus: x\n---', 'status', 'y', true],
+    ])('%s', (_name, text, key, value, changed) => {
+      let ret = false;
+      const ts = withFile(text, (p) => { ret = replaceFrontmatterField(p, key, value); });
+      const sh = withFile(text, (p) => sed(p, `0,/^${key}:.*/s//${key}: ${value}/`));
+      expect(ts).toBe(sh);
+      expect(ret).toBe(changed);
+      expect(ts !== text).toBe(changed);
+    });
+    it('non-parity, pinned: a key in the body is not the record; line 1 not --- is no record', () => {
+      const body = '---\nround: 1\n---\nstatus: done\n';
+      expect(withFile(body, (p) => expect(replaceFrontmatterField(p, 'status', 'ready')).toBe(false))).toBe(body);
+      expect(withFile(body, (p) => sed(p, '0,/^status:.*/s//status: ready/'))).toBe('---\nround: 1\n---\nstatus: ready\n');
+      const bare = 'status: x\n';
+      expect(withFile(bare, (p) => expect(replaceFrontmatterField(p, 'status', 'y')).toBe(false))).toBe(bare);
+    });
+  });
+
+  describe('deleteFrontmatterField — revert.sh:67\'s `/^merged:/d`, within the record', () => {
+    it.each([
+      ['one line', '---\nstatus: done\nmerged: abc\n---\n\n# S\n', 'merged', 1],
+      ['absent', '---\nstatus: done\n---\n', 'merged', 0],
+      ['twice in the record: both go', '---\nmerged: a\nmerged: b\nstatus: done\n---\n', 'merged', 2],
+      ['present but empty', '---\nmerged:\n---\n', 'merged', 1],
+    ])('%s', (_name, text, key, n) => {
+      let ret = -1;
+      const ts = withFile(text, (p) => { ret = deleteFrontmatterField(p, key); });
+      const sh = withFile(text, (p) => sed(p, `/^${key}:/d`));
+      expect(ts).toBe(sh);
+      expect(ret).toBe(n);
+    });
+    it('non-parity, pinned: a merged: line in the body survives', () => {
+      const text = '---\nmerged: a\n---\n\nmerged: in the prose\n';
+      expect(withFile(text, (p) => expect(deleteFrontmatterField(p, 'merged')).toBe(1))).toBe('---\n---\n\nmerged: in the prose\n');
+      expect(withFile(text, (p) => sed(p, '/^merged:/d'))).toBe('---\n---\n\n');
+    });
+  });
+
+  describe('recordMergedSha — merge.sh:228-234: replace the record\'s merged:, else insert after line 1, only under a --- first line', () => {
+    it.each([
+      ['absent: inserted after line 1', '---\nstatus: done\nround: 1\n---\n\n# S\n', true],
+      ['present: replaced', '---\nmerged: 0000000\nstatus: done\n---\n', true],
+      ['present but empty: replaced in place, not doubled as set_story_field would', '---\nmerged:\n---\n', true],
+      ['no frontmatter: nothing recorded', '# S\n', false],
+      ['empty file', '', false],
+    ])('%s', (_name, text, changed) => {
+      let ret = false;
+      const ts = withFile(text, (p) => { ret = recordMergedSha(p, 'abc1234'); });
+      const sh = withFile(text, (p) => bashRecord(p, 'abc1234'));
+      expect(ts).toBe(sh);
+      expect(ret).toBe(changed);
+    });
+    it('non-parity, pinned: a merged: in the body is not the record — inserted in the record, the body untouched', () => {
+      const text = '---\nstatus: done\n---\n\nmerged: in the prose\n';
+      expect(withFile(text, (p) => expect(recordMergedSha(p, 'abc1234')).toBe(true))).toBe('---\nmerged: abc1234\nstatus: done\n---\n\nmerged: in the prose\n');
+      expect(withFile(text, (p) => bashRecord(p, 'abc1234'))).toBe('---\nstatus: done\n---\n\nmerged: abc1234\n');
+    });
   });
 });
