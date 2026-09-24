@@ -3,6 +3,7 @@
 // cwd. Where the bash let git's stderr through to the log (a hook's output,
 // `Preparing worktree …`, a fatal), so does the call here; where it dropped
 // it (`push -q 2>/dev/null`, `worktree remove … 2>/dev/null`), so does this.
+import { out } from './log.ts';
 import { runSync, runToFile, type RunResult } from './proc.ts';
 
 /** `git status --porcelain` minus the untracked .review-out/ line: the one
@@ -237,7 +238,11 @@ export function fetchQuiet(root: string, remote: string): number {
   return runSync('git', ['-C', root, 'fetch', remote]).status;
 }
 
-/** `git merge --no-edit <ref> 2>/dev/null` (run-queue.sh:94). */
+/** `git merge --no-edit <ref> 2>/dev/null` (run-queue.sh:94): only stderr is
+ *  dropped — git's stdout (`Already up to date.`, a merge summary) reaches
+ *  ours, as the bash's did. */
 export function mergeNoEditQuiet(root: string, ref: string): number {
-  return runSync('git', ['-C', root, 'merge', '--no-edit', ref]).status;
+  const r = runSync('git', ['-C', root, 'merge', '--no-edit', ref]);
+  if (r.stdout !== '') out(r.stdout);
+  return r.status;
 }

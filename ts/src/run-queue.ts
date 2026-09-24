@@ -37,6 +37,11 @@ export const USAGE = 'usage: run-queue.sh <repo>|--all [--max N]';
 
 const DIM = '\x1b[2m';
 const RST = '\x1b[0m';
+/** run-queue.sh:30's `LOG_TAG=queue` — lib.sh's log()/warn() prefix every
+ *  line `[queue] `. Not inherited by the child processes it launches
+ *  (unexported in the bash, and each is a fresh `bash launch.sh`/`merge.sh`
+ *  invocation here too), so only the queue's own lines carry it. */
+const TAG = { tag: 'queue' } as const;
 
 /** run-queue.sh:37: `--max N` only where N is argv[0] right after the repo
  *  name; anything else leaves MAX from the environment (default 20). */
@@ -68,25 +73,25 @@ export function formatRanLine(r: RanLine): string {
 export function refreshFromOrigin(root: string): void {
   const upstream = upstreamBranch(root);
   if (upstream === '') {
-    warn('refresh failed: no upstream configured, continuing on local state');
+    warn('refresh failed: no upstream configured, continuing on local state', TAG);
     return;
   }
   const gd = gitDir(root);
   const rebaseMerge = `${gd}/rebase-merge`;
   if (existsSync(`${gd}/MERGE_HEAD`) || (existsSync(rebaseMerge) && statSync(rebaseMerge).isDirectory())) {
-    warn('refresh skipped: a merge/rebase is already in progress, continuing on local state');
+    warn('refresh skipped: a merge/rebase is already in progress, continuing on local state', TAG);
     return;
   }
   if (fetchQuiet(root, 'origin') !== 0) {
-    warn('refresh failed: fetch from origin failed, continuing on local state');
+    warn('refresh failed: fetch from origin failed, continuing on local state', TAG);
     return;
   }
   if (mergeNoEditQuiet(root, upstream) !== 0) {
     mergeAbort(root);
-    warn(`refresh failed: merge conflict with ${upstream}, continuing on local state`);
+    warn(`refresh failed: merge conflict with ${upstream}, continuing on local state`, TAG);
     return;
   }
-  log(`refreshed from ${upstream}`);
+  log(`refreshed from ${upstream}`, TAG);
 }
 
 /** `"$FLEET_REGISTRY_DIR"/*.env` (run-queue.sh:44), sorted the way a shell
@@ -121,7 +126,7 @@ export function runAll(o: RunAllOptions): number {
   const repos = registeredRepos(o.fleetHome, o.env);
   if (repos.length === 0) throw new Die(`no repos registered in ${dir}`);
   for (const name of repos) {
-    log(`repo: ${name}`);
+    log(`repo: ${name}`, TAG);
     runInherit('bash', [`${o.fleetHome}/run-queue.sh`, name, ...o.argv]);
   }
   return 0;
@@ -151,10 +156,10 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   // and knows to check the worktree for live processes before declaring
   // anything an orphan. Its exit status is not checked, as the bash never
   // checked it: a die here (a live orphan) does not stop the drain.
-  log('reaping orphans from any interrupted run');
+  log('reaping orphans from any interrupted run', TAG);
   runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, '--reap']);
 
-  log('refreshing from origin before scan');
+  log('refreshing from origin before scan', TAG);
   refreshFromOrigin(root);
 
   const started = formatIsoSeconds(new Date());
@@ -165,18 +170,18 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   while (n < max) {
     const id = nextReady(root);
     if (id === '') {
-      log('queue empty');
+      log('queue empty', TAG);
       break;
     }
     if (id === prev) {
-      warn(`${id} is ready again without having finished — stopping rather than looping`);
-      warn(`read .review/${id}.md and .stories/${id}.md before re-running`);
+      warn(`${id} is ready again without having finished — stopping rather than looping`, TAG);
+      warn(`read .review/${id}.md and .stories/${id}.md before re-running`, TAG);
       break;
     }
     prev = id;
     n += 1;
 
-    log(`story ${id} (${n} of at most ${max})`);
+    log(`story ${id} (${n} of at most ${max})`, TAG);
     const rc = runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, id]);
 
     const status = storyField(root, id, 'status');
@@ -191,18 +196,18 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
 
     switch (status) {
       case 'done':
-        log(`${id}: done`);
+        log(`${id}: done`, TAG);
         // Only a COMPUTED PASS merges. merge.ts checks this again and
         // refuses on its own; asking here keeps a FAIL from even reaching it.
         if (verdict === 'PASS' && autoMerge === '1') {
           if (runInherit('bash', [`${o.fleetHome}/merge.sh`, cfg.name, id]) === 0) {
             notify(`${cfg.name}/${id} merged → ${base} (computed PASS)\nundo: /revert ${cfg.name} ${id}`);
           } else {
-            warn(`${id} passed but did not merge`);
+            warn(`${id} passed but did not merge`, TAG);
             notify(`${id} computed PASS but did not merge into ${base} — see the queue log`);
           }
         } else if (verdict === 'PASS') {
-          log(`${id}: PASS, not merged (AUTO_MERGE=0)`);
+          log(`${id}: PASS, not merged (AUTO_MERGE=0)`, TAG);
           notify(`${id} computed PASS and is waiting for a human to merge it into ${base}`);
         }
         break;
@@ -210,18 +215,18 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
       // a story can stop without a queue, and saying it twice is how a
       // channel stops being read.
       case 'blocked':
-        warn(`${id}: blocked — a question is waiting in .blocked/${id}.md`);
+        warn(`${id}: blocked — a question is waiting in .blocked/${id}.md`, TAG);
         break;
       case 'needs_human':
-        warn(`${id}: needs_human — see .review/${id}.md`);
+        warn(`${id}: needs_human — see .review/${id}.md`, TAG);
         break;
       default:
-        warn(`${id}: ended as '${status || 'unknown'}' (launcher exit ${rc})`);
+        warn(`${id}: ended as '${status || 'unknown'}' (launcher exit ${rc})`, TAG);
         notify(`${id} ended as '${status || 'unknown'}' (launcher exit ${rc}) — that is not a state the queue expects`);
     }
   }
 
-  if (n >= max) warn(`stopped at the --max ceiling of ${max} stories`);
+  if (n >= max) warn(`stopped at the --max ceiling of ${max} stories`, TAG);
 
   out('\n');
   out(`${DIM}─── queue finished, started ${started} ───${RST}\n`);
