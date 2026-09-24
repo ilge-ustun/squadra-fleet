@@ -3064,6 +3064,103 @@ case_122_merge_without_push() {
   assert_grep 'PR_CMD failed' "$MLOG" "naming it"
 }
 
+# 123: revert.sh's refusals, none pinned before seam 5. The integration
+# branch is a human's in both directions (revert.sh:34-36); a recorded sha
+# that is not on origin's branch was already reverted or never landed (:46);
+# a revert that does not apply is aborted and the throwaway worktree removed
+# (:51-54). Red when any of the three is deleted.
+case_123_revert_refusals() {
+  CASE="123 revert refuses a story landed on the integration branch"; fixture c123
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run -- --land
+  assert_eq "$MRC" 0 "precondition: landed"
+  [[ -n "$(field merged)" ]] && ok || fail "precondition: the merge is recorded"
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  revert_run
+  assert_eq "$RVRC" 1 "exit code (die)"
+  assert_grep "is based on base — that branch is a human's, here too" "$RVLOG" "the message says why"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "the integration branch did not move"
+
+  CASE="123b a recorded sha that is not on origin's epic"; epic_story c123b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local tip; tip="$(git -C "$REPO" rev-parse "story/$STORY")"
+  sed -i "2a merged: $tip" "$REPO/.stories/$STORY.md"
+  before="$(epic_head)"
+  revert_run
+  assert_eq "$RVRC" 1 "exit code (die)"
+  assert_grep "${tip:0:8} is not on origin/epic/test" "$RVLOG" "the message names the sha and the branch"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  [[ -d "$FX/revert-$STORY" ]] && fail "the revert worktree was left behind" || ok
+  assert_grep "^merged: $tip" "$REPO/.stories/$STORY.md" "the record is left as it was"
+
+  CASE="123c a revert that does not apply is aborted"; epic_story c123c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  # The epic rewrites the line the story added; undoing the merge no longer applies.
+  git -C "$REPO" checkout -q epic/test
+  sed -i 's/fake builder touched this/the epic rewrote this/' "$REPO/README.md"
+  git -C "$REPO" commit -qam "epic: rewrite the story's line"
+  git -C "$REPO" push -q origin epic/test
+  git -C "$REPO" checkout -q base
+  before="$(epic_head)"
+  revert_run
+  assert_eq "$RVRC" 1 "exit code (die)"
+  assert_grep 'the revert did not apply' "$RVLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  [[ -d "$FX/revert-$STORY" ]] && fail "the revert worktree was left behind" || ok
+  assert_eq "$(git -C "$REPO" worktree list | grep -c "revert-$STORY")" 0 "and git no longer lists it"
+  assert_grep '^merged: [0-9a-f]{7,}' "$REPO/.stories/$STORY.md" "the record still stands"
+  assert_file "$REPO/.runs/$STORY-revert.log" "git's account is in .runs"
+}
+
+# 124: reset.sh's flags and its second run. --draft (reset.sh:37), the two
+# argv refusals (:38-39), a reset of a story that is already clear (:97), and
+# the base fallback to origin's branch when the local one is missing
+# (:59-60). Red when --draft is ignored, an argv arm is deleted, or the
+# fallback is dropped (the unmerged count reads 0 and the branch goes).
+case_124_reset_flags_and_second_run() {
+  CASE="124 --draft puts the story back as a draft"; fixture c124
+  reset_run "$STORY" --draft
+  assert_eq "$RRC" 0 "exit 0"
+  assert_eq "$(field status)" draft "status is draft"
+  assert_eq "$(field round)" 0 "round is 0"
+  assert_grep "$STORY is draft, round 0" "$RLOG" "and says so"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "reset to draft" "committed"
+
+  CASE="124b the argv refusals"
+  reset_run "$STORY" 901
+  assert_eq "$RRC" 1 "two ids"
+  assert_grep 'one story at a time' "$RLOG" "the message"
+  reset_run "$STORY" --nope
+  assert_eq "$RRC" 1 "an unknown flag"
+  assert_grep 'unknown option: --nope' "$RLOG" "naming it"
+  reset_run
+  assert_eq "$RRC" 1 "no id"
+  assert_grep 'usage: reset.sh' "$RLOG" "the usage"
+
+  CASE="124c a second reset finds nothing to do and says so"
+  local head; head="$(git -C "$REPO" rev-parse HEAD)"
+  reset_run "$STORY" --draft
+  assert_eq "$RRC" 0 "exit 0"
+  assert_grep 'already clear in git' "$RLOG" "the warning"
+  assert_grep "$STORY is draft, round 0" "$RLOG" "and the closing line"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "no commit"
+
+  CASE="124d the unmerged count is against origin's base when the local branch is missing"; fixture c124d
+  git -C "$REPO" push -q origin base:epic/only-on-origin
+  sed -i '2a base: epic/only-on-origin' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" branch -q "story/$STORY" base
+  git -C "$REPO" checkout -q "story/$STORY"
+  git -C "$REPO" commit -q --allow-empty -m "work on no other branch"
+  git -C "$REPO" checkout -q base
+  reset_run "$STORY"
+  assert_eq "$RRC" 1 "exit code (die)"
+  assert_grep 'has 1 commit\(s\) that origin/epic/only-on-origin does not — rerun with --force' "$RLOG" "counted against origin's branch"
+  assert_grep '^    [0-9a-f]{7,} work on no other branch' "$RLOG" "the commits listed, indented, before the die"
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && ok || fail "the branch survives"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3118,7 +3215,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_116_lint_story_model case_117_update_agents
        case_118_merge_nothing_to_do_and_usage case_119_merge_refuses_while_live
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
-       case_122_merge_without_push)
+       case_122_merge_without_push case_123_revert_refusals
+       case_124_reset_flags_and_second_run)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
