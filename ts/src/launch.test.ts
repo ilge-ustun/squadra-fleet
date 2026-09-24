@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, capture, chooseBuildPrompt, finalReviewHeader, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, finalReviewHeader, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
   runFileStart, splitCommand,
 } from './launch.ts';
 
@@ -103,5 +103,23 @@ describe('splitCommand — an unquoted $FLEET_NOTIFY_CMD', () => {
     expect(splitCommand('bash /f/telegram.sh send')).toEqual(['bash', '/f/telegram.sh', 'send']);
     expect(splitCommand('  true  ')).toEqual(['true']);
     expect(splitCommand('')).toEqual([]);
+  });
+});
+
+describe('builderModelForRound — a haiku story gets one round (24 Sep)', () => {
+  it('round 1 keeps whatever the story asked for', () => {
+    expect(builderModelForRound('haiku', 1, 'sonnet')).toBe('haiku');
+    expect(builderModelForRound('opus', 1, 'sonnet')).toBe('opus');
+  });
+  it('a later round of a haiku story goes to the default', () => {
+    expect(builderModelForRound('haiku', 2, 'sonnet')).toBe('sonnet');
+    expect(builderModelForRound('claude-haiku-4-5-20251001', 3, 'opus')).toBe('opus');
+  });
+  it('and to sonnet when the default is haiku too', () => {
+    expect(builderModelForRound('haiku', 2, 'haiku')).toBe('sonnet');
+  });
+  it('other models keep their model every round', () => {
+    expect(builderModelForRound('opus', 2, 'sonnet')).toBe('opus');
+    expect(builderModelForRound('sonnet', 5, 'sonnet')).toBe('sonnet');
   });
 });

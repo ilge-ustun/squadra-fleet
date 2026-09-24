@@ -93,6 +93,15 @@ export function chooseBuildPrompt(o: { round: number; roundStart: number; review
   return 'build-round2.md';
 }
 
+/** 24 Sep: a haiku story gets one round. After that the default builder
+ *  model takes over (sonnet if the default is haiku as well), so trying the
+ *  cheap model costs one round at most. */
+export const isHaiku = (m: string): boolean => m === 'haiku' || m.startsWith('claude-haiku');
+export function builderModelForRound(model: string, round: number, fallback: string): string {
+  if (round <= 1 || !isHaiku(model)) return model;
+  return isHaiku(fallback) ? 'sonnet' : fallback;
+}
+
 /** launch.sh:408: `grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)'` — any line. */
 export function priorFailingReview(text: string): boolean {
   return text.split('\n').some((l) => /^verdict: (FAIL|UNPARSEABLE|SPEC)/.test(l));
@@ -421,6 +430,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       state.round = String(round);
       const reviewFileText = isFile(reviewFile) ? readFileSync(reviewFile, 'utf8') : '';
+      const roundModel = builderModelForRound(builderModel, round, knobs.builderModel);
+      if (roundModel !== builderModel) log(`model: ${roundModel} for round ${round} — haiku builds one round`);
       const buildPrompt = render(chooseBuildPrompt({ round, roundStart, reviewText, reviewFileText }));
 
       let buildErr: string;
@@ -431,9 +442,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         buildMsg = '(REVIEW_ONLY: no builder ran this round; reviewing the existing head)';
         log('REVIEW_ONLY: skipping the builder');
       } else {
-        log(`builder: ${builderModel}`);
+        log(`builder: ${roundModel}`);
         let t0 = secs();
-        const b = await runBuilder({ wt: builderWt, prompt: buildPrompt, model: builderModel, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
+        const b = await runBuilder({ wt: builderWt, prompt: buildPrompt, model: roundModel, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
         tBuild = secs() - t0;
         t0 = 0;
         if (b.timedOut) {
@@ -577,7 +588,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       appendFileSync(newFile, renderRoundSection({
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-        builderModel, reviewerModel: knobs.reviewerModel, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        builderModel: roundModel, reviewerModel: knobs.reviewerModel, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;

@@ -2790,6 +2790,28 @@ case_113_launch_through_the_loader() {
   assert_not_grep '^ +at ' "$LOG" "no stack frames"
 }
 
+# 24 Sep. Haiku is cheap enough to try on a small, fully specified story, and
+# the price of trying must be one round at most: a Haiku round that fails is
+# followed by the default builder model, not by Haiku again.
+#
+# Red when the launcher uses the story's model for every round.
+case_114_haiku_builds_one_round() {
+  CASE="114 a haiku story's round 2 is built by the default model"; fixture c114
+  sed -i '2a model: haiku' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_eq "$(calls claude)" 2 "two builder rounds"
+  assert_grep '^haiku$' "$TRACE/claude-args-1" "round 1 on haiku, as the story asks"
+  assert_grep '^sonnet$' "$TRACE/claude-args-2" "round 2 on the default"
+  assert_grep 'haiku builds one round' "$LOG" "and the run says why"
+  assert_eq "$(grep -c '^builder:  haiku$' "$REPO/.review/$STORY.md")" 1 "the block records haiku for round 1 only"
+  assert_eq "$(grep -c '^builder:  sonnet$' "$REPO/.review/$STORY.md")" 1 "and sonnet for round 2"
+
+  CASE="114b a story on another model keeps it every round"; fixture c114b
+  sed -i '2a model: opus' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_grep '^opus$' "$TRACE/claude-args-2" "round 2 still on the story's model"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2839,7 +2861,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
        case_109_status_through_the_loader case_110_check_through_the_loader
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
-       case_112_reviewer_without_a_message case_113_launch_through_the_loader)
+       case_112_reviewer_without_a_message case_113_launch_through_the_loader
+       case_114_haiku_builds_one_round)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
