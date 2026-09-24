@@ -2525,28 +2525,46 @@ case_103_reviewer_model() {
 # both, is idempotent, and refuses to replace anything that is not its own
 # symlink. Red while the script does not exist.
 case_104_install_skills() {
-  CASE="104 install-skills.sh links every skill into both harnesses"; fixture c104
+  # 24 Sep: Codex gets the fleet skills from the fleet repo's .agents/skills
+  # (project scope), not from $CODEX_HOME/skills: the unattended reviewer is
+  # codex in a target's worktree, and it loaded the coordinator's procedures
+  # (fleet-coordinate, fleet-verdict) into every review of 020 and 025.
+  # Red while install-skills.sh links into $CODEX_HOME/skills, or leaves the
+  # links an older run made there, or the repo has no .agents/skills.
+  CASE="104 install-skills.sh: Claude Code gets every skill; Codex only inside the fleet repo"; fixture c104
   local H="$FX/home" out rc n
   mkdir -p "$H"
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "exit 0"
   n="$(ls -d "$FLEET"/skills/*/ | wc -l)"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Claude Code"
-  assert_eq "$(find "$H/.codex/skills"  -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Codex"
   assert_eq "$(readlink -f "$H/.claude/skills/fleet-story")" "$(readlink -f "$FLEET/skills/fleet-story")" "the link points at the fleet's copy"
-  assert_file "$H/.codex/skills/fleet-story/SKILL.md" "readable through the Codex link"
-  assert_grep '^name: fleet-story$' "$H/.codex/skills/fleet-story/SKILL.md" "with the frontmatter both harnesses read"
+  assert_eq "$(find "$H/.codex/skills" -maxdepth 1 -name 'fleet-*' 2>/dev/null | wc -l)" 0 "no fleet skill in Codex's home, where every codex run would load it"
+  assert_eq "$(readlink -f "$FLEET/.agents/skills")" "$(readlink -f "$FLEET/skills")" "the fleet repo's .agents/skills is skills/"
+  assert_grep '^name: fleet-story$' "$FLEET/.agents/skills/fleet-story/SKILL.md" "readable there, with the frontmatter Codex reads"
 
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "second run: exit 0"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "second run: still one link per skill"
 
-  # A directory that is not our symlink is someone's work: refused, named.
-  rm "$H/.codex/skills/fleet-land"; mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
+  # The links an older install made in Codex's home are ours: removed. A
+  # directory there that is not our symlink is someone's work: left alone.
+  mkdir -p "$H/.codex/skills"
+  ln -s "$FLEET/skills/fleet-story" "$H/.codex/skills/fleet-story"
+  mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
+  mkdir -p "$H/.codex/skills/security-review"; printf 'a reviewer skill\n' > "$H/.codex/skills/security-review/SKILL.md"
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "exit 0"
+  assert_eq "$(test -e "$H/.codex/skills/fleet-story" && echo present || echo gone)" gone "our old Codex link is removed"
+  assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "a directory that is not ours stays"
+  assert_grep '^a reviewer skill$' "$H/.codex/skills/security-review/SKILL.md" "and so does any other Codex skill"
+
+  # A directory in Claude's home that is not our symlink: refused, named.
+  rm "$H/.claude/skills/fleet-land"; mkdir -p "$H/.claude/skills/fleet-land"; printf 'theirs\n' > "$H/.claude/skills/fleet-land/SKILL.md"
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "a foreign directory: exit 1"
   assert_contains "$out" "fleet-land" "names it"
-  assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "and leaves it alone"
+  assert_grep '^theirs$' "$H/.claude/skills/fleet-land/SKILL.md" "and leaves it alone"
 }
 
 # The fixture is a copy of the working tree, once per case. ts/node_modules
