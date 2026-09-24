@@ -45,7 +45,8 @@
 // the few places it differs, each pinned by a test.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { parseBuilderOutput, reviewerMessages, runBuilder, runReviewer } from './lib/agents.ts';
+import { join, resolve } from 'node:path';
+import { builderModelUsed, parseBuilderOutput, reviewerMessages, reviewerModelUsed, runBuilder, runReviewer } from './lib/agents.ts';
 import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
@@ -91,6 +92,15 @@ export function chooseBuildPrompt(o: { round: number; roundStart: number; review
   if (o.round === o.roundStart + 1 && o.reviewText === '') return 'build-round1.md';
   if (o.round === o.roundStart + 1 && o.reviewFileText.split('\n').some((l) => l.startsWith('verdict: SPEC'))) return 'build-after-spec.md';
   return 'build-round2.md';
+}
+
+/** 24 Sep: a haiku story gets one round. After that the default builder
+ *  model takes over (sonnet if the default is haiku as well), so trying the
+ *  cheap model costs one round at most. */
+export const isHaiku = (m: string): boolean => m === 'haiku' || m.startsWith('claude-haiku');
+export function builderModelForRound(model: string, round: number, fallback: string): string {
+  if (round <= 1 || !isHaiku(model)) return model;
+  return isHaiku(fallback) ? 'sonnet' : fallback;
 }
 
 /** launch.sh:408: `grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)'` — any line. */
@@ -150,7 +160,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
   const maxRoundsRaw = v('MAX_ROUNDS', '2');
   const lockWaitRaw = v('FLEET_LOCK_WAIT', '120');
   return {
-    builderModel: v('BUILDER_MODEL', 'claude-sonnet-4-6'),
+    builderModel: v('BUILDER_MODEL', 'sonnet'),
     reviewerModel: env['REVIEWER_MODEL'] || '',
     maxTurns: v('MAX_TURNS', '60'),
     agentTimeoutRaw,
@@ -421,9 +431,12 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       state.round = String(round);
       const reviewFileText = isFile(reviewFile) ? readFileSync(reviewFile, 'utf8') : '';
+      const roundModel = builderModelForRound(builderModel, round, knobs.builderModel);
+      if (roundModel !== builderModel) log(`model: ${roundModel} for round ${round} — haiku builds one round`);
       const buildPrompt = render(chooseBuildPrompt({ round, roundStart, reviewText, reviewFileText }));
 
       let buildErr: string;
+      let builderUsed = '';
       let buildMsg: string;
       if (knobs.reviewOnly === '1') {
         // REVIEW_ONLY re-reviews the branch head with no builder round.
@@ -431,9 +444,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         buildMsg = '(REVIEW_ONLY: no builder ran this round; reviewing the existing head)';
         log('REVIEW_ONLY: skipping the builder');
       } else {
-        log(`builder: ${builderModel}`);
+        log(`builder: ${roundModel}`);
         let t0 = secs();
-        const b = await runBuilder({ wt: builderWt, prompt: buildPrompt, model: builderModel, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
+        const b = await runBuilder({ wt: builderWt, prompt: buildPrompt, model: roundModel, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
         tBuild = secs() - t0;
         t0 = 0;
         if (b.timedOut) {
@@ -441,6 +454,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
           throw new Die(`round ${round}: the builder exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
         }
         const buildOut = capture(b.output);
+        builderUsed = builderModelUsed(buildOut);
         const parsed = parseBuilderOutput(buildOut);
         buildErr = parsed.isError;
         buildMsg = parsed.message;
@@ -515,10 +529,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       log(`reviewer: codex${knobs.reviewerModel !== '' ? ` ${knobs.reviewerModel}` : ''}`);
       t0 = secs();
+      const reviewerStartMs = Date.now();
       const rv = await runReviewer({
         wt: reviewerWt, prompt: reviewPrompt, model: knobs.reviewerModel, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
       });
       tReview = secs() - t0;
+      const reviewerUsed = reviewerModelUsed({
+        codexHome: process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex'), cwd: resolve(reviewerWt), sinceMs: reviewerStartMs,
+      });
       if (rv.timedOut) {
         setStatus(storyId, 'needs_human');
         throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
@@ -577,7 +595,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       appendFileSync(newFile, renderRoundSection({
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-        builderModel, reviewerModel: knobs.reviewerModel, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        builderModel: roundModel, builderModelUsed: builderUsed, reviewerModel: knobs.reviewerModel, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;

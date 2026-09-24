@@ -1460,7 +1460,7 @@ case_76_story_model() {
 
   CASE="76b a story that names none gets the default"; fixture c76b
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep '^claude-sonnet-4-6$' "$TRACE/claude-args-1" "the launcher's default model"
+  assert_grep '^sonnet$' "$TRACE/claude-args-1" "the launcher's default model"
 }
 
 # Phase D1, the launcher's half. The queue notifies about merges; the launcher
@@ -2182,6 +2182,9 @@ case_94_epic_naming() {
   assert_eq "$(calls claude)" 0 "before any agent runs"
   ws 902 epic/test
   assert_eq "$(calls claude)" 1 "an epic/* base gets past the check to the agent"
+  # 24 Sep: the writer names the alias, so a new Opus is picked up by the
+  # CLI with no change here. Red while the default is a pinned id.
+  assert_grep '^opus$' "$TRACE/claude-args-1" "the writer runs on the opus alias by default"
 
   local d="$FX/lint"; mkdir -p "$d"
   lint_base() {                       # lint_base <name> <base-line> → out rc
@@ -2787,6 +2790,92 @@ case_113_launch_through_the_loader() {
   assert_not_grep '^ +at ' "$LOG" "no stack frames"
 }
 
+# 24 Sep. Haiku is cheap enough to try on a small, fully specified story, and
+# the price of trying must be one round at most: a Haiku round that fails is
+# followed by the default builder model, not by Haiku again.
+#
+# Red when the launcher uses the story's model for every round.
+case_114_haiku_builds_one_round() {
+  CASE="114 a haiku story's round 2 is built by the default model"; fixture c114
+  sed -i '2a model: haiku' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_eq "$(calls claude)" 2 "two builder rounds"
+  assert_grep '^haiku$' "$TRACE/claude-args-1" "round 1 on haiku, as the story asks"
+  assert_grep '^sonnet$' "$TRACE/claude-args-2" "round 2 on the default"
+  assert_grep 'haiku builds one round' "$LOG" "and the run says why"
+  assert_eq "$(grep -c '^builder:  haiku$' "$REPO/.review/$STORY.md")" 1 "the block records haiku for round 1 only"
+  assert_eq "$(grep -c '^builder:  sonnet$' "$REPO/.review/$STORY.md")" 1 "and sonnet for round 2"
+
+  CASE="114b a story on another model keeps it every round"; fixture c114b
+  sed -i '2a model: opus' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_grep '^opus$' "$TRACE/claude-args-2" "round 2 still on the story's model"
+}
+
+# 24 Sep. With aliases, `builder: sonnet` no longer says which model built a
+# round, and codex's default is invisible altogether. The block records what
+# each agent reports it ran on: claude's modelUsage, codex's session file.
+#
+# Red when the launcher does not read them back.
+case_115_block_records_the_models_used() {
+  CASE="115 the block records the model each agent actually ran"; fixture c115
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      FAKE_BUILDER_USED=claude-sonnet-9 FAKE_REVIEWER_USED=gpt-test-9 CODEX_HOME="$FX/codex-home"
+  assert_grep '^builder:  sonnet → claude-sonnet-9$' "$REPO/.review/$STORY.md" "the alias and what it resolved to"
+  assert_grep '^reviewer: codex → gpt-test-9$' "$REPO/.review/$STORY.md" "codex's default, named"
+}
+
+# 24 Sep. A story's model: is an alias — haiku, sonnet, opus or fable — so a
+# new release reaches the builder without editing stories. A pinned id goes
+# stale silently (six stories named claude-opus-5 when opus had moved on);
+# a typo would reach the CLI and die a round in.
+#
+# Red while lint-story.sh does not read model:.
+case_116_lint_story_model() {
+  CASE="116 lint: model: is one of the aliases"; fixture c116
+  local d="$FX/lint" out rc m
+  mkdir -p "$d"
+  lint_model() {                      # lint_model <name> <model-line> → out rc
+    printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
+    out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
+  }
+  for m in haiku sonnet opus fable; do
+    lint_model "ok-$m" "model: $m"; assert_eq "$rc" 0 "model: $m is accepted"
+  done
+  lint_model none "";                         assert_eq "$rc" 0 "no model: is accepted (the default)"
+  lint_model pinned "model: claude-opus-5";   assert_eq "$rc" 1 "a pinned id is an error"
+  assert_contains "$out" "haiku, sonnet, opus or fable" "naming the aliases"
+  lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
+}
+
+# 24 Sep. Aliases only track new releases if the CLIs themselves are new:
+# Claude Code updates itself, codex (an npm global under nvm) never does.
+# update-agents.sh updates both, and only while the queue is idle — a codex
+# replaced under a running reviewer is a dead round.
+#
+# Red while update-agents.sh does not exist.
+case_117_update_agents() {
+  CASE="117 update-agents.sh updates both CLIs, never under a running queue"; fixture c117
+  local B="$FX/bin" out rc
+  mkdir -p "$B"
+  printf '#!/usr/bin/env bash\necho "claude $*" >> "%s/calls"\necho 9.9.9\n' "$TRACE" > "$B/claude"
+  printf '#!/usr/bin/env bash\necho "codex $*" >> "%s/calls"\necho codex-cli 9.9.9\n' "$TRACE" > "$B/codex"
+  printf '#!/usr/bin/env bash\necho "npm $*" >> "%s/calls"\n' "$TRACE" > "$B/npm"
+  chmod +x "$B/claude" "$B/codex" "$B/npm"
+  upd() { out="$( env PATH="$B:$PATH" FLEET_QUEUE_ACTIVE_CMD="$1" bash "$FLEET/update-agents.sh" 2>&1 )"; rc=$?; }
+
+  upd true
+  assert_eq "$rc" 0 "a running queue is not a failure"
+  assert_contains "$out" "queue is running" "it says why it did nothing"
+  assert_not_grep '^claude update' "$TRACE/calls" "claude untouched"
+  assert_not_grep '^npm ' "$TRACE/calls" "codex untouched"
+
+  upd false
+  assert_eq "$rc" 0 "idle: exit 0"
+  assert_grep '^claude update$' "$TRACE/calls" "claude updated"
+  assert_grep '^npm install -g @openai/codex@latest' "$TRACE/calls" "codex updated to latest"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2836,7 +2925,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
        case_109_status_through_the_loader case_110_check_through_the_loader
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
-       case_112_reviewer_without_a_message case_113_launch_through_the_loader)
+       case_112_reviewer_without_a_message case_113_launch_through_the_loader
+       case_114_haiku_builds_one_round case_115_block_records_the_models_used
+       case_116_lint_story_model case_117_update_agents)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

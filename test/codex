@@ -34,6 +34,10 @@
 #   green  a probe the fake vitest passes (no regression found)
 #   red    a probe the fake vitest fails (a regression the suite did not cover)
 #
+# FAKE_REVIEWER_USED=<model> writes a session file the way real codex does,
+# under $CODEX_HOME/sessions/YYYY/MM/DD, whose turn_context names the cwd and
+# the model — the only place codex records the model it ran on.
+#
 # Records calls in $FAKE_TRACE_DIR/calls and the prompt as codex-prompt-N.
 #
 set -euo pipefail
@@ -46,6 +50,12 @@ set -euo pipefail
 if [[ ! -t 0 ]]; then prompt="$(cat)"; else prompt="${*: -1}"; fi
 echo codex >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^codex$' "$FAKE_TRACE_DIR/calls")"
+if [[ -n "${FAKE_REVIEWER_USED:-}" ]]; then
+  d="${CODEX_HOME:?FAKE_REVIEWER_USED needs CODEX_HOME}/sessions/2026/09/24"
+  mkdir -p "$d"
+  printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n{"type":"turn_context","payload":{"cwd":"%s","model":"%s"}}\n' \
+    "$PWD" "$PWD" "$FAKE_REVIEWER_USED" > "$d/rollout-fake-$n.jsonl"
+fi
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
 printf '%s\n' "$@" > "$FAKE_TRACE_DIR/codex-args-$n"
 

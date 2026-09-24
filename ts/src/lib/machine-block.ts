@@ -50,8 +50,13 @@ export interface RoundSection {
   baseline: Baseline;
   timing: Timing;
   builderModel: string;
+  /** What the builder actually ran on (claude's modelUsage), shown after
+   *  the name asked for when it differs; '' or absent when unknown. */
+  builderModelUsed?: string;
   /** '' when codex runs on its own default. */
   reviewerModel: string;
+  /** What codex actually ran on (its session file); '' or absent when unknown. */
+  reviewerModelUsed?: string;
   acIds: string[];
   scope: string;
   scopeHits: string[];
@@ -117,6 +122,10 @@ function probeTable(rows: ProbeRow[]): string {
   return rows.map((r) => `${r.cls.padEnd(13)} ${r.name}`).join('\n');
 }
 
+/** ` → <model>` when an agent resolved the name it was given to another. */
+const resolved = (asked: string, used: string | undefined): string =>
+  used === undefined || used === '' || used === asked ? '' : ` → ${used}`;
+
 export function renderRoundSection(s: RoundSection): Buffer {
   const b = s.baseline;
   const t = s.timing;
@@ -132,8 +141,8 @@ export function renderRoundSection(s: RoundSection): Buffer {
     `${MACHINE_HEADING}\n\n` +
     `${label('baseline')}test ${b.test} | build ${b.build} | lint ${b.lint}\n` +
     `${label('timing')}builder ${t.build}s | baseline ${t.base}s | reviewer ${t.review}s | mutations ${t.mut}s | total ${t.total}s\n` +
-    `${label('builder')}${s.builderModel}\n` +
-    `${label('reviewer')}codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}\n` +
+    `${label('builder')}${s.builderModel}${resolved(s.builderModel, s.builderModelUsed)}\n` +
+    `${label('reviewer')}codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}${resolved(s.reviewerModel, s.reviewerModelUsed)}\n` +
     `${label('acs')}${s.acIds.map((a) => `${a} `).join('')}\n` +
     `${label('scope')}${s.scope}${hits === '' ? '' : ` ${hits}`}\n` +
     `${label('model')}${s.model}\n` +

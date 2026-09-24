@@ -1,0 +1,14 @@
+[Unit]
+Description=fleet — update the agent CLIs weekly
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
+
+[Timer]
+# Sunday before dawn: the least likely hour for a promoted story to be
+# running. If the queue is busy anyway, the script skips and waits a week;
+# `bash update-agents.sh` by hand does it sooner.
+OnCalendar=Sun *-*-* 04:30
+# A firing missed while the box was off runs after boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

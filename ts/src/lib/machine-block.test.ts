@@ -83,6 +83,25 @@ describe('the row parsers — awk $1 $2 $3 and `read -r ac cls slug` agree on th
   });
 });
 
+describe('the models a round ran on', () => {
+  const section = (x: { builderModel: string; builderModelUsed?: string; reviewerModel: string; reviewerModelUsed?: string }): string => renderRoundSection({
+    round: '1', headSha: 'h', roundCommits: '1', reviewedAt: 't', baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN' },
+    timing: { build: '0', base: '0', review: '0', mut: '0', total: '0' }, ...x,
+    acIds: [], scope: 'CLEAN', scopeHits: [], model: 'PASS', computed: 'PASS', reasons: [], mutRows: [], probeRows: [],
+    builderText: Buffer.from('b\n'), reviewerText: Buffer.from('r\n'),
+  }).toString('utf8');
+  it('an alias is followed by the model it resolved to', () => {
+    const out = section({ builderModel: 'sonnet', builderModelUsed: 'claude-sonnet-5', reviewerModel: '', reviewerModelUsed: 'gpt-6-astra' });
+    expect(out).toContain('\nbuilder:  sonnet → claude-sonnet-5\n');
+    expect(out).toContain('\nreviewer: codex → gpt-6-astra\n');
+  });
+  it('nothing resolved, or resolved to the name asked for: the line as before', () => {
+    const out = section({ builderModel: 'claude-opus-5', builderModelUsed: 'claude-opus-5', reviewerModel: 'r', reviewerModelUsed: '' });
+    expect(out).toContain('\nbuilder:  claude-opus-5\n');
+    expect(out).toContain('\nreviewer: codex r\n');
+  });
+});
+
 describe('formatIsoSeconds — date -Iseconds', () => {
   const epoch = 1758621600; // 2026-09-23T10:00:00Z
   it.each(['Europe/Rome', 'UTC', 'Asia/Kolkata', 'America/New_York'])('under TZ=%s', (tz) => {

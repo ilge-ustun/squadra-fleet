@@ -24,7 +24,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" 
 USAGE='usage: write-story.sh <repo> <story-id> "<what you want>" [--base epic/<name>]'
 [[ $# -ge 1 ]] || die "$USAGE"
 load_repo "$1"; shift
-STORY_MODEL="${STORY_MODEL:-claude-opus-5}"   # the highest-judgment job in the loop
+STORY_MODEL="${STORY_MODEL:-opus}"   # the highest-judgment job in the loop; an alias, so the newest Opus
 MAX_TURNS="${MAX_TURNS:-60}"
 ALLOWED_TOOLS="Read,Grep,Glob,Bash,Write"
 

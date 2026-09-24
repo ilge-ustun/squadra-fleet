@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, capture, chooseBuildPrompt, finalReviewHeader, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, finalReviewHeader, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
   runFileStart, splitCommand,
 } from './launch.ts';
 
@@ -81,9 +81,9 @@ describe('head20 — echo "$BUILD_OUT" | head -20', () => {
 describe('readKnobs — the ${X:-default} knobs of launch.sh:57-71,96', () => {
   it('defaults; an empty value is the default too', () => {
     const k = readKnobs({}, '/fleet');
-    expect(k).toMatchObject({ builderModel: 'claude-sonnet-4-6', reviewerModel: '', maxTurns: '60', agentTimeoutRaw: '1800', agentTimeout: 1800,
+    expect(k).toMatchObject({ builderModel: 'sonnet', reviewerModel: '', maxTurns: '60', agentTimeoutRaw: '1800', agentTimeout: 1800,
       maxRoundsRaw: '2', maxRounds: 2, pushStatus: '1', reviewOnly: '0', lockWait: 120, notifyCmd: 'bash /fleet/telegram.sh send' });
-    expect(readKnobs({ BUILDER_MODEL: '', MAX_ROUNDS: '', AGENT_TIMEOUT: '', FLEET_NOTIFY_CMD: '' }, '/f')).toMatchObject({ builderModel: 'claude-sonnet-4-6', maxRounds: 2, agentTimeout: 1800, notifyCmd: 'bash /f/telegram.sh send' });
+    expect(readKnobs({ BUILDER_MODEL: '', MAX_ROUNDS: '', AGENT_TIMEOUT: '', FLEET_NOTIFY_CMD: '' }, '/f')).toMatchObject({ builderModel: 'sonnet', maxRounds: 2, agentTimeout: 1800, notifyCmd: 'bash /f/telegram.sh send' });
   });
   it('the environment wins', () => {
     expect(readKnobs({ BUILDER_MODEL: 'm', REVIEWER_MODEL: 'r', MAX_TURNS: '7', AGENT_TIMEOUT: '5', MAX_ROUNDS: '1', PUSH_STATUS: '0', REVIEW_ONLY: '1', FLEET_LOCK_WAIT: '0.5', FLEET_NOTIFY_CMD: 'true' }, '/f'))
@@ -103,5 +103,23 @@ describe('splitCommand — an unquoted $FLEET_NOTIFY_CMD', () => {
     expect(splitCommand('bash /f/telegram.sh send')).toEqual(['bash', '/f/telegram.sh', 'send']);
     expect(splitCommand('  true  ')).toEqual(['true']);
     expect(splitCommand('')).toEqual([]);
+  });
+});
+
+describe('builderModelForRound — a haiku story gets one round (24 Sep)', () => {
+  it('round 1 keeps whatever the story asked for', () => {
+    expect(builderModelForRound('haiku', 1, 'sonnet')).toBe('haiku');
+    expect(builderModelForRound('opus', 1, 'sonnet')).toBe('opus');
+  });
+  it('a later round of a haiku story goes to the default', () => {
+    expect(builderModelForRound('haiku', 2, 'sonnet')).toBe('sonnet');
+    expect(builderModelForRound('claude-haiku-4-5-20251001', 3, 'opus')).toBe('opus');
+  });
+  it('and to sonnet when the default is haiku too', () => {
+    expect(builderModelForRound('haiku', 2, 'haiku')).toBe('sonnet');
+  });
+  it('other models keep their model every round', () => {
+    expect(builderModelForRound('opus', 2, 'sonnet')).toBe('opus');
+    expect(builderModelForRound('sonnet', 5, 'sonnet')).toBe('sonnet');
   });
 });

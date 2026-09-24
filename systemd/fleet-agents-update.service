@@ -1,0 +1,22 @@
+[Unit]
+Description=fleet — update the claude and codex CLIs to their newest release
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/fleet/work/fleet
+
+# The same PATH as fleet-queue.service: claude in ~/.local/bin, codex and npm
+# under nvm. update-agents.sh updates exactly the binaries the queue runs.
+Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/fleet
+
+# The script itself refuses while fleet-queue.service is active (a codex
+# replaced under a running reviewer is a dead round) and exits 0 so the
+# unit is not marked failed; the next weekly firing tries again.
+ExecStart=/bin/bash /home/fleet/work/fleet/update-agents.sh
+TimeoutStartSec=15min
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fleet-agents-update

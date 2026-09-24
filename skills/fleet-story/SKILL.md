@@ -67,9 +67,14 @@ checkout, which is usually `develop`):
 8. **Product decisions.** If Evidence raises a question, stop and put it to
    the human; do not answer it yourself. When they answer, add the AC by
    hand — that has been the right move before (stories 016, 018).
-9. **model:** in the frontmatter names the builder's model. Leave the
-   default for bounded changes; name the strongest model for design-heavy
-   stories (service-worker rewrites, state machines). One line.
+9. **model:** in the frontmatter names the builder's model, as an alias
+   only (`lint-story.sh` refuses anything else), so a new release is
+   picked up with no edit: omit it for the default (`sonnet`) on a bounded
+   story; `haiku` for a small, fully specified one (one or two files, one
+   or two ACs, every instrument spelled out; it builds round 1 only, then
+   the default takes over); `opus` for design-heavy or diagnose-first
+   stories (service-worker rewrites, state machines, an unknown cause).
+   `fable` only after a trial is recorded in `docs/coordinator-trials.md`.
 
 Hand-edit what the review found. Keep the writer's citations unless you
 verified a replacement. After any edit:
