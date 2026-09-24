@@ -2918,6 +2918,152 @@ case_117_update_agents() {
   assert_grep '^npm install -g @openai/codex@latest' "$TRACE/calls" "codex updated to latest"
 }
 
+# Seam 5 (24 Sep). Before merge.sh moves to TypeScript, the paths no case
+# pinned. 118: the two exit-0 "nothing to do" answers and the argv refusals.
+# Red against a copy with the "already merged" test (merge.sh:113) or the
+# "already in base" test (:88) deleted — the second run merges again or
+# dies; and with the flag loop's `-*)` arm deleted, --bogus is an id.
+case_118_merge_nothing_to_do_and_usage() {
+  CASE="118 a second merge of the same story is nothing to do, exit 0"; epic_story c118
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  local head nv; head="$(epic_head)"; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 0 "exit 0, not a die"
+  assert_grep "$STORY is already merged into epic/test" "$MLOG" "and says so"
+  assert_eq "$(epic_head)" "$head" "the epic did not move"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$nv" "no baseline ran"
+
+  CASE="118b an epic already in the integration branch"
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 0 "precondition: the epic landed"
+  local bhead; bhead="$(git -C "$REPO" rev-parse origin/base)"
+  merge_epic "$FX/merge-epic2.log"
+  assert_eq "$?" 0 "exit 0"
+  assert_grep 'epic/test is already in base' "$FX/merge-epic2.log" "and says so"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$bhead" "the integration branch did not move"
+
+  CASE="118c the argv refusals"
+  merge_run -- --bogus
+  assert_eq "$MRC" 1 "an unknown flag is a die"
+  assert_grep 'unknown option --bogus' "$MLOG" "naming it"
+  ( cd "$FX" && bash "$FLEET/merge.sh" t ) > "$FX/usage.log" 2>&1
+  assert_eq "$?" 1 "no id is a die"
+  assert_grep 'usage: merge.sh' "$FX/usage.log" "with the usage"
+  ( cd "$FX" && bash "$FLEET/merge.sh" t "$STORY" 901 ) > "$FX/two.log" 2>&1
+  assert_eq "$?" 1 "two ids are a die"
+  assert_grep 'usage: merge.sh' "$FX/two.log" "with the usage"
+  ( cd "$FX" && bash "$FLEET/merge.sh" t --epic epic/test --land ) > "$FX/epic-land.log" 2>&1
+  assert_eq "$?" 1 "--epic with --land is a die"
+  assert_grep '[-]-land is for a story' "$FX/epic-land.log" "saying which flag is for what"
+}
+
+# 119: the liveness refusal, the mirror of case 53. A merge while the
+# launcher still runs in the worktree would merge a round in progress. Red
+# when the `live` check (merge.sh:102) is deleted: the merge goes.
+case_119_merge_refuses_while_live() {
+  CASE="119 merge refuses while something runs in the story's worktree"; epic_story c119
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  ( cd "$FX/wt-$STORY" && exec sleep 30 ) &
+  local pid=$!
+  sleep 0.3
+  merge_run
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'something running in its worktree' "$MLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  assert_eq "$(test -d "$FX/wt-$STORY" && echo present || echo gone)" present "and the worktree is untouched"
+  merge_run
+  assert_eq "$MRC" 0 "once it is quiet, the merge goes"
+  assert_grep "worktree removed: .*wt-$STORY \(branch story/$STORY kept\)" "$MLOG" "and says it removed the worktree"
+}
+
+# 120: the local copy of the base branch. The merge is made on origin's
+# branch in a throwaway worktree; a local branch that is ahead of origin
+# would be silently dropped when the local branch is moved over the result
+# (merge.sh:159-162), so that is refused; otherwise the local branch follows
+# (:214), unless it is checked out, where the human is told (:211). Red when
+# the ancestor check or the branch -f is deleted.
+case_120_merge_and_the_local_base_branch() {
+  CASE="120 merge refuses when the local epic has commits origin does not"; epic_story c120
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  git -C "$REPO" checkout -q epic/test
+  git -C "$REPO" commit -q --allow-empty -m "local only, never pushed"
+  git -C "$REPO" checkout -q base
+  merge_run
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'local epic/test has commits origin does not' "$MLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+
+  CASE="120b after a merge the local epic branch follows origin"
+  git -C "$REPO" branch -q -f epic/test origin/epic/test
+  merge_run
+  assert_eq "$MRC" 0 "merged"
+  assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(field merged)" "local epic/test is at the recorded sha"
+  assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(epic_head)" "which is origin's"
+
+  CASE="120c a checked-out base is not moved; the human is told what to run"; fixture c120c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run -- --land
+  assert_eq "$MRC" 0 "landed"
+  assert_grep 'local base is checked out — run: git pull --ff-only' "$MLOG" "the warning names the command"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "origin's base holds the story"
+  assert_eq "$(git -C "$REPO" rev-parse --abbrev-ref HEAD)" base "the checkout is still on base"
+}
+
+# 121: a story that does not merge cleanly. The merge is aborted, the throwaway
+# worktree removed by the EXIT trap, and nothing is recorded or run. Red when
+# the `merge --abort`/die branch (merge.sh:167-170) or the trap is deleted.
+case_121_merge_conflict() {
+  CASE="121 a story that does not merge cleanly is refused and leaves nothing behind"; epic_story c121
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  # The epic appends its own line where the builder appended one.
+  git -C "$REPO" checkout -q epic/test
+  printf '\nthe epic moved on this line\n' >> "$REPO/README.md"
+  git -C "$REPO" commit -qam "epic: a conflicting line"
+  git -C "$REPO" push -q origin epic/test
+  git -C "$REPO" checkout -q base
+  local before nv; before="$(epic_head)"; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'does not merge cleanly into epic/test' "$MLOG" "the message says why"
+  assert_eq "$(epic_head)" "$before" "the epic did not move"
+  [[ -d "$FX/merge-$STORY" ]] && fail "the merge worktree was left behind" || ok
+  assert_eq "$(git -C "$REPO" worktree list | grep -c "merge-$STORY")" 0 "and git no longer lists it"
+  assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "nothing claims it merged"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$nv" "no baseline ran"
+  assert_file "$REPO/.runs/$STORY-merge.log" "git's account of the conflict is in .runs"
+}
+
+# 122: PUSH_STATUS=0, the knob every writer honours. The merge happens on the
+# local branch only; pr mode, which is nothing but a push, refuses. Red when
+# the PUSH_STATUS guards (merge.sh:141, :205, :241) are deleted.
+case_122_merge_without_push() {
+  CASE="122 PUSH_STATUS=0 merges locally and pushes nothing"; epic_story c122
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before obase; before="$(epic_head)"; obase="$(git -C "$REPO" rev-parse origin/base)"
+  merge_run PUSH_STATUS=0
+  assert_eq "$MRC" 0 "exit 0"
+  assert_eq "$(epic_head)" "$before" "origin's epic did not move"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" epic/test && ok || fail "the local epic holds the story"
+  assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(field merged)" "at the recorded sha"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "merged" "the record is committed"
+  assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$obase" "and not pushed"
+
+  CASE="122b pr mode is a push, so PUSH_STATUS=0 refuses it"
+  merge_run PUSH_STATUS=0 MERGE_MODE=pr PR_CMD=true
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'PUSH_STATUS=0 forbids it' "$MLOG" "the message says why"
+
+  CASE="122c a failing PR_CMD is a die"
+  merge_run MERGE_MODE=pr PR_CMD=false
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'PR_CMD failed' "$MLOG" "naming it"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2969,7 +3115,10 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
        case_112_reviewer_without_a_message case_113_launch_through_the_loader
        case_114_haiku_builds_one_round case_115_block_records_the_models_used
-       case_116_lint_story_model case_117_update_agents)
+       case_116_lint_story_model case_117_update_agents
+       case_118_merge_nothing_to_do_and_usage case_119_merge_refuses_while_live
+       case_120_merge_and_the_local_base_branch case_121_merge_conflict
+       case_122_merge_without_push)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
