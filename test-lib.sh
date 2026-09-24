@@ -3190,6 +3190,29 @@ case_125_merge_through_the_loader() {
   assert_not_grep 'merge\.ts:' "$MLOG" "nor in the story merge's"
 }
 
+# Seam 5. revert.sh is a wrapper over ts/src/bin/revert.ts. The loader stub
+# is red under bash, which never loaded it; then the real loader through
+# case 66's revert, with no bin-level line in the log.
+case_126_revert_through_the_loader() {
+  CASE="126 revert.sh reaches the target through ts/src/lib/config.ts"; epic_story c126
+  config_stub
+  revert_run
+  assert_eq "$RVRC" 1 "the stub's throw ends the revert"
+  assert_grep 'fleet-test: config stub reached' "$RVLOG" "with its text"
+
+  CASE="126b the real loader: a revert, no bin-level line"; epic_story c126b
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  rm -rf "$REPO/.runs"
+  revert_run
+  assert_eq "$RVRC" 0 "reverted, with .runs/ made on the way (the bash never made it here)"
+  assert_file "$REPO/.runs/$STORY-revert.log" "git's account is in .runs"
+  assert_not_grep 'revert\.ts:' "$RVLOG" "no bin-level error in the log"
+  assert_not_grep '^ +at ' "$RVLOG" "no stack frames"
+}
+
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3245,7 +3268,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_118_merge_nothing_to_do_and_usage case_119_merge_refuses_while_live
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
        case_122_merge_without_push case_123_revert_refusals
-       case_124_reset_flags_and_second_run case_125_merge_through_the_loader)
+       case_124_reset_flags_and_second_run case_125_merge_through_the_loader
+       case_126_revert_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
