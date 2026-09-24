@@ -568,7 +568,7 @@ case_31_codex_stderr_notice() {
   assert_eq "$(review_line 3)" "verdict: PASS" "verdict parsed from the agent_message"
   assert_grep '^fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "reviewer.md is prose, not JSON"
   assert_not_grep '"type":"item' "$REPO/.review/$STORY/round-1/reviewer.md" "no raw JSONL in reviewer.md"
-  assert_grep 'Reading additional input' "$REPO/.review/$STORY/round-1/reviewer.stderr" "stderr kept as evidence"
+  assert_grep 'Reading prompt from stdin' "$REPO/.review/$STORY/round-1/reviewer.stderr" "stderr kept as evidence"
   assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.stderr" "stderr committed"
 }
 
