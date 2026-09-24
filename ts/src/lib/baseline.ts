@@ -97,15 +97,45 @@ export interface BaselineInput {
   lintCmd: string;
 }
 
+/** The suite with the JSON reporter, the raw file removed first so a stale
+ *  one cannot stand in for a run that wrote nothing; the JSON text back, or
+ *  undefined when the runner wrote none. */
+function runVitestJson(wt: string, vitestCmd: string, rawJson: string, logFile: string): string | undefined {
+  rmSync(rawJson, { force: true });
+  runBashTo(`${vitestCmd} --reporter json --outputFile '${rawJson}'`, { cwd: wt, logFile });
+  return existsSync(rawJson) ? readFileSync(rawJson, 'utf8') : undefined;
+}
+
 export function runBaseline(i: BaselineInput): Baseline {
   const ev = join(i.evidenceDir, 'baseline');
   mkdirSync(ev, { recursive: true });
-  rmSync(i.rawJson, { force: true });
-  runBashTo(`${i.vitestCmd} --reporter json --outputFile '${i.rawJson}'`, { cwd: i.wt, logFile: join(ev, 'test.log') });
-  const text = existsSync(i.rawJson) ? readFileSync(i.rawJson, 'utf8') : undefined;
+  const text = runVitestJson(i.wt, i.vitestCmd, i.rawJson, join(ev, 'test.log'));
   const test = baselineColour(text);
   writeFileSync(join(ev, 'test.summary.json'), summary(text));
   const build = tailed(i.buildCmd, i.wt, join(ev, 'build.log'));
   const lint = tailed(i.lintCmd, i.wt, join(ev, 'lint.log'));
+  return { test, build, lint };
+}
+
+/** merge.sh:186-193 — the post-merge baseline in the merge worktree. The same
+ *  rule for the suite; build and lint by exit status with the whole of both
+ *  streams in their logs (`> log 2>&1`, no tail); no summary file — the logs
+ *  under .runs/<logid>-merge-*.log are what the die names. The install step
+ *  (merge.sh:182-184) is the caller's, with its own log and its own die. */
+export interface MergeBaselineInput {
+  wt: string;
+  rawJson: string;
+  testLog: string;
+  buildLog: string;
+  lintLog: string;
+  vitestCmd: string;
+  buildCmd: string;
+  lintCmd: string;
+}
+
+export function runMergeBaseline(i: MergeBaselineInput): Baseline {
+  const test = baselineColour(runVitestJson(i.wt, i.vitestCmd, i.rawJson, i.testLog));
+  const build: Colour = runBashTo(i.buildCmd, { cwd: i.wt, logFile: i.buildLog }) === 0 ? 'GREEN' : 'RED';
+  const lint: Colour = runBashTo(i.lintCmd, { cwd: i.wt, logFile: i.lintLog }) === 0 ? 'GREEN' : 'RED';
   return { test, build, lint };
 }
