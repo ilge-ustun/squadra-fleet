@@ -3161,6 +3161,35 @@ case_124_reset_flags_and_second_run() {
   git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && ok || fail "the branch survives"
 }
 
+# Seam 5. merge.sh is a wrapper over ts/src/bin/merge.ts, which reaches the
+# target through the same loader as the other bins. The stub is red under
+# bash only in epic mode: story mode shelled to status.sh, which already went
+# through the loader. Then two things the port changed: a checkout without
+# .runs/ merges (the bash wrote the merge log before mkdir -p, so a clean
+# merge there read "does not merge cleanly" — red under bash), and a normal
+# merge leaves no bin-level line in the log (case 113's shape).
+case_125_merge_through_the_loader() {
+  CASE="125 merge.sh reaches the target through ts/src/lib/config.ts"; epic_story c125
+  config_stub
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 1 "the stub's throw ends the merge"
+  assert_grep 'fleet-test: config stub reached' "$FX/merge-epic.log" "with its text"
+
+  CASE="125b a checkout without .runs/ merges"; epic_story c125b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: the story is on its epic"
+  rm -rf "$REPO/.runs"
+  local before; before="$(git -C "$REPO" rev-parse origin/base)"
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 0 "the epic lands"
+  [[ "$(git -C "$REPO" rev-parse origin/base)" != "$before" ]] && ok || fail "the integration branch moved"
+  assert_file "$REPO/.runs/epic-test-merge.log" "and git's account of the merge is in .runs"
+  assert_not_grep 'merge\.ts:' "$FX/merge-epic.log" "no bin-level error in the log"
+  assert_not_grep '^ +at ' "$FX/merge-epic.log" "no stack frames"
+  assert_not_grep 'merge\.ts:' "$MLOG" "nor in the story merge's"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3216,7 +3245,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_118_merge_nothing_to_do_and_usage case_119_merge_refuses_while_live
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
        case_122_merge_without_push case_123_revert_refusals
-       case_124_reset_flags_and_second_run)
+       case_124_reset_flags_and_second_run case_125_merge_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -81,9 +81,10 @@ export function worktreeAdd(root: string, path: string, o: WorktreeAddOptions): 
 }
 
 /** `git worktree remove <path> --force 2>/dev/null`: both streams dropped,
- *  nothing thrown — cleanup_reviewer runs on every exit. */
-export function worktreeRemoveForce(root: string, path: string): void {
-  runSync('git', ['-C', root, 'worktree', 'remove', path, '--force']);
+ *  nothing thrown — cleanup_reviewer runs on every exit. The status is
+ *  returned for merge.sh:253, which tells the human when it failed. */
+export function worktreeRemoveForce(root: string, path: string): number {
+  return runSync('git', ['-C', root, 'worktree', 'remove', path, '--force']).status;
 }
 
 /** `git merge-base <a> <b>`; '' when git cannot answer (the bash logged
