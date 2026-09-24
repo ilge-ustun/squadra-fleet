@@ -2825,6 +2825,29 @@ case_115_block_records_the_models_used() {
   assert_grep '^reviewer: codex → gpt-test-9$' "$REPO/.review/$STORY.md" "codex's default, named"
 }
 
+# 24 Sep. A story's model: is an alias — haiku, sonnet, opus or fable — so a
+# new release reaches the builder without editing stories. A pinned id goes
+# stale silently (six stories named claude-opus-5 when opus had moved on);
+# a typo would reach the CLI and die a round in.
+#
+# Red while lint-story.sh does not read model:.
+case_116_lint_story_model() {
+  CASE="116 lint: model: is one of the aliases"; fixture c116
+  local d="$FX/lint" out rc m
+  mkdir -p "$d"
+  lint_model() {                      # lint_model <name> <model-line> → out rc
+    printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
+    out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
+  }
+  for m in haiku sonnet opus fable; do
+    lint_model "ok-$m" "model: $m"; assert_eq "$rc" 0 "model: $m is accepted"
+  done
+  lint_model none "";                         assert_eq "$rc" 0 "no model: is accepted (the default)"
+  lint_model pinned "model: claude-opus-5";   assert_eq "$rc" 1 "a pinned id is an error"
+  assert_contains "$out" "haiku, sonnet, opus or fable" "naming the aliases"
+  lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2875,7 +2898,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_109_status_through_the_loader case_110_check_through_the_loader
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
        case_112_reviewer_without_a_message case_113_launch_through_the_loader
-       case_114_haiku_builds_one_round case_115_block_records_the_models_used)
+       case_114_haiku_builds_one_round case_115_block_records_the_models_used
+       case_116_lint_story_model)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

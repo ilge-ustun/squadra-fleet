@@ -61,6 +61,13 @@ if [[ -n "$BASE" ]]; then
   fi
 fi
 [[ -n "$(field scope_deny)" ]] || warn "no scope_deny: — nothing is forbidden to the builder"
+# model: is an alias, so a new release reaches the builder with no edit; a
+# pinned id goes stale unseen, and a typo dies at the CLI a round in.
+MODEL="$(field model)"
+case "$MODEL" in
+  ""|haiku|sonnet|opus|fable) : ;;
+  *) err "model: $MODEL — name an alias, haiku, sonnet, opus or fable (the CLI resolves it to the newest release)" ;;
+esac
 
 # ── acceptance criteria ──────────────────────────────────────────────────────
 
