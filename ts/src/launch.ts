@@ -45,7 +45,8 @@
 // the few places it differs, each pinned by a test.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { parseBuilderOutput, reviewerMessages, runBuilder, runReviewer } from './lib/agents.ts';
+import { join, resolve } from 'node:path';
+import { builderModelUsed, parseBuilderOutput, reviewerMessages, reviewerModelUsed, runBuilder, runReviewer } from './lib/agents.ts';
 import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
@@ -435,6 +436,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const buildPrompt = render(chooseBuildPrompt({ round, roundStart, reviewText, reviewFileText }));
 
       let buildErr: string;
+      let builderUsed = '';
       let buildMsg: string;
       if (knobs.reviewOnly === '1') {
         // REVIEW_ONLY re-reviews the branch head with no builder round.
@@ -452,6 +454,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
           throw new Die(`round ${round}: the builder exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
         }
         const buildOut = capture(b.output);
+        builderUsed = builderModelUsed(buildOut);
         const parsed = parseBuilderOutput(buildOut);
         buildErr = parsed.isError;
         buildMsg = parsed.message;
@@ -526,10 +529,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       log(`reviewer: codex${knobs.reviewerModel !== '' ? ` ${knobs.reviewerModel}` : ''}`);
       t0 = secs();
+      const reviewerStartMs = Date.now();
       const rv = await runReviewer({
         wt: reviewerWt, prompt: reviewPrompt, model: knobs.reviewerModel, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
       });
       tReview = secs() - t0;
+      const reviewerUsed = reviewerModelUsed({
+        codexHome: process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex'), cwd: resolve(reviewerWt), sinceMs: reviewerStartMs,
+      });
       if (rv.timedOut) {
         setStatus(storyId, 'needs_human');
         throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
@@ -588,7 +595,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       appendFileSync(newFile, renderRoundSection({
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-        builderModel: roundModel, reviewerModel: knobs.reviewerModel, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        builderModel: roundModel, builderModelUsed: builderUsed, reviewerModel: knobs.reviewerModel, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, builderArgv, parseBuilderOutput, reviewerArgv, reviewerMessages, runBuilder, runReviewer,
+  ALLOWED_TOOLS, builderArgv, builderModelUsed, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test');
@@ -135,6 +135,43 @@ describe('runBuilder / runReviewer with test/claude and test/codex', () => {
       expect(readFileSync(join(trace, 'codex-args-1'), 'utf8')).toBe('exec\n--json\n--sandbox\ndanger-full-access\n-m\nfleet-test-reviewer\n');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the model each agent actually ran (24 Sep: the fleet names aliases)', () => {
+  it('builder: the modelUsage entry that cost the most', () => {
+    const out = JSON.stringify({ is_error: false, result: 'x', modelUsage: {
+      'claude-haiku-4-5-20251001': { costUSD: 0.01, outputTokens: 50 }, 'claude-sonnet-5': { costUSD: 1.2, outputTokens: 9000 } } });
+    expect(builderModelUsed(out)).toBe('claude-sonnet-5');
+  });
+  it('builder: no modelUsage, not an object, not JSON → empty', () => {
+    expect(builderModelUsed('{"is_error":false,"result":"x"}')).toBe('');
+    expect(builderModelUsed('[1]')).toBe('');
+    expect(builderModelUsed('not json {')).toBe('');
+    expect(builderModelUsed(JSON.stringify({ modelUsage: {} }))).toBe('');
+  });
+  it('reviewer: the newest codex session in the reviewer worktree since the run began', () => {
+    const home = mkdtempSync(join(tmpdir(), 'codex-home-'));
+    try {
+      const day = join(home, 'sessions', '2026', '09', '24');
+      mkdirSync(day, { recursive: true });
+      const session = (name: string, cwd: string, model: string, mtimeSec: number): void => {
+        const f = join(day, name);
+        writeFileSync(f, [
+          JSON.stringify({ type: 'session_meta', payload: { cwd, base_instructions: { text: '"model":"not-this"' } } }),
+          JSON.stringify({ type: 'turn_context', payload: { cwd, model } }),
+        ].join('\n') + '\n');
+        utimesSync(f, mtimeSec, mtimeSec);
+      };
+      session('rollout-a.jsonl', '/wt/020-review', 'gpt-old', 1000);   // before the run
+      session('rollout-b.jsonl', '/wt/other', 'gpt-other', 3000);       // another worktree
+      session('rollout-c.jsonl', '/wt/020-review', 'gpt-6-astra', 2500);
+      expect(reviewerModelUsed({ codexHome: home, cwd: '/wt/020-review', sinceMs: 2000 * 1000 })).toBe('gpt-6-astra');
+      expect(reviewerModelUsed({ codexHome: home, cwd: '/wt/none', sinceMs: 0 })).toBe('');
+      expect(reviewerModelUsed({ codexHome: join(home, 'absent'), cwd: '/wt/020-review', sinceMs: 0 })).toBe('');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

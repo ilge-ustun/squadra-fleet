@@ -6,7 +6,8 @@
 // fakes stand in (L-14). This file is the seam a later move to the agent
 // SDKs would replace; nothing else in the launcher knows how an agent is
 // started or what its output looks like.
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { run } from './proc.ts';
 
 export const ALLOWED_TOOLS = 'Read,Write,Edit,Grep,Glob,Bash';
@@ -152,4 +153,67 @@ export function reviewerMessages(jsonl: string): ReviewerMessages {
     texts.push(typeof t === 'string' ? t : JSON.stringify(t, null, 2));
   });
   return { text: texts.join('\n').replace(/\n+$/, ''), noise };
+}
+
+/** 24 Sep: the fleet names aliases (`sonnet`, `opus`), so what a round ran
+ *  on is read back from the agent. The builder: claude's `modelUsage`, whose
+ *  costliest entry is the model that did the work (the CLI also bills small
+ *  side calls to Haiku). '' when the output has none. */
+export function builderModelUsed(output: string): string {
+  let v: unknown;
+  try {
+    v = JSON.parse(output);
+  } catch {
+    return '';
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return '';
+  const usage = (v as Record<string, unknown>)['modelUsage'];
+  if (usage === null || typeof usage !== 'object') return '';
+  let best = '';
+  let bestCost = -1;
+  for (const [name, u] of Object.entries(usage as Record<string, unknown>)) {
+    const c = u !== null && typeof u === 'object' ? Number((u as Record<string, unknown>)['costUSD'] ?? 0) : 0;
+    if (c > bestCost) { best = name; bestCost = c; }
+  }
+  return best;
+}
+
+/** The reviewer: codex's `exec --json` stream does not name its model, but
+ *  every run writes a session file under $CODEX_HOME/sessions/YYYY/MM/DD
+ *  whose turn_context carries the cwd and the model. The newest one for the
+ *  reviewer worktree, written since the run began, is this run. '' when
+ *  there is none — the block then says what it said before. */
+export function reviewerModelUsed(o: { codexHome: string; cwd: string; sinceMs: number }): string {
+  const files: { path: string; mtime: number }[] = [];
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.jsonl')) {
+        const mtime = statSync(p).mtimeMs;
+        if (mtime >= o.sinceMs) files.push({ path: p, mtime });
+      }
+    }
+  };
+  walk(join(o.codexHome, 'sessions'));
+  files.sort((a, b) => b.mtime - a.mtime);
+  for (const f of files) {
+    for (const line of readFileSync(f.path, 'utf8').split('\n')) {
+      let v: unknown;
+      try {
+        v = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const r = v as { type?: unknown; payload?: { cwd?: unknown; model?: unknown } } | null;
+      if (r?.type === 'turn_context' && r.payload?.cwd === o.cwd && typeof r.payload.model === 'string') return r.payload.model;
+    }
+  }
+  return '';
 }

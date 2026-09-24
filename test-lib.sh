@@ -2812,6 +2812,19 @@ case_114_haiku_builds_one_round() {
   assert_grep '^opus$' "$TRACE/claude-args-2" "round 2 still on the story's model"
 }
 
+# 24 Sep. With aliases, `builder: sonnet` no longer says which model built a
+# round, and codex's default is invisible altogether. The block records what
+# each agent reports it ran on: claude's modelUsage, codex's session file.
+#
+# Red when the launcher does not read them back.
+case_115_block_records_the_models_used() {
+  CASE="115 the block records the model each agent actually ran"; fixture c115
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 \
+      FAKE_BUILDER_USED=claude-sonnet-9 FAKE_REVIEWER_USED=gpt-test-9 CODEX_HOME="$FX/codex-home"
+  assert_grep '^builder:  sonnet → claude-sonnet-9$' "$REPO/.review/$STORY.md" "the alias and what it resolved to"
+  assert_grep '^reviewer: codex → gpt-test-9$' "$REPO/.review/$STORY.md" "codex's default, named"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2862,7 +2875,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_109_status_through_the_loader case_110_check_through_the_loader
        case_111_builder_output_not_json case_111b_builder_output_wrong_shape
        case_112_reviewer_without_a_message case_113_launch_through_the_loader
-       case_114_haiku_builds_one_round)
+       case_114_haiku_builds_one_round case_115_block_records_the_models_used)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

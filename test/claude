@@ -34,6 +34,9 @@
 #   garbage   `not json {` — not JSON at all
 #   shape     `{"unexpected":"shape"}` — JSON, but not the CLI's object
 #
+# FAKE_BUILDER_USED=<model> adds `modelUsage` naming it — the model the
+# requested alias resolved to.
+#
 set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
@@ -88,7 +91,11 @@ case "${FAKE_BUILDER_MUTATIONS:-none}" in
 esac
 
 case "${FAKE_BUILDER_OUTPUT:-json}" in
-  json)    printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n" ;;
+  json)    if [[ -n "${FAKE_BUILDER_USED:-}" ]]; then   # the model an alias resolved to, as modelUsage reports it
+             printf '{"is_error":false,"result":"fake builder did: %s (call %s)","modelUsage":{"claude-haiku-side":{"costUSD":0.01},"%s":{"costUSD":1.5}}}\n' "$FAKE_BUILDER" "$n" "$FAKE_BUILDER_USED"
+           else
+             printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n"
+           fi ;;
   garbage) printf 'not json {\n' ;;
   shape)   printf '{"unexpected":"shape"}\n' ;;
   *) echo "fleet/test/claude: unknown FAKE_BUILDER_OUTPUT='$FAKE_BUILDER_OUTPUT'" >&2; exit 2 ;;
