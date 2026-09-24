@@ -1104,6 +1104,7 @@ case_56_merge() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_eq "$(field status)" done "precondition: the story passed"
   local before; before="$(epic_head)"
+  assert_eq "$(test -d "$REPO/../wt-$STORY" && echo present || echo gone)" present "precondition: the launcher left its worktree"
 
   merge_run
   assert_eq "$MRC" 0 "exit code"
@@ -1112,6 +1113,13 @@ case_56_merge() {
   [[ "$(epic_head)" != "$before" ]] && ok || fail "the epic moved"
   assert_grep '^merged: [0-9a-f]{7,}' "$REPO/.stories/$STORY.md" "the merge sha is recorded, so it can be reverted"
   assert_contains "$(git -C "$REPO" log -1 --format=%s)" "merged" "and recorded as a commit on the integration branch"
+  # 24 Sep: wt-020 and wt-025 stayed on disk after their merges; the launcher
+  # only printed "when finished: git worktree remove". A merged story's work
+  # is in its epic, and revert.sh works from the recorded sha. Red while the
+  # worktree survives the merge.
+  assert_eq "$(test -d "$REPO/../wt-$STORY" && echo present || echo gone)" gone "the story's builder worktree is removed"
+  git -C "$REPO" rev-parse --verify --quiet "refs/heads/story/$STORY" >/dev/null && ok \
+    || fail "the story's branch stays"
 }
 
 # Red when the verdict check is deleted: a story the harness vetoed lands.
