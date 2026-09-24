@@ -61,6 +61,25 @@ export function runBashTo(line: string, o: BashToOptions): number {
   }
 }
 
+export interface ToFileOptions {
+  cwd?: string;
+  /** Created or truncated before the program runs, as `> "$log" 2>&1` would. */
+  logFile: string;
+}
+
+/** The argv form of runBashTo: a program (no shell) with both streams to the
+ *  log file — `git merge … > log 2>&1` (merge.sh:167, revert.sh:51). Returns
+ *  the exit status, -1 when it could not start or died of a signal. */
+export function runToFile(cmd: string, args: readonly string[], o: ToFileOptions): number {
+  const fd = openSync(o.logFile, 'w');
+  try {
+    const r = spawnSync(cmd, args, { ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), stdio: ['ignore', fd, fd] });
+    return r.status ?? -1;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export interface AsyncRunOptions {
   cwd?: string;
   /** Text for the child's stdin (the prompt — on stdin, never argv, L-18). */

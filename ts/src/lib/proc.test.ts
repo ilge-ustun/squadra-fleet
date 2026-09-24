@@ -3,7 +3,7 @@ import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { procsInWorktree } from './procs.ts';
-import { run, runBashTo, runSync } from './proc.ts';
+import { run, runBashTo, runSync, runToFile } from './proc.ts';
 
 describe('runSync', () => {
   it('returns the exit status and both streams', () => {
@@ -146,5 +146,17 @@ describe('run', () => {
     const r = await run('bash', ['-c', 'sleep 0.2; echo done'], { cwd: dir, timeoutSec: 0, stderr: 'merge' });
     expect(r.timedOut).toBe(false);
     expect(r.stdout).toBe('done\n');
+  });
+});
+
+describe('runToFile', () => {
+  it('an argv form of runBashTo: both streams to the log, the status back (merge.sh:167)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fleet-proc-'));
+    const log = join(d, 'x.log');
+    writeFileSync(log, 'stale\n');
+    expect(runToFile('bash', ['-c', 'echo out; echo err >&2; exit 3'], { logFile: log })).toBe(3);
+    expect(readFileSync(log, 'utf8')).toBe('out\nerr\n');
+    expect(runToFile('/nonexistent/prog', [], { logFile: log })).toBe(-1);
+    rmSync(d, { recursive: true, force: true });
   });
 });
