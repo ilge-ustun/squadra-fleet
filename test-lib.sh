@@ -1460,7 +1460,7 @@ case_76_story_model() {
 
   CASE="76b a story that names none gets the default"; fixture c76b
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep '^claude-sonnet-4-6$' "$TRACE/claude-args-1" "the launcher's default model"
+  assert_grep '^sonnet$' "$TRACE/claude-args-1" "the launcher's default model"
 }
 
 # Phase D1, the launcher's half. The queue notifies about merges; the launcher
@@ -2182,6 +2182,9 @@ case_94_epic_naming() {
   assert_eq "$(calls claude)" 0 "before any agent runs"
   ws 902 epic/test
   assert_eq "$(calls claude)" 1 "an epic/* base gets past the check to the agent"
+  # 24 Sep: the writer names the alias, so a new Opus is picked up by the
+  # CLI with no change here. Red while the default is a pinned id.
+  assert_grep '^opus$' "$TRACE/claude-args-1" "the writer runs on the opus alias by default"
 
   local d="$FX/lint"; mkdir -p "$d"
   lint_base() {                       # lint_base <name> <base-line> → out rc

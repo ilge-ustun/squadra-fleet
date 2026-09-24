@@ -208,8 +208,8 @@ on all-RED. The Machine block records
 
 ### Seams
 
-Fleet-level: `BUILDER_MODEL` (`claude-sonnet-4-6`; a story's `model:`
-overrides) `STORY_MODEL` (`claude-opus-5`) `REVIEWER_MODEL` (empty = codex's
+Fleet-level: `BUILDER_MODEL` (`sonnet`; a story's `model:`
+overrides) `STORY_MODEL` (`opus`) `REVIEWER_MODEL` (empty = codex's
 default) `MAX_TURNS` (60) `MAX_ROUNDS` (2) `AGENT_TIMEOUT` (1800) `PUSH_STATUS`
 `REVIEW_ONLY` `AUTO_MERGE` `FLEET_NOTIFY_CMD` `FLEET_LOCK_WAIT` `QUEUE_START_CMD`
 `FLEET_REGISTRY_DIR`. Per-target, from `.fleet/config`, no fleet default.

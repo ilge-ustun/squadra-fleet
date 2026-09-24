@@ -150,7 +150,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
   const maxRoundsRaw = v('MAX_ROUNDS', '2');
   const lockWaitRaw = v('FLEET_LOCK_WAIT', '120');
   return {
-    builderModel: v('BUILDER_MODEL', 'claude-sonnet-4-6'),
+    builderModel: v('BUILDER_MODEL', 'sonnet'),
     reviewerModel: env['REVIEWER_MODEL'] || '',
     maxTurns: v('MAX_TURNS', '60'),
     agentTimeoutRaw,

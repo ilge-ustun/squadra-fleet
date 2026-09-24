@@ -50,8 +50,8 @@ replaceable at that seam.
 
 | role | runs as | model | does | may not |
 |---|---|---|---|---|
-| story writer | `write-story.sh`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `claude-opus-5` | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
-| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `claude-sonnet-4-6`; a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `check-mutation.sh` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
+| story writer | `write-story.sh`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `opus` (alias: the newest Opus) | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
+| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `check-mutation.sh` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head: reads files, runs the suite, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | the launcher: `ts/src/lib/baseline.ts`, `scope.ts`, `evidence.ts` over `ts/src/classifier.ts`, `ts/src/lib/verdict.ts` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
@@ -360,8 +360,8 @@ Fleet-level, `${X:-default}` in the scripts, set in the caller's environment:
 
 | seam | default | meaning |
 |---|---|---|
-| `BUILDER_MODEL` | `claude-sonnet-4-6` | the builder; a story's `model:` overrides it |
-| `STORY_MODEL` | `claude-opus-5` | the story writer |
+| `BUILDER_MODEL` | `sonnet` | the builder; a story's `model:` overrides it |
+| `STORY_MODEL` | `opus` | the story writer |
 | `REVIEWER_MODEL` | empty | empty keeps codex's own default; set, `codex exec -m`; recorded as `reviewer:` in the Machine block |
 | `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
