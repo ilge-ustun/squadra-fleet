@@ -225,7 +225,7 @@ answered by `telegram.sh poll` every minute.
 | `merge.sh <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
 | `revert.sh <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
 | `reset.sh <repo> <id> [--force] [--draft]` | | back to the queue |
-| `install-skills.sh` | | link `skills/` into `~/.claude/skills` and `~/.codex/skills` |
+| `install-skills.sh` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
 | `update-agents.sh` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
 | `test-lib.sh [substring]` | | the harness's own suite |
 
@@ -320,8 +320,12 @@ it and nothing changes in the pipeline.
 When one is used, its procedures are five skills in `skills/<name>/SKILL.md`, written for any agent: actions
 rather than tool names, the reason beside every rule. Claude Code and Codex
 read the same `name:`/`description:` frontmatter, so one set of files serves
-both; `bash install-skills.sh` links them into `~/.claude/skills/` and
-`~/.codex/skills/`. `AGENTS.md` is `CLAUDE.md` under the name Codex reads.
+both. `bash install-skills.sh` links them into `~/.claude/skills/`. Codex
+reads them from this repo's `.agents/skills` (a symlink to `skills/`), so a
+coordinator codex has them when started in `~/work/fleet` and the reviewer,
+which is codex in a target's worktree, does not. Reviewer skills of its own
+(security, design, …) belong in `~/.codex/skills/` or the target's
+`.agents/skills/`. `AGENTS.md` is `CLAUDE.md` under the name Codex reads.
 
 | skill | when |
 |---|---|

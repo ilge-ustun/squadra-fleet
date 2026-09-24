@@ -56,7 +56,7 @@ export interface ReviewerRun {
 }
 
 /** stderr goes to `stderrFile` (round-N/reviewer.stderr): codex prints
- *  "Reading additional input from stdin..." there on every unattended run,
+ *  "Reading prompt from stdin..." there on every unattended run (the text changes between codex versions),
  *  and merged into the stream it once broke the extraction (L-17). */
 export async function runReviewer(o: AgentCall & { model: string; stderrFile: string }): Promise<ReviewerRun> {
   const fd = openSync(o.stderrFile, 'w');

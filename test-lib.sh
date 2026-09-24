@@ -568,7 +568,7 @@ case_31_codex_stderr_notice() {
   assert_eq "$(review_line 3)" "verdict: PASS" "verdict parsed from the agent_message"
   assert_grep '^fake review, call 1' "$REPO/.review/$STORY/round-1/reviewer.md" "reviewer.md is prose, not JSON"
   assert_not_grep '"type":"item' "$REPO/.review/$STORY/round-1/reviewer.md" "no raw JSONL in reviewer.md"
-  assert_grep 'Reading additional input' "$REPO/.review/$STORY/round-1/reviewer.stderr" "stderr kept as evidence"
+  assert_grep 'Reading prompt from stdin' "$REPO/.review/$STORY/round-1/reviewer.stderr" "stderr kept as evidence"
   assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.stderr" "stderr committed"
 }
 
@@ -1104,6 +1104,7 @@ case_56_merge() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_eq "$(field status)" done "precondition: the story passed"
   local before; before="$(epic_head)"
+  assert_eq "$(test -d "$REPO/../wt-$STORY" && echo present || echo gone)" present "precondition: the launcher left its worktree"
 
   merge_run
   assert_eq "$MRC" 0 "exit code"
@@ -1112,6 +1113,13 @@ case_56_merge() {
   [[ "$(epic_head)" != "$before" ]] && ok || fail "the epic moved"
   assert_grep '^merged: [0-9a-f]{7,}' "$REPO/.stories/$STORY.md" "the merge sha is recorded, so it can be reverted"
   assert_contains "$(git -C "$REPO" log -1 --format=%s)" "merged" "and recorded as a commit on the integration branch"
+  # 24 Sep: wt-020 and wt-025 stayed on disk after their merges; the launcher
+  # only printed "when finished: git worktree remove". A merged story's work
+  # is in its epic, and revert.sh works from the recorded sha. Red while the
+  # worktree survives the merge.
+  assert_eq "$(test -d "$REPO/../wt-$STORY" && echo present || echo gone)" gone "the story's builder worktree is removed"
+  git -C "$REPO" rev-parse --verify --quiet "refs/heads/story/$STORY" >/dev/null && ok \
+    || fail "the story's branch stays"
 }
 
 # Red when the verdict check is deleted: a story the harness vetoed lands.
@@ -1563,6 +1571,15 @@ case_80_status_epics() {
   out="$( status_run --epics )"
   assert_contains "$out" "1 merged" "which changes when one does"
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
+
+  # 24 Sep: a story may name an epic before new-epic.sh has made it (024 on
+  # epic/search). Status said "in develop", as if it had landed. Red while
+  # a missing branch reads as landed.
+  CASE="80b an epic with no branch yet says so"; fixture c80b draft
+  sed -i '2a base: epic/ghost' "$REPO/.stories/$STORY.md"
+  out="$( status_run --epics )"
+  assert_contains "$out" "no branch yet" "not 'in base'"
+  assert_contains "$out" "new-epic.sh t ghost" "with the command that makes it"
 }
 
 # AC1. Red when the refresh call is deleted from run-queue.sh: the
@@ -1849,6 +1866,13 @@ case_84_prompts_carry_the_targets_facts() {
   assert_eq "$(field status)" done "the round completes"
   assert_not_grep '{{REPO_RULES}}' "$TRACE/claude-prompt-1" "no leftover placeholder"
   assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
+
+  # 24 Sep: 025's round 1 passed its tests and failed the baseline on a
+  # type error that only the build reports; the builder had never been told
+  # the build or the lint exist. Red while the rules name only the tests.
+  CASE="84d the builder is told to run the baseline's three commands"; fixture c84d
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep "baseline, on your final commit: $FLEET/test/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
 }
 
 # One fleet, many repos. `--all` walks the registry and drains each repo in
@@ -2525,28 +2549,46 @@ case_103_reviewer_model() {
 # both, is idempotent, and refuses to replace anything that is not its own
 # symlink. Red while the script does not exist.
 case_104_install_skills() {
-  CASE="104 install-skills.sh links every skill into both harnesses"; fixture c104
+  # 24 Sep: Codex gets the fleet skills from the fleet repo's .agents/skills
+  # (project scope), not from $CODEX_HOME/skills: the unattended reviewer is
+  # codex in a target's worktree, and it loaded the coordinator's procedures
+  # (fleet-coordinate, fleet-verdict) into every review of 020 and 025.
+  # Red while install-skills.sh links into $CODEX_HOME/skills, or leaves the
+  # links an older run made there, or the repo has no .agents/skills.
+  CASE="104 install-skills.sh: Claude Code gets every skill; Codex only inside the fleet repo"; fixture c104
   local H="$FX/home" out rc n
   mkdir -p "$H"
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "exit 0"
   n="$(ls -d "$FLEET"/skills/*/ | wc -l)"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Claude Code"
-  assert_eq "$(find "$H/.codex/skills"  -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Codex"
   assert_eq "$(readlink -f "$H/.claude/skills/fleet-story")" "$(readlink -f "$FLEET/skills/fleet-story")" "the link points at the fleet's copy"
-  assert_file "$H/.codex/skills/fleet-story/SKILL.md" "readable through the Codex link"
-  assert_grep '^name: fleet-story$' "$H/.codex/skills/fleet-story/SKILL.md" "with the frontmatter both harnesses read"
+  assert_eq "$(find "$H/.codex/skills" -maxdepth 1 -name 'fleet-*' 2>/dev/null | wc -l)" 0 "no fleet skill in Codex's home, where every codex run would load it"
+  assert_eq "$(readlink -f "$FLEET/.agents/skills")" "$(readlink -f "$FLEET/skills")" "the fleet repo's .agents/skills is skills/"
+  assert_grep '^name: fleet-story$' "$FLEET/.agents/skills/fleet-story/SKILL.md" "readable there, with the frontmatter Codex reads"
 
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "second run: exit 0"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "second run: still one link per skill"
 
-  # A directory that is not our symlink is someone's work: refused, named.
-  rm "$H/.codex/skills/fleet-land"; mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
+  # The links an older install made in Codex's home are ours: removed. A
+  # directory there that is not our symlink is someone's work: left alone.
+  mkdir -p "$H/.codex/skills"
+  ln -s "$FLEET/skills/fleet-story" "$H/.codex/skills/fleet-story"
+  mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
+  mkdir -p "$H/.codex/skills/security-review"; printf 'a reviewer skill\n' > "$H/.codex/skills/security-review/SKILL.md"
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "exit 0"
+  assert_eq "$(test -e "$H/.codex/skills/fleet-story" && echo present || echo gone)" gone "our old Codex link is removed"
+  assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "a directory that is not ours stays"
+  assert_grep '^a reviewer skill$' "$H/.codex/skills/security-review/SKILL.md" "and so does any other Codex skill"
+
+  # A directory in Claude's home that is not our symlink: refused, named.
+  rm "$H/.claude/skills/fleet-land"; mkdir -p "$H/.claude/skills/fleet-land"; printf 'theirs\n' > "$H/.claude/skills/fleet-land/SKILL.md"
   out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "a foreign directory: exit 1"
   assert_contains "$out" "fleet-land" "names it"
-  assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "and leaves it alone"
+  assert_grep '^theirs$' "$H/.claude/skills/fleet-land/SKILL.md" "and leaves it alone"
 }
 
 # The fixture is a copy of the working tree, once per case. ts/node_modules

@@ -130,7 +130,7 @@ describe('runBuilder / runReviewer with test/claude and test/codex', () => {
       const r = await runReviewer({ wt, prompt: 'review it', model: 'fleet-test-reviewer', timeoutSec: 30, stderrFile, env });
       expect(r.timedOut).toBe(false);
       expect(reviewerMessages(r.stdout).text).toMatch(/VERDICT: PASS$/);
-      expect(readFileSync(stderrFile, 'utf8')).toBe('Reading additional input from stdin...\n');
+      expect(readFileSync(stderrFile, 'utf8')).toBe('Reading prompt from stdin...\n');
       expect(readFileSync(join(trace, 'codex-prompt-1'), 'utf8')).toBe('review it');
       expect(readFileSync(join(trace, 'codex-args-1'), 'utf8')).toBe('exec\n--json\n--sandbox\ndanger-full-access\n-m\nfleet-test-reviewer\n');
     } finally {

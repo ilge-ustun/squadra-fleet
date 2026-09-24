@@ -104,11 +104,11 @@ case "$FAKE_REVIEWER" in
 esac
 
 # Output shaped like real codex 0.153 (read from a real run, 17 Sep):
-#   stderr  "Reading additional input from stdin..." when stdin is not a TTY —
+#   stderr  "Reading prompt from stdin..." when stdin is not a TTY (this text since at least 22 Sep; "Reading additional input from stdin..." on 17 Sep) —
 #           always on, because that is what every unattended run sees
 #   stdout  JSON Lines: thread.started, command_execution items (no .text),
 #           then the agent_message that carries the verdict, then turn.completed
-echo "Reading additional input from stdin..." >&2
+echo "Reading prompt from stdin..." >&2
 jq -cn '{type:"thread.started", thread_id:"fake"}'
 jq -cn '{type:"item.started",   item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\""}}'
 jq -cn '{type:"item.completed", item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\"", exit_code:0}}'

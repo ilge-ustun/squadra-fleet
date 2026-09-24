@@ -241,4 +241,19 @@ else
   [[ "$PUSH_STATUS" == "1" ]] && { git -C "$REPO_ROOT" push -q 2>/dev/null || warn "push failed — the record is local only"; }
 fi
 
+# The builder's worktree has done its job: its commits are in $BASE, and
+# revert.sh works from the recorded sha, not from the worktree. The branch
+# stays. LIVE was checked false above; checked again, since a merge takes
+# minutes and someone may have opened a shell there meanwhile.
+WT="$REPO_ROOT/../wt-$ID"
+if [[ -d "$WT" ]]; then
+  if [[ -n "$(procs_in_worktree "$WT")" ]]; then
+    warn "something is running in $WT — left in place; remove it with: git worktree remove --force $WT"
+  else
+    git -C "$REPO_ROOT" worktree remove --force "$WT" >/dev/null 2>&1 \
+      && log "worktree removed: $WT (branch story/$ID kept)" \
+      || warn "could not remove $WT — git worktree remove --force $WT"
+  fi
+fi
+
 log "$ID merged into $BASE — revert with: revert.sh $REPO_NAME $ID"

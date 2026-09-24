@@ -59,6 +59,9 @@ export interface EpicRow {
   total: number;
   merged: number;
   ahead: number;
+  /** false when neither origin nor this checkout has the branch — a story
+   *  names an epic that new-epic.sh has not made yet (24 Sep). */
+  exists?: boolean;
 }
 
 export interface Detail {
@@ -183,6 +186,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
     total: total.get(name) ?? 0,
     merged: mergedCount.get(name) ?? 0,
     ahead: revListCount(root, `${baseRef}..${refOf(name)}`),
+    exists: refExists(root, `origin/${name}`) || branchExists(root, name),
   }));
 
   const stories: StoryRow[] = [];
