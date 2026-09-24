@@ -3250,6 +3250,25 @@ case_127_reset_through_the_loader() {
   assert_not_grep '^ +at ' "$RLOG" "no stack frames"
 }
 
+# Seam 6. run-queue.sh's next_ready always skipped TEMPLATE.md; launch.ts's
+# own nextReady did not (storyFiles() kept the bash glob's non-skipping
+# behaviour). A bare `launch.sh <repo>` picks a story to build when none is
+# named — TEMPLATE.md carrying status: ready is real, not hypothetical
+# (khaita's does). Red today: launch.ts would try to build the template.
+case_128_bare_launch_never_picks_template() {
+  CASE="128 a bare launch never picks TEMPLATE.md, ready or not"; fixture c128 draft
+  sed -i 's/^status: draft/status: ready/' "$REPO/.stories/TEMPLATE.md"
+  ( cd "$FX" && env PATH="$(FAKES)" \
+      PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      bash "$FLEET/launch.sh" t ) > "$FX/bare.log" 2>&1
+  local rc=$?
+  assert_eq "$rc" 0 "nothing ready is not an error"
+  assert_grep 'queue empty' "$FX/bare.log" "it says the queue is empty"
+  assert_eq "$(calls claude)" 0 "the builder never ran"
+  assert_eq "$(frontmatter "$REPO/.stories/TEMPLATE.md" status)" ready "TEMPLATE.md is untouched"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3306,7 +3325,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
        case_122_merge_without_push case_123_revert_refusals
        case_124_reset_flags_and_second_run case_125_merge_through_the_loader
-       case_126_revert_through_the_loader case_127_reset_through_the_loader)
+       case_126_revert_through_the_loader case_127_reset_through_the_loader
+       case_128_bare_launch_never_picks_template)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
