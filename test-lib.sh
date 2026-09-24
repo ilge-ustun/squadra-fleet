@@ -3212,6 +3212,25 @@ case_126_revert_through_the_loader() {
   assert_not_grep '^ +at ' "$RVLOG" "no stack frames"
 }
 
+# Seam 5. reset.sh is a wrapper over ts/src/bin/reset.ts. The loader stub is
+# red under bash, which never loaded it; then case 52's reset through the
+# real loader, with no bin-level line in the log.
+case_127_reset_through_the_loader() {
+  CASE="127 reset.sh reaches the target through ts/src/lib/config.ts"; fixture c127
+  config_stub
+  reset_run "$STORY" --force
+  assert_eq "$RRC" 1 "the stub's throw ends the reset"
+  assert_grep 'fleet-test: config stub reached' "$RLOG" "with its text"
+  assert_eq "$(field status)" ready "and the story is untouched"
+
+  CASE="127b the real loader: a reset, no bin-level line"; fixture c127b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  reset_run "$STORY" --force
+  assert_eq "$RRC" 0 "reset"
+  assert_eq "$(field status)" ready "status back to ready"
+  assert_not_grep 'reset\.ts:' "$RLOG" "no bin-level error in the log"
+  assert_not_grep '^ +at ' "$RLOG" "no stack frames"
+}
 
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
@@ -3269,7 +3288,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
        case_122_merge_without_push case_123_revert_refusals
        case_124_reset_flags_and_second_run case_125_merge_through_the_loader
-       case_126_revert_through_the_loader)
+       case_126_revert_through_the_loader case_127_reset_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
