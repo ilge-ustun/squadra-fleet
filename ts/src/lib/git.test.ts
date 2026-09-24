@@ -7,7 +7,7 @@ import {
   add, branchExists, commit as gitCommit, diffNameOnly, fetch, isAncestor, mergeBase, pushQuiet, refExists, revListCount, revParse,
   stagedIsEmpty, worktreeAdd, worktreeRemoveForce,
   addAll, branchDelete, branchForce, logOneline, lsFilesTracked, mergeAbort, mergeNoFf, pushRef, revertAbort, revertMerge,
-  worktreeCheckedOutBranches, worktreePrune,
+  worktreeCheckedOutBranches, worktreePrune, currentBranch, mergeFfOnly,
 } from './git.ts';
 import { existsSync, readFileSync } from 'node:fs';
 
@@ -255,5 +255,51 @@ describe('the operations landing makes', () => {
     expect(g(['diff', '--cached', '--name-status'])).toBe('D\ta');
     g(['reset', '-q', '--hard']);
     expect(lsFilesTracked(repo, 'a')).toBe(true);
+  });
+});
+
+// After seam 5: the checkout that is on the base branch is fast-forwarded to
+// the merge before the record is committed on it (merge.ts, case 120c).
+describe('currentBranch and mergeFfOnly', () => {
+  let d4: string;
+  let repo: string;
+  const ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  function g(args: string[], cwd = repo): string {
+    const r = runSync('git', args, { cwd, env: ENV });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+  beforeAll(() => {
+    d4 = mkdtempSync(join(tmpdir(), 'fleet-git4-'));
+    repo = join(d4, 'repo');
+    runSync('git', ['init', '-q', '-b', 'base', repo]);
+    g(['config', 'user.name', 't']); g(['config', 'user.email', 't@t']);
+    writeFileSync(join(repo, 'a'), 'one\n'); g(['add', '-A']); g(['commit', '-qm', 'one']);
+  });
+  afterAll(() => { rmSync(d4, { recursive: true, force: true }); });
+
+  it('currentBranch: the checked-out branch, \'\' when detached', () => {
+    expect(currentBranch(repo)).toBe('base');
+    const head = g(['rev-parse', 'HEAD']);
+    g(['checkout', '-q', '--detach']);
+    expect(currentBranch(repo)).toBe('');
+    g(['checkout', '-q', 'base']);
+    expect(g(['rev-parse', 'HEAD'])).toBe(head);
+  });
+
+  it('mergeFfOnly: 0 and moved when a fast-forward; non-zero and untouched when not', () => {
+    const base1 = g(['rev-parse', 'HEAD']);
+    g(['checkout', '-q', '-b', 'ahead']);
+    writeFileSync(join(repo, 'b'), 'two\n'); g(['add', '-A']); g(['commit', '-qm', 'two']);
+    const ahead = g(['rev-parse', 'HEAD']);
+    g(['checkout', '-q', 'base']);
+    expect(mergeFfOnly(repo, 'ahead')).toBe(0);
+    expect(g(['rev-parse', 'HEAD'])).toBe(ahead);
+    g(['checkout', '-q', '-b', 'diverged', base1]);
+    writeFileSync(join(repo, 'c'), 'three\n'); g(['add', '-A']); g(['commit', '-qm', 'three']);
+    const div = g(['rev-parse', 'HEAD']);
+    expect(mergeFfOnly(repo, 'ahead')).not.toBe(0);
+    expect(g(['rev-parse', 'HEAD'])).toBe(div);
+    expect(g(['status', '--porcelain'])).toBe('');
   });
 });

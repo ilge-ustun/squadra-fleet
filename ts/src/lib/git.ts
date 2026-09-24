@@ -201,3 +201,16 @@ export function logOneline(root: string, range: string): string {
   const r = runSync('git', ['-C', root, '--no-pager', 'log', '--oneline', range], { stderr: 'inherit' });
   return r.status === 0 ? r.stdout.replace(/\n+$/, '') : '';
 }
+
+/** `git symbolic-ref --short -q HEAD`: the checked-out branch, '' when detached. */
+export function currentBranch(root: string): string {
+  const r = runSync('git', ['-C', root, 'symbolic-ref', '--short', '-q', 'HEAD']);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
+/** `git merge -q --ff-only <ref>` in the checkout: 0 and moved when HEAD is
+ *  an ancestor of the ref, non-zero and untouched otherwise. Both streams
+ *  dropped — the caller says what it did. */
+export function mergeFfOnly(root: string, ref: string): number {
+  return runSync('git', ['-C', root, 'merge', '-q', '--ff-only', ref]).status;
+}

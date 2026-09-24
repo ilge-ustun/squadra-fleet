@@ -27,8 +27,8 @@ import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
 import { recordMergedSha } from './lib/frontmatter.ts';
 import {
-  add, branchExists, branchForce, commit, fetch, isAncestor, mergeAbort, mergeNoFf, pushQuiet, pushRef, refExists, revParse,
-  stagedIsEmpty, worktreeAdd, worktreeCheckedOutBranches, worktreeRemoveForce,
+  add, branchExists, branchForce, commit, currentBranch, fetch, isAncestor, mergeAbort, mergeFfOnly, mergeNoFf, porcelain, pushQuiet,
+  pushRef, refExists, revParse, stagedIsEmpty, worktreeAdd, worktreeCheckedOutBranches, worktreeRemoveForce,
 } from './lib/git.ts';
 import { log, out, warn } from './lib/log.ts';
 import { runBashTo, runSync } from './lib/proc.ts';
@@ -261,11 +261,18 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     // ── publish ──────────────────────────────────────────────────────────────
     const mergeSha = revParse(mwt, 'HEAD');
     if (pushStatus === '1' && pushRef(mwt, 'HEAD', base) !== 0) throw new Die(`push of ${base} failed — the merge is local only`);
-    // Move the local branch to what was just published, unless someone is
-    // standing on it — then say so rather than leave a stale ref behind.
+    // Move the local branch to what was just published. When this checkout
+    // itself is on it — the integration branch always is — and clean, it is
+    // fast-forwarded, so the record below lands on top of the merge and its
+    // push goes (24 Sep: the record on a stale base was refused, and the
+    // human's `git pull --ff-only` failed; case 120c). Someone standing on it
+    // elsewhere, or a dirty tree, is told rather than left a stale ref.
     if (branchExists(root, base)) {
-      if (worktreeCheckedOutBranches(root).includes(`refs/heads/${base}`)) warn(`local ${base} is checked out — run: git pull --ff-only`);
-      else if (branchForce(root, base, mergeSha) !== 0) warn(`could not move local ${base} to ${short(mergeSha)}`);
+      if (currentBranch(root) === base && porcelain(root) === '' && mergeFfOnly(root, mergeSha) === 0) {
+        log(`local ${base} is checked out and clean — fast-forwarded to ${short(mergeSha)}`);
+      } else if (worktreeCheckedOutBranches(root).includes(`refs/heads/${base}`)) {
+        warn(`local ${base} is checked out — run: git pull --ff-only`);
+      } else if (branchForce(root, base, mergeSha) !== 0) warn(`could not move local ${base} to ${short(mergeSha)}`);
     }
     log(`${base} is now ${short(mergeSha)}`);
 

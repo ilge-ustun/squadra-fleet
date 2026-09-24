@@ -3005,13 +3005,31 @@ case_120_merge_and_the_local_base_branch() {
   assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(field merged)" "local epic/test is at the recorded sha"
   assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(epic_head)" "which is origin's"
 
-  CASE="120c a checked-out base is not moved; the human is told what to run"; fixture c120c
+  # 24 Sep, after seam 5. The checkout is on the base (khaita's is on
+  # develop), so the merge is pushed but the local branch cannot be moved
+  # under it; the record was then committed on the stale local base and its
+  # push refused — `git pull --ff-only` failed for the human afterwards.
+  # Now a clean checkout is fast-forwarded to the merge before the record.
+  CASE="120c a clean checked-out base is fast-forwarded before the record"; fixture c120c
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
   merge_run -- --land
   assert_eq "$MRC" 0 "landed"
-  assert_grep 'local base is checked out — run: git pull --ff-only' "$MLOG" "the warning names the command"
+  assert_grep 'local base is checked out and clean — fast-forwarded' "$MLOG" "the log says what happened to the checkout"
+  assert_not_grep 'push failed' "$MLOG" "the record's push went"
   git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "origin's base holds the story"
   assert_eq "$(git -C "$REPO" rev-parse --abbrev-ref HEAD)" base "the checkout is still on base"
+  assert_eq "$(git -C "$REPO" rev-parse base)" "$(git -C "$REPO" rev-parse origin/base)" "and level with origin"
+  git -C "$REPO" show origin/base:.stories/$STORY.md | grep -q '^merged: ' && ok || fail "the record reached origin"
+
+  CASE="120d a dirty checkout is not touched; the human is told"; fixture c120d
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  printf 'uncommitted\n' >> "$REPO/src/marker.txt"
+  merge_run -- --land
+  assert_eq "$MRC" 0 "landed"
+  assert_grep 'local base is checked out — run: git pull --ff-only' "$MLOG" "the warning names the command"
+  assert_grep 'push failed — the record is local only' "$MLOG" "and the record stays local, as before"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/base && ok || fail "origin's base holds the story"
+  assert_grep 'uncommitted' "$REPO/src/marker.txt" "the human's edit survives"
 }
 
 # 121: a story that does not merge cleanly. The merge is aborted, the throwaway

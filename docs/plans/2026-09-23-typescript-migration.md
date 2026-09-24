@@ -443,3 +443,13 @@ registry, read-only, each wrapper's first refusal: `merge.sh khaita 021` →
 → `unknown option`, exit 1 each, the checkout at `ec02943` untouched. The
 fixture never carries `ts/node_modules`, so every run proves the runtime
 needs none.
+
+Fixed after the seam, a behaviour change and so not part of the parity port
+(branch `land-record`, 24 Sep): `--land` with the base checked out — khaita's
+checkout is on `develop` — pushed the merge, could not move the local branch
+under itself, then committed the `merged:` record on that stale base; the
+record's push was refused and the human's `git pull --ff-only` failed
+(ahead 1, behind 2). Now a checkout that is on the base and clean is
+fast-forwarded to the merge before the record (`currentBranch`,
+`mergeFfOnly`, `porcelain`); a dirty one keeps the warning and the local
+record. Case 120c (red against the port as merged), 120d for the dirty tree.
