@@ -1,0 +1,19 @@
+epic/done              1 story, 1 merged  [2min base[0m
+epic/test              2 stories, 1 merged  [33m2 ahead of base[0m  → merge.sh t --epic epic/test
+
+ID   TITLE          STATUS          R  VERDICT  INTO  NOTES
+[2m──────────────────────────────────────────────────────[0m
+900  fixture story  [33mawaiting merge[0m  1  PASS     base  worktree
+
+### Machine
+baseline:  test GREEN  build GREEN  lint GREEN
+timing:    builder 10s  baseline 5s  reviewer 20s  mutations 3s  total 40s
+builder:   fleet-test-model
+reviewer:  codex
+acs:       AC1 
+scope:     CLEAN
+model:     PASS
+computed:  PASS
+mutations:
+AC1  RED           marker
+[2mevidence: Round-3 builder.md round-1 round.1 round_1 [0m

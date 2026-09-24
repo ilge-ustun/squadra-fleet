@@ -60,9 +60,9 @@ human should run instead.
   the human sends `/run`. A launcher started as a child of an interactive
   session inherits its memory policy and sandbox and has been killed by
   both (handoff, memory section).
-- Never edit `launch.sh` while `status.sh` shows a round in flight: bash
-  reads scripts incrementally and a running launcher would execute the
-  half-edited file.
+- Editing the launcher (`ts/src/launch.ts`) while `status.sh` shows a
+  round in flight is safe — node loaded the whole program when the round
+  started — but the change reaches only the next launch.
 - Never write under `.fleet/` from a story; the harness sources it and
   denies it to builders. Change it only as a deliberate coordinator commit.
 - Never `pkill -f` a pattern; kill by worktree (`procs_in_worktree` in

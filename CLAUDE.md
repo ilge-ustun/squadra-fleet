@@ -17,7 +17,9 @@ against this checkout.
 - `repos/<name>.env` — the registry. One file per target repo, holding
   **only** `REPO_PATH=/abs/path`. Nothing else may live in it.
 - `<target>/.fleet/config` — the target's own settings, committed there and
-  sourced by `lib.sh:load_repo`: `BASE_BRANCH INSTALL_CMD VITEST_CMD
+  sourced by `lib.sh:load_repo` (the TypeScript side reads it through
+  `ts/src/lib/config.ts`, which runs `load_repo` in a child bash; nothing
+  parses the file): `BASE_BRANCH INSTALL_CMD VITEST_CMD
   BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR`, optional `REPO_RULES` (a markdown
   file, relative to the target, rendered into the agent prompts), optional
   `MERGE_MODE` (`direct`, the default, or `pr` — which requires `PR_CMD`;
@@ -46,19 +48,34 @@ bash test-lib.sh blocked    # cases whose name contains "blocked"
 Nothing runs this for you. TDD is mandatory: write the failing case, run it,
 SEE IT FAIL, then change the script. Most cases characterise behaviour the
 scripts already have, so "see it fail" means running the case against a copy
-with the block deleted: `FLEET_LAUNCH_OVERRIDE`, `FLEET_RENDER_OVERRIDE`,
-`FLEET_LIB_OVERRIDE` substitute that copy into the fixture. A case that has
-never been observed red is not a case.
+with the block deleted: `FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE`
+substitute that copy into the fixture; `FLEET_TS_OVERRIDE` lays a directory
+over `ts/src/`, or the case writes a stub into the fixture's `ts/src/lib/`
+after `fixture` (cases 106-110, 113). A case that has never been observed
+red is not a case.
+
+The TypeScript side (`ts/`, run by `node` as is — no build) has vitest
+unit tests beside each module, red first too:
+
+```bash
+cd ts && npm ci && npm run check && npm test   # tsc --noEmit, then vitest
+```
+
+`npm test` compiles through esbuild, which accepts syntax Node rejects;
+`npm run check` and `bash test-lib.sh` (real `node`) are the proofs.
+Nothing under `ts/` needs `node_modules` at run time; the live checkout
+never runs `npm`. The plan: `docs/plans/2026-09-23-typescript-migration.md`.
 
 ## Working rules
 
-- Never edit `launch.sh` while a launcher is running it — bash reads scripts
-  incrementally. `status.sh <repo>` shows what is live.
+- `launch.sh` is a wrapper that execs node, which loads the whole program
+  before it starts: editing `ts/src/` while a launcher runs is safe (editing
+  the bash launcher never was). `status.sh <repo>` shows what is live.
 - Never run a launcher as a child of an interactive agent session; always
   `setsid nohup bash -c '…' > log 2>&1 < /dev/null &`.
 - Kill by cwd (`procs_in_worktree`) or exact process name, never by a
   `pkill -f` pattern that can match your own command line.
-- Show the `launch.sh` diff before applying it.
+- Show the `ts/src/launch.ts` diff before applying it.
 - Prefer `die` over `warn` — a warning assumes a human is watching.
 - A check that cannot go red is absent, not weak.
 - Prompts go to agents on stdin, never argv.

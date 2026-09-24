@@ -1,0 +1,254 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { classFromVitestJson } from './lib/vitest-json.ts';
+import { runSync } from './lib/proc.ts';
+import { DirtyTreeError, classifyMutation, findSelector, runSelector } from './classifier.ts';
+
+// The fleet's one fake runner, the same one test-lib.sh points VITEST_CMD at.
+const FAKE_VITEST = resolve(import.meta.dirname, '../../test/vitest');
+
+describe('classFromVitestJson — the decision, row by row (mutation.sh@8fe954a:36-39)', () => {
+  it.each([
+    [undefined, 'NO_TESTS', 'no file'],
+    ['', 'GREEN', 'empty file (jq -e exits 4 → falls through)'],
+    ['not json', 'GREEN', 'unparseable (jq -e exits 2 → falls through)'],
+    ['{}', 'GREEN', 'no counts at all (null == 0 is false, null > 0 is false)'],
+    ['{"numTotalTests":0,"numFailedTests":0}', 'NO_TESTS', 'zero collected'],
+    ['{"numTotalTests":0,"numFailedTests":1}', 'NO_TESTS', 'zero collected wins over failures'],
+    ['{"numTotalTests":2,"numFailedTests":1}', 'RED', 'a real failure'],
+    ['{"numTotalTests":2,"numFailedTests":0}', 'GREEN', 'all passed'],
+    ['{"numTotalTests":"2","numFailedTests":"1"}', 'GREEN', 'strings are not numbers, as for jq'],
+  ] as const)('%j → %s (%s)', (text, expected, _why) => {
+    expect(classFromVitestJson(text)).toBe(expected);
+  });
+});
+
+// A throwaway repo: one commit, src/marker.txt (what the fake's marker mode
+// greps, relative to its cwd), patches kept OUTSIDE the tree so porcelain
+// never sees them.
+interface Fx { dir: string; wt: string; mut: string; trace: string; raw: string }
+let fx: Fx;
+
+function git(args: string[], cwd = fx.wt): string {
+  const r = runSync('git', args, { cwd });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout;
+}
+function commit(msg: string): void {
+  git(['add', '-A']);
+  git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg]);
+}
+function hashOf(file: string): string {
+  return git(['hash-object', file]).trim();
+}
+function porcelainOf(): string {
+  return git(['status', '--porcelain']).split('\n').filter((l) => l && !l.startsWith('?? .review-out/')).join('\n');
+}
+/** A patch (against HEAD) that appends the marker to src/marker.txt, and its selector. */
+function markerPatch(name = 'AC1-marker', selector = 'fake.test.tsx\n', ext: 'test' | 'cmd' = 'test'): string {
+  writeFileSync(join(fx.wt, 'src/marker.txt'), 'the fake agents mutate this file\n\nFLEET_MUTANT_MARKER\n');
+  const diff = git(['diff', '--', 'src/marker.txt']);
+  git(['checkout', '-q', '--', 'src/marker.txt']);
+  const p = join(fx.mut, `${name}.patch`);
+  writeFileSync(p, diff);
+  writeFileSync(join(fx.mut, `${name}.${ext}`), selector);
+  return p;
+}
+function calls(): number {
+  return existsSync(join(fx.trace, 'calls')) ? readFileSync(join(fx.trace, 'calls'), 'utf8').split('\n').filter((l) => l.startsWith('vitest')).length : 0;
+}
+function classify(patch: string, o: { kind?: 'test' | 'cmd'; restore?: 'checkout' | 'reverse'; fake?: string } = {}) {
+  const kind = o.kind ?? 'test';
+  process.env['FAKE_VITEST'] = o.fake ?? 'marker';
+  return classifyMutation({
+    wt: fx.wt,
+    patch,
+    kind,
+    selectorFile: patch.replace(/\.patch$/, `.${kind}`),
+    rawPrefix: join(fx.raw, 'AC1-marker'),
+    restore: o.restore ?? 'checkout',
+    vitestCmd: FAKE_VITEST,
+  });
+}
+
+beforeEach(() => {
+  const dir = mkdtempSync(join(tmpdir(), 'fleet-classifier-'));
+  fx = { dir, wt: join(dir, 'repo'), mut: join(dir, 'mut'), trace: join(dir, 'trace'), raw: join(dir, 'runs') };
+  for (const d of [fx.wt, fx.mut, fx.trace, fx.raw, join(fx.wt, 'src')]) mkdirSync(d, { recursive: true });
+  git(['init', '-q', '-b', 'main']);
+  writeFileSync(join(fx.wt, 'src/marker.txt'), 'the fake agents mutate this file\n');
+  writeFileSync(join(fx.wt, '.gitignore'), '.review-out/\n');
+  commit('fixture');
+  process.env['FAKE_TRACE_DIR'] = fx.trace;
+  process.env['FAKE_VITEST'] = 'marker';
+});
+afterEach(() => {
+  rmSync(fx.dir, { recursive: true, force: true });
+  delete process.env['FAKE_TRACE_DIR'];
+  delete process.env['FAKE_VITEST'];
+});
+
+describe('findSelector', () => {
+  it('prefers .test, then .cmd, else nothing', () => {
+    const p = join(fx.mut, 'AC2-x.patch');
+    writeFileSync(p, '');
+    expect(findSelector(p)).toBeUndefined();
+    writeFileSync(join(fx.mut, 'AC2-x.cmd'), 'false\n');
+    expect(findSelector(p)).toEqual({ kind: 'cmd', file: join(fx.mut, 'AC2-x.cmd') });
+    writeFileSync(join(fx.mut, 'AC2-x.test'), 'a.test.ts\n');
+    expect(findSelector(p)).toEqual({ kind: 'test', file: join(fx.mut, 'AC2-x.test') });
+  });
+});
+
+describe('runSelector', () => {
+  const sel = () => {
+    const f = join(fx.mut, 'sel.test');
+    writeFileSync(f, 'fake.test.tsx -t "a pattern"\nsecond line ignored\n');
+    return f;
+  };
+  it.each([['pass', 'GREEN'], ['fail', 'RED'], ['notests', 'NO_TESTS']] as const)('test kind, fake %s → %s, writes .json and .log', (fake, expected) => {
+    process.env['FAKE_VITEST'] = fake;
+    const prefix = join(fx.raw, 'r');
+    expect(runSelector({ wt: fx.wt, kind: 'test', selectorFile: sel(), rawPrefix: prefix, vitestCmd: FAKE_VITEST })).toBe(expected);
+    expect(existsSync(`${prefix}.json`)).toBe(true);
+    expect(existsSync(`${prefix}.log`)).toBe(true);
+    // only the first line reaches the runner, word-split by bash
+    expect(readFileSync(join(fx.trace, 'calls'), 'utf8')).toBe('vitest fake.test.tsx -t a pattern\n');
+  });
+  it('test kind: a runner that writes no file is NO_TESTS, and a stale .json is removed first', () => {
+    const prefix = join(fx.raw, 'r');
+    writeFileSync(`${prefix}.json`, '{"numTotalTests":2,"numFailedTests":1}');
+    expect(runSelector({ wt: fx.wt, kind: 'test', selectorFile: sel(), rawPrefix: prefix, vitestCmd: 'true' })).toBe('NO_TESTS');
+    expect(existsSync(`${prefix}.json`)).toBe(false);
+  });
+  it('cmd kind: non-zero exit is RED, zero is GREEN, output lands in the log, cwd is the tree', () => {
+    const f = join(fx.mut, 'sel.cmd');
+    const prefix = join(fx.raw, 'c');
+    writeFileSync(f, 'pwd; grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n');
+    expect(runSelector({ wt: fx.wt, kind: 'cmd', selectorFile: f, rawPrefix: prefix, vitestCmd: FAKE_VITEST })).toBe('GREEN');
+    expect(readFileSync(`${prefix}.log`, 'utf8').trim()).toBe(runSync('pwd', [], { cwd: fx.wt }).stdout.trim());
+    writeFileSync(f, 'exit 3\n');
+    expect(runSelector({ wt: fx.wt, kind: 'cmd', selectorFile: f, rawPrefix: prefix, vitestCmd: FAKE_VITEST })).toBe('RED');
+  });
+});
+
+describe('classifyMutation — the classes (mutation.sh@8fe954a:65-88)', () => {
+  it('RED: caught; the tree is restored byte for byte and every raw file exists', () => {
+    const p = markerPatch();
+    const before = hashOf('src/marker.txt');
+    const r = classify(p, { fake: 'marker' });
+    expect(r.cls).toBe('RED');
+    expect(r.mutJsonPath).toBe(join(fx.raw, 'AC1-marker-mut.json'));
+    expect(hashOf('src/marker.txt')).toBe(before);
+    expect(porcelainOf()).toBe('');
+    for (const s of ['-pre.json', '-pre.log', '-apply.log', '-mut.json', '-mut.log']) {
+      expect(existsSync(join(fx.raw, `AC1-marker${s}`)), s).toBe(true);
+    }
+    expect(calls()).toBe(2);
+  });
+  it('GREEN: survived', () => {
+    expect(classify(markerPatch(), { fake: 'pass' }).cls).toBe('GREEN');
+    expect(porcelainOf()).toBe('');
+  });
+  it('NO_TESTS: the mutation broke compilation', () => {
+    expect(classify(markerPatch(), { fake: 'marker-notests' }).cls).toBe('NO_TESTS');
+    expect(porcelainOf()).toBe('');
+  });
+  it('PRE_RED: the instrument was already red; the patch is never applied', () => {
+    const r = classify(markerPatch(), { fake: 'fail' });
+    expect(r.cls).toBe('PRE_RED');
+    expect(r.mutJsonPath).toBeUndefined();
+    expect(existsSync(join(fx.raw, 'AC1-marker-apply.log'))).toBe(false);
+    expect(existsSync(join(fx.raw, 'AC1-marker-mut.json'))).toBe(false);
+    expect(calls()).toBe(1);
+  });
+  it('SELECTOR_INVALID: the selector collected nothing before the mutation', () => {
+    expect(classify(markerPatch(), { fake: 'notests' }).cls).toBe('SELECTOR_INVALID');
+    expect(calls()).toBe(1);
+  });
+  it('PATCH_INVALID: does not apply; -apply.log carries git\'s reason; tree restored by checkout even in reverse mode', () => {
+    const p = join(fx.mut, 'AC1-bad.patch');
+    writeFileSync(p, '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-x\n+y\n');
+    writeFileSync(join(fx.mut, 'AC1-bad.test'), 'fake.test.tsx\n');
+    process.env['FAKE_VITEST'] = 'marker';
+    const r = classifyMutation({ wt: fx.wt, patch: p, kind: 'test', selectorFile: join(fx.mut, 'AC1-bad.test'), rawPrefix: join(fx.raw, 'AC1-bad'), restore: 'reverse', vitestCmd: FAKE_VITEST });
+    expect(r.cls).toBe('PATCH_INVALID');
+    expect(readFileSync(join(fx.raw, 'AC1-bad-apply.log'), 'utf8')).toMatch(/nope\.txt/);
+    expect(existsSync(join(fx.raw, 'AC1-bad-mut.json'))).toBe(false);
+    expect(porcelainOf()).toBe('');
+  });
+  it('cmd selector: RED when the command fails on the mutated tree', () => {
+    const p = markerPatch('AC1-cmd', 'grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n', 'cmd');
+    const r = classify(p, { kind: 'cmd' });
+    expect(r.cls).toBe('RED');
+    expect(r.mutJsonPath).toBeUndefined();
+    expect(porcelainOf()).toBe('');
+  });
+});
+
+describe('classifyMutation — restore modes', () => {
+  /** A patch that also adds a new file, so the two modes differ. */
+  function addingPatch(): string {
+    writeFileSync(join(fx.wt, 'src/marker.txt'), 'the fake agents mutate this file\n\nFLEET_MUTANT_MARKER\n');
+    writeFileSync(join(fx.wt, 'src/new.txt'), 'added by the mutation\n');
+    git(['add', '-N', 'src/new.txt']);
+    const diff = git(['diff', '--', 'src']);
+    git(['reset', '-q']);
+    rmSync(join(fx.wt, 'src/new.txt'));
+    git(['checkout', '-q', '--', 'src/marker.txt']);
+    const p = join(fx.mut, 'AC1-marker.patch');
+    writeFileSync(p, diff);
+    writeFileSync(join(fx.mut, 'AC1-marker.test'), 'fake.test.tsx\n');
+    return p;
+  }
+  it('checkout: checkout -- . then clean -fd sweeps the added file', () => {
+    expect(classify(addingPatch(), { restore: 'checkout' }).cls).toBe('RED');
+    expect(existsSync(join(fx.wt, 'src/new.txt'))).toBe(false);
+    expect(porcelainOf()).toBe('');
+  });
+  it('reverse: git apply -R undoes exactly the patch', () => {
+    expect(classify(addingPatch(), { restore: 'reverse' }).cls).toBe('RED');
+    expect(existsSync(join(fx.wt, 'src/new.txt'))).toBe(false);
+    expect(porcelainOf()).toBe('');
+  });
+  it('reverse leaves other untracked work alone; checkout would not, which is why a human tree uses reverse', () => {
+    writeFileSync(join(fx.wt, '.review-out'), ''); rmSync(join(fx.wt, '.review-out'));
+    mkdirSync(join(fx.wt, '.review-out/checks'), { recursive: true });
+    writeFileSync(join(fx.wt, '.review-out/checks/note.txt'), 'kept\n');
+    expect(classify(markerPatch(), { restore: 'reverse' }).cls).toBe('RED');
+    expect(existsSync(join(fx.wt, '.review-out/checks/note.txt'))).toBe(true);
+    expect(classify(markerPatch(), { restore: 'checkout' }).cls).toBe('RED');
+    expect(existsSync(join(fx.wt, '.review-out/checks/note.txt')), 'clean -e .review-out keeps it too').toBe(true);
+  });
+});
+
+describe('classifyMutation — a dirty tree stops everything', () => {
+  it('before: throws naming the path, and the runner is never called', () => {
+    const p = markerPatch();
+    writeFileSync(join(fx.wt, 'README.md'), 'uncommitted\n');
+    commit('a readme');
+    writeFileSync(join(fx.wt, 'README.md'), 'uncommitted change\n');
+    let err: unknown;
+    try { classify(p); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(DirtyTreeError);
+    expect((err as DirtyTreeError).when).toBe('before');
+    expect((err as DirtyTreeError).message).toMatch(/README\.md/);
+    expect(calls()).toBe(0);
+    expect(readFileSync(join(fx.wt, 'README.md'), 'utf8')).toBe('uncommitted change\n');
+  });
+  it('after: a selector that litters the tree is caught under reverse (apply -R undoes only the patch)', () => {
+    const p = markerPatch('AC1-litter', 'touch src/junk.txt; grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n', 'cmd');
+    let err: unknown;
+    try { classify(p, { kind: 'cmd', restore: 'reverse' }); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(DirtyTreeError);
+    expect((err as DirtyTreeError).when).toBe('after');
+    expect((err as DirtyTreeError).message).toMatch(/junk\.txt/);
+  });
+  it('after: the same litter is swept under checkout, so no error', () => {
+    const p = markerPatch('AC1-litter', 'touch src/junk.txt; grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n', 'cmd');
+    expect(classify(p, { kind: 'cmd', restore: 'checkout' }).cls).toBe('RED');
+    expect(porcelainOf()).toBe('');
+  });
+});

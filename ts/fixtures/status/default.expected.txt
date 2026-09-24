@@ -1,0 +1,15 @@
+epic/done              1 story, 1 merged  [2min base[0m
+epic/test              2 stories, 1 merged  [33m2 ahead of base[0m  → merge.sh t --epic epic/test
+
+ID     TITLE                                  STATUS          R  VERDICT  INTO       NOTES
+[2m─────────────────────────────────────────────────────────────────────────────────────[0m
+900-b  Order before ids                       [0mdraft         [0m  —  —      base       
+900    fixture story                          [33mawaiting merge[0m  1  PASS     base       worktree
+9000   Über long title, ümlauts and — dashes  [33min_progress   [0m  2  FAIL     base       worktree, BLOCKED: see .blocked/9000.md, scope VIOLATION: src/a
+901    Two spaces after the hash              [0mdone          [0m  1           base       AC1 GREEN: marker
+902    lower case, hyphen                     [32mon epic       [0m  1  PASS     epic/test  
+904    landed                                 [32mlanded        [0m  1  PASS     base       
+905    Merged by sha, branch gone             [32mlanded        [0m  2  PASS     base       
+906    ready on the epic                      [0mready         [0m  —  —      epic/test  
+907    On an epic that landed                 [32mlanded        [0m  1  PASS     epic/done  
+908    —                                    [0m—           [0m  —  —      base       

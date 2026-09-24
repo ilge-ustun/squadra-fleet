@@ -171,9 +171,9 @@ fi
 
 # ── the baseline that earns this ─────────────────────────────────────────────
 #
-# Same rule as the launcher's run_baseline (launch.sh): a suite that
-# collects zero tests is not green (L-08). Duplicated rather than sourced —
-# launch.sh runs its main body on source — and it is the same eleven lines.
+# Same rule as the launcher's baseline (ts/src/lib/baseline.ts): a suite
+# that collects zero tests is not green (L-08). Duplicated in bash rather
+# than called — merge.sh stays bash — and it is the same eleven lines.
 
 for f in "${SEED_FILES_ARR[@]}"; do
   [[ -f "$REPO_ROOT/$f" ]] && cp "$REPO_ROOT/$f" "$MWT/$f"

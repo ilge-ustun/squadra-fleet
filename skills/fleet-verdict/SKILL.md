@@ -26,10 +26,10 @@ The block, per round:
 ```
 baseline: test GREEN | build GREEN | lint GREEN
 builder:  <model>            reviewer: codex [<model>]
-scope:    CLEAN | HIT <paths>
+scope:    CLEAN | VIOLATION <paths>
 model:    PASS|FAIL|SPEC|UNPARSEABLE      ← the reviewer's line
-computed: PASS | FAIL — <reason>; <reason>; …
-mutations:  ACn  CLASS  slug        probes:  name  RED|GREEN
+computed: PASS | FAIL — <reason>; <reason>; …   (SPEC and UNPARSEABLE keep their reasons too)
+mutations:  ACn  CLASS  slug        probes:  CLASS  name
 ```
 
 ## What each reason means, and the fix it needs
@@ -46,7 +46,8 @@ mutations:  ACn  CLASS  slug        probes:  name  RED|GREEN
 | `ACn has no mutation` | no patch for that AC at all | the reviewer — or the AC cannot be instrumented: a story defect |
 | `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
 
-`prompts/README.md` is the contract; `mutation.sh` is the classifier.
+`prompts/README.md` is the contract; `ts/src/classifier.ts` is the classifier
+(`check-mutation.sh` runs it by hand).
 
 ## The decision tree
 

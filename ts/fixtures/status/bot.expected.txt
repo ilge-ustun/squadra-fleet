@@ -1,0 +1,28 @@
+epic/done
+  1 story, 1 merged
+  in base
+epic/test
+  2 stories, 1 merged
+  2 ahead of base → /merge t epic/test
+
+-------
+908 —
+→ base | — | — | —
+-------
+906 ready on the epic
+→ epic/test | ready | — | —
+-------
+902 lower case, hyphen
+→ epic/test | on epic | R1 | PASS
+-------
+9000 Über long title, ümlauts and — dashes
+→ base | in_progress | R2 | FAIL
+! worktree, BLOCKED: see .blocked/9000.md, scope VIOLATION: src/a
+-------
+900 fixture story
+→ base | awaiting merge | R1 | PASS
+! worktree
+-------
+900-b Order before ids
+→ base | draft | — | —
+-------

@@ -2,14 +2,15 @@
 #
 # fleet/test/codex — stand-in for the real `codex exec --json …` under fleet/test-lib.sh.
 #
-# The launcher invokes `codex` by bare name with the review prompt as the
-# LAST argument (launch.sh: `codex exec --json --sandbox … "$REVIEW_PROMPT"`),
-# cwd = the reviewer worktree, and filters the output with
-#   jq -r 'select(.type=="item.completed") | .item.text'
-# then greps the text for `^VERDICT: (PASS|FAIL|SPEC)[[:space:]]*$`.
+# The launcher invokes `codex` by bare name with the review prompt on stdin
+# (launch.sh: `printf '%s' "$REVIEW_PROMPT" | codex exec --json --sandbox …`),
+# cwd = the reviewer worktree, and keeps only the reviewer's own messages:
+#   fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text
+# The verdict rule then reads `^VERDICT: (PASS|FAIL|SPEC)` from that text.
 #
 #   FAKE_REVIEWER=PASS | FAIL | SPEC   a well-formed verdict line
 #   FAKE_REVIEWER=garbage              no line the launcher can parse → UNPARSEABLE
+#   FAKE_REVIEWER=silent               a stream with no agent_message at all
 #   FAKE_REVIEWER=hang                 never returns — for the agent-timeout case
 #
 # Phase 1.3+: the reviewer's output contract is files under .review-out/
@@ -88,6 +89,7 @@ esac
 case "$FAKE_REVIEWER" in
   PASS|FAIL|SPEC) text=$'fake review, call '"$n"$'.\nfinding: none.\nVERDICT: '"$FAKE_REVIEWER" ;;
   garbage)        text=$'fake review, call '"$n"$'.\nverdict: pass (lowercase, not the contract)' ;;
+  silent)         text="" ;;
   *) echo "fleet/test/codex: unknown FAKE_REVIEWER='$FAKE_REVIEWER'" >&2; exit 2 ;;
 esac
 
@@ -100,5 +102,5 @@ echo "Reading additional input from stdin..." >&2
 jq -cn '{type:"thread.started", thread_id:"fake"}'
 jq -cn '{type:"item.started",   item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\""}}'
 jq -cn '{type:"item.completed", item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\"", exit_code:0}}'
-jq -cn --arg t "$text" '{type:"item.completed", item:{id:"item_2", type:"agent_message", text:$t}}'
+[[ "$FAKE_REVIEWER" == silent ]] || jq -cn --arg t "$text" '{type:"item.completed", item:{id:"item_2", type:"agent_message", text:$t}}'
 jq -cn '{type:"turn.completed", usage:{input_tokens:1, output_tokens:1}}'

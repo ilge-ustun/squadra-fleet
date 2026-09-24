@@ -1,0 +1,15 @@
+{
+  "name": "fleet-ts",
+  "private": true,
+  "type": "module",
+  "description": "The fleet harness's TypeScript side. Run directly by Node (type stripping); no build, no runtime dependencies.",
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

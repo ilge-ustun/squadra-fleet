@@ -3,8 +3,9 @@
 # fleet/test/claude — stand-in for the real `claude -p …` under fleet/test-lib.sh.
 #
 # The launcher invokes `claude` by bare name with cwd = the builder worktree
-# (launch.sh: `cd "$BUILDER_WT" && claude -p "$PROMPT" …`). This script is
-# found first on PATH and does exactly one scripted thing:
+# (launch.sh: `printf '%s' "$BUILD_PROMPT" | claude -p --model … --output-format json`,
+# the prompt on stdin). This script is found first on PATH and does exactly
+# one scripted thing:
 #
 #   FAKE_BUILDER=commit     one empty commit  (the postcondition the launcher checks)
 #   FAKE_BUILDER=nocommit   nothing
@@ -26,8 +27,12 @@
 #
 # It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
 # given as $FAKE_TRACE_DIR/claude-prompt-N, and its argv as claude-args-N, so a
-# test can assert which prompt the launcher rendered and which model it chose. Output is the one JSON object the launcher parses
-# with jq (launch.sh: `.is_error`, `.result`).
+# test can assert which prompt the launcher rendered and which model it chose.
+# Output is the one JSON object the launcher reads (`is_error`, `result`) —
+# unless FAKE_BUILDER_OUTPUT says otherwise, for the paths where it is not:
+#
+#   garbage   `not json {` — not JSON at all
+#   shape     `{"unexpected":"shape"}` — JSON, but not the CLI's object
 #
 set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
@@ -82,4 +87,9 @@ case "${FAKE_BUILDER_MUTATIONS:-none}" in
   *) echo "fleet/test/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
 esac
 
-printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n"
+case "${FAKE_BUILDER_OUTPUT:-json}" in
+  json)    printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n" ;;
+  garbage) printf 'not json {\n' ;;
+  shape)   printf '{"unexpected":"shape"}\n' ;;
+  *) echo "fleet/test/claude: unknown FAKE_BUILDER_OUTPUT='$FAKE_BUILDER_OUTPUT'" >&2; exit 2 ;;
+esac

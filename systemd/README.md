@@ -114,7 +114,7 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 |---|---|---|
 | `.timer` | `OnUnitActiveSec=15min` | how soon a promoted story is picked up |
 | `.service` | `--all --max 5` | every registered repo, at most 5 stories each per drain; a ceiling against looping unattended |
-| `.service` | `AGENT_TIMEOUT=1800` | wall clock per agent call; a hung agent is killed and the story goes to `needs_human` |
+| `.service` | `AGENT_TIMEOUT=1800` | wall clock per agent call; a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
 | `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is committed before the fleet starts (`docs/FLEET-HANDOFF.md` §2) and a Next build peaks near 1.4 GB |
 | `.service` | `TimeoutStartSec=6h` | a full drain is long; `AGENT_TIMEOUT` already bounds the part that can hang |
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |

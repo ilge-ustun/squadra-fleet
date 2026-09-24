@@ -25,12 +25,16 @@
 # substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of repo/,
 # exactly as in production (launch.sh: "$REPO_ROOT/../wt-$STORY_ID").
 #
-# Observing red. Most cases characterise behaviour launch.sh already has, so
-# "see it fail first" means: run the case against a copy of launch.sh with
-# the named block deleted. FLEET_LAUNCH_OVERRIDE=<file> substitutes that
-# copy into the fixture; the real launch.sh is never modified.
-# FLEET_RENDER_OVERRIDE does the same for render.sh. Each case's comment
-# names the block whose deletion turns it red.
+# Observing red. Most cases characterise behaviour the scripts already have,
+# so "see it fail first" means: run the case against a copy with the named
+# block deleted. FLEET_RENDER_OVERRIDE=<file> and FLEET_LIB_OVERRIDE=<file>
+# substitute that copy into the fixture; FLEET_TS_OVERRIDE=<dir> lays a
+# directory over ts/src/, and a case may write a stub straight into the
+# fixture's ts/src/lib/ after `fixture` (cases 106-110, 113). The real
+# scripts are never modified. Each case's comment names the block whose
+# deletion turns it red. (The launcher was bash until seam 4; its override,
+# FLEET_LAUNCH_OVERRIDE, went with it — overriding a four-line wrapper
+# proves nothing.)
 #
 # Two guards, both learned the expensive way on the first run (17 Sep): the
 # fakes were named fake-claude/fake-codex, so `claude` resolved to the REAL
@@ -56,9 +60,9 @@ fi
 # three override seams are the red-observation mechanism and must survive.
 if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
-       FLEET_LAUNCH_OVERRIDE="${FLEET_LAUNCH_OVERRIDE:-}" \
        FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
        FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
+       FLEET_TS_OVERRIDE="${FLEET_TS_OVERRIDE:-}" \
        FLEET_TEST_CLEAN=1 bash "$0" "$@"
 fi
 
@@ -97,20 +101,30 @@ shadow_check() {                      # shadow_check <fleet-copy> — die unless
   done
 }
 
+# The fleet under test is a copy of a working tree, minus its git metadata,
+# its real registry (a typo'd name in a case must never reach a real
+# checkout), anything machine-local, and ts/node_modules: the TypeScript
+# side's devDependencies (tsc, vitest) are tens of megabytes that would be
+# copied once per case, and nothing under ts/ may need them at run time —
+# their absence in every fixture is what proves that.
+copy_fleet() {                        # copy_fleet <src> <dst>
+  mkdir -p "$2"
+  tar -C "$1" --exclude=./.git --exclude=./repos --exclude=./ts/node_modules -cf - . | tar -C "$2" -xf -
+  rm -rf "$2/.env.fleet" "$2/.bot-offset"
+}
+
 fixture() {                           # fixture <case-name> [story-status] → FX FLEET REPO TRACE
   FX="$TMP/$1"; FLEET="$FX/fleet"; REPO="$FX/repo"; TRACE="$FX/trace"
   local status="${2:-ready}"
   mkdir -p "$TRACE"; : > "$TRACE/calls"
 
-  # The fleet under test: this working tree, minus its git metadata, its real
-  # registry (a typo'd name in a case must never reach a real checkout) and
-  # anything machine-local. One registry entry, t, names the target below.
-  mkdir -p "$FLEET"
-  cp -r "$FLEET_HOME/." "$FLEET"
-  rm -rf "$FLEET/.git" "$FLEET/repos" "$FLEET/.env.fleet" "$FLEET/.bot-offset"
-  [[ -n "${FLEET_LAUNCH_OVERRIDE:-}" ]] && cp "$FLEET_LAUNCH_OVERRIDE" "$FLEET/launch.sh"
+  # One registry entry, t, names the target below. The override seams put a
+  # copy with a block deleted in place of a script (or, for TypeScript, lay a
+  # directory over ts/src/) so a case can be observed red.
+  copy_fleet "$FLEET_HOME" "$FLEET"
   [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
   [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
+  [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"
   mkdir -p "$FLEET/repos"
   printf 'REPO_PATH=%s\n' "$REPO" > "$FLEET/repos/t.env"
 
@@ -475,7 +489,13 @@ mutation_case() {                     # mutation_case <name> <label> <expected-c
   assert_contains "$(tracked)" ".review/$STORY/round-1/mutations/$mut.result" "result committed"
   assert_grep "^${mut%%-*} +$cls +${mut#*-}" "$REPO/.review/$STORY.md" "row in the Machine table"
 }
-case_18_mutation_red()      { mutation_case c18 "18 mutation caught → RED"                 RED          AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker; }
+case_18_mutation_red() {
+  mutation_case c18 "18 mutation caught → RED" RED AC1-marker FAKE_MUTATIONS=patch FAKE_VITEST=marker
+  # Line 2 of the .result: the mutated run's counts and failed tests, the bytes
+  # `jq -c` wrote and the classifier writes now. Red with the line deleted.
+  assert_eq "$(sed -n 2p "$REPO/.review/$STORY/round-1/mutations/AC1-marker.result")" \
+    '{"numTotalTests":2,"numFailedTests":1,"failed":["fake suite a"]}' "the .result second line"
+}
 case_19_mutation_green()    { mutation_case c19 "19 mutation survives → GREEN"             GREEN        AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=pass; }
 case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation → NO_TESTS" NO_TESTS     AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker-notests; }
 case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }
@@ -2526,6 +2546,247 @@ case_104_install_skills() {
   assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "and leaves it alone"
 }
 
+# The fixture is a copy of the working tree, once per case. ts/node_modules
+# must not come along (size, and the proof that nothing under ts/ needs it at
+# run time); everything else must. Exercised on a synthetic tree so it can go
+# red whether or not anything is installed here. Red while copy_fleet is cp -r.
+case_105_fixture_excludes_node_modules() {
+  CASE="105 the fixture carries no ts/node_modules"; fixture c105
+  local src="$FX/src-tree" dst="$FX/dst-tree"
+  mkdir -p "$src/ts/node_modules/typescript" "$src/ts/src/lib" "$src/.git" "$src/repos"
+  printf 'x\n' > "$src/ts/node_modules/typescript/package.json"
+  printf 'export {}\n' > "$src/ts/src/lib/a.ts"
+  printf '# lib\n' > "$src/lib.sh"; printf 'token\n' > "$src/.env.fleet"
+  copy_fleet "$src" "$dst"
+  assert_no_file "$dst/ts/node_modules/typescript/package.json" "node_modules left behind"
+  [[ -d "$dst/ts/node_modules" ]] && fail "ts/node_modules directory copied" || ok
+  assert_file "$dst/ts/src/lib/a.ts" "ts/src copied"
+  assert_file "$dst/lib.sh" "scripts copied"
+  assert_no_file "$dst/.env.fleet" "machine-local token not copied"
+  [[ -d "$dst/.git" || -d "$dst/repos" ]] && fail ".git or repos copied" || ok
+}
+
+# One classifier. The verdict (launch.sh) and a builder's own check
+# (check-mutation.sh) both reach ts/src/lib/vitest-json.ts, the one place a
+# runner's JSON becomes a class. Replace that file with a stub that answers
+# GREEN to everything: a marker mutation the fake runner would catch must
+# then come out GREEN from both, and the veto must follow. Red while either
+# caller still classifies in bash.
+case_106_one_classifier() {
+  CASE="106 the verdict and check-mutation.sh share one classifier"; fixture c106
+  cat > "$FLEET/ts/src/lib/vitest-json.ts" <<'STUB'
+import type { RunClass } from './types.ts';
+export function classFromVitestJson(_text: string | undefined): RunClass { return 'GREEN'; }
+export function readVitestJson(_path: string): string | undefined { return ''; }
+STUB
+  local m="$REPO/.review-out/mutations" out rc
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation.sh gives the stub's answer"
+  assert_eq "$rc" 1 "and exits 1"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the verdict gives the stub's answer"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "and the veto follows"
+}
+
+# A probe's class came from an unchecked $(run_selector …): a runner that
+# failed to start left cls empty, the .result empty, the probe row without a
+# class, and the veto had nothing to look at — a silent PASS marked done.
+# Break the runner for probes only (a probe's selector path carries
+# fleet-probe-; mutations do not) and the launcher must stop, not finish.
+# Red while launch.sh takes run_selector's output without its status.
+case_107_probe_runner_failure_is_not_a_pass() {
+  CASE="107 a failing probe runner stops the round rather than passing it"; fixture c107
+  sed -i "s|^export function runBashTo(line: string, o: BashToOptions): number {|&\n  if (line.includes('fleet-probe-')) throw new Error('injected: probe runner failure');|" "$FLEET/ts/src/lib/proc.ts"
+  grep -q 'injected: probe runner failure' "$FLEET/ts/src/lib/proc.ts" || { fail "the injection did not land — proc.ts changed shape"; return; }
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=green MAX_ROUNDS=1
+  [[ "$RC" -ne 0 ]] && ok || fail "the launcher exited 0 with a broken probe runner"
+  [[ "$(field status)" != done ]] && ok || fail "the story was marked done"
+  assert_not_grep '^verdict: PASS' "$REPO/.review/$STORY.md" "no PASS was written"
+  assert_grep 'probe runner' "$LOG" "the log says which runner failed"
+}
+
+# One verdict. The rule — reasons, veto — is ts/src/lib/verdict.ts and
+# nothing else; the launcher only carries the answer. Replace that file with
+# a rule that says PASS to everything and a round the real rule would veto
+# (a GREEN mutation under a reviewer PASS) must come out PASS, done, with an
+# empty computed line. Red while launch.sh still vetoes in bash.
+case_108_one_verdict() {
+  CASE="108 the launcher's verdict is computed by ts/src/lib/verdict.ts"; fixture c108
+  cat > "$FLEET/ts/src/lib/verdict.ts" <<'STUB'
+export function computeVerdict(_i: unknown): { model: 'PASS'; computed: 'PASS'; reasons: string[] } {
+  return { model: 'PASS', computed: 'PASS', reasons: [] };
+}
+STUB
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$RC" 0 "the launcher finished"
+  assert_eq "$(field status)" done "the stub's PASS stood"
+  assert_eq "$(review_line 3)" "verdict: PASS" "verdict line"
+  assert_grep '^computed: PASS$' "$REPO/.review/$STORY.md" "no reasons, no veto"
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the survivor is still in the table"
+}
+
+# One config loader. status.sh (and, from case 110, check-mutation.sh) run
+# as `node ts/src/bin/<x>.ts`, and the only way from there to the target's
+# .fleet/config is ts/src/lib/config.ts — which runs lib.sh's load_repo in a
+# child bash. Replace that module with one that throws and the entry point
+# must fail with its text; a bash status.sh never loads it and would answer
+# as usual. Then, with the real module, the things the wrapper must keep:
+# success is silent on stderr (telegram.sh merges stderr into the reply),
+# load_repo runs before the flag loop (an unknown repo exits 1 even with a
+# bad flag; a bad flag alone exits 2). Red while status.sh is bash.
+config_stub() {                       # config_stub — ts/src/lib/config.ts that throws on load
+  cat > "$FLEET/ts/src/lib/config.ts" <<'STUB'
+export class ConfigError extends Error { readonly alreadyReported = false; }
+export function loadRepo(_home: string, _name: string, _o?: unknown): never {
+  throw new Error('fleet-test: config stub reached');
+}
+STUB
+}
+case_109_status_through_the_loader() {
+  CASE="109 status.sh reaches the target through ts/src/lib/config.ts"; fixture c109
+  config_stub
+  local out rc err
+  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json 2>&1 )"; rc=$?
+  assert_contains "$out" "fleet-test: config stub reached" "status.sh --json went through the loader"
+  assert_eq "$rc" 1 "and failed with it"
+  fixture c109b
+  err="$FX/status.err"
+  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json "$STORY" 2>"$err" )"; rc=$?
+  assert_eq "$rc" 0 "the real loader: --json exits 0"
+  assert_eq "$(jq -r '.[0].id' <<< "$out")" "$STORY" "and names the story"
+  assert_eq "$(cat "$err")" "" "nothing on stderr on success"
+  ( cd "$FX" && bash "$FLEET/status.sh" t -x >/dev/null 2>&1 ); assert_eq "$?" 2 "an unknown flag exits 2"
+  ( cd "$FX" && bash "$FLEET/status.sh" nope -x >/dev/null 2>&1 ); assert_eq "$?" 1 "an unknown repo exits 1 before the flags are read"
+  out="$( cd "$FX" && bash "$FLEET/status.sh" nope 2>&1 )"
+  assert_contains "$out" "unknown repo 'nope'" "lib.sh's own die text reaches the caller"
+}
+
+# The same loader for check-mutation.sh: `node ts/src/bin/mutation.ts check`
+# reaches VITEST_CMD and REPO_ROOT through ts/src/lib/config.ts. With the
+# stub it must fail with the stub's text (a bash check-mutation.sh sources
+# lib.sh and never loads it — it would print RED and exit 0). Then the real
+# thing: a RED run is silent on stderr, and any -flag but --wt is usage,
+# exit 1, as the bash had it. Red while check-mutation.sh is bash.
+case_110_check_through_the_loader() {
+  CASE="110 check-mutation.sh reaches the target through ts/src/lib/config.ts"; fixture c110
+  local m="$REPO/.review-out/mutations" out rc err
+  mutation_patch() {                  # mutation_patch — AC1-tdd-marker.patch and its .test under $m
+    mkdir -p "$m"
+    printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+    git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+    git -C "$REPO" checkout -q -- src/marker.txt
+    printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
+  }
+  mutation_patch; config_stub
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "fleet-test: config stub reached" "check-mutation.sh went through the loader"
+  assert_eq "$rc" 1 "and failed with it"
+  fixture c110b; m="$REPO/.review-out/mutations"; mutation_patch
+  err="$FX/check.err"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
+          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>"$err" )"; rc=$?
+  assert_eq "$out" "RED AC1-tdd-marker" "the real loader: the class line and nothing else on stdout"
+  assert_eq "$rc" 0 "exit 0 on all RED"
+  assert_eq "$(cat "$err")" "" "nothing on stderr on success"
+  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" -x 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "an unknown flag is a die"
+  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "no patch is a die"
+  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+}
+
+# Two paths of the builder block no case exercised, characterised before the
+# launcher moves to TypeScript (seam 4) so the move cannot change them. What
+# bash does when `claude` prints something other than its JSON object: jq's
+# `has("is_error")` fails on non-JSON, so BUILD_ERR is EMPTY — not
+# "parse-failed" — the warning does not fire, builder.json keeps the raw text
+# (the `|| printf` fallback), and builder.md is the empty BUILD_MSG. Red when
+# that fallback (launch.sh: `|| printf '%s\n' "$BUILD_OUT" > …/builder.json`)
+# is deleted: builder.json is then empty.
+case_111_builder_output_not_json() {
+  CASE="111 builder output that is not JSON is kept raw, silently"; fixture c111
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" done "the round went on to the reviewer"
+  assert_not_grep 'builder output was not JSON' "$LOG" "the warning is for JSON of the wrong shape, not for non-JSON"
+  assert_eq "$(cat "$ev/builder.json")" "not json {" "builder.json holds the raw output"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/builder.json" "and is committed"
+  assert_eq "$(stat -c %s "$ev/builder.md")" 1 "builder.md is one empty line (BUILD_MSG is empty)"
+  # The empty BUILD_ERR is visible in the one message that prints it.
+  fixture c111n
+  run "$STORY" FAKE_BUILDER=nocommit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
+  assert_eq "$RC" 1 "no commit is still the die"
+  assert_contains "$(cat "$LOG")" "produced no commits (is_error=). Said: " "is_error is empty, not parse-failed, and Said is empty"
+}
+
+# JSON that is not the CLI's object — no is_error key — is the path the
+# warning was written for: BUILD_ERR is "parse-failed", the first 20 lines
+# are shown, builder.json is jq's pretty print, builder.md says "no result
+# field". Red when the warning block (launch.sh: `if [[ "$BUILD_ERR" ==
+# "parse-failed" ]] … fi`) is deleted.
+case_111b_builder_output_wrong_shape() {
+  CASE="111b builder JSON of the wrong shape is warned about"; fixture c111b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=shape
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" done "the round went on"
+  assert_grep 'builder output was not JSON' "$LOG" "the warning"
+  assert_grep '^\{"unexpected":"shape"\}$' "$LOG" "followed by the raw output"
+  assert_eq "$(cat "$ev/builder.md")" "no result field" "builder.md"
+  assert_eq "$(cat "$ev/builder.json")" $'{\n  "unexpected": "shape"\n}' "builder.json is the pretty print"
+}
+
+# The reviewer's stream without any agent_message: the raw JSONL is kept as
+# evidence, reviewer.md carries the placeholder, and the verdict rule reads
+# that placeholder as UNPARSEABLE. Red when the empty-REVIEW_TEXT block
+# (launch.sh: `if [[ -z "$REVIEW_TEXT" ]]; then … fi`) is deleted:
+# reviewer.raw.jsonl is never written and reviewer.md is an empty line.
+case_112_reviewer_without_a_message() {
+  CASE="112 a reviewer that says nothing leaves its raw stream and an UNPARSEABLE round"; fixture c112
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=silent MAX_ROUNDS=1
+  local ev="$REPO/.review/$STORY/round-1"
+  assert_eq "$RC" 0 "exit code (the ceiling, not a die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_eq "$(review_line 3)" "verdict: UNPARSEABLE" ".review line 3"
+  assert_grep 'reviewer produced no agent_message' "$LOG" "the warning"
+  assert_file "$ev/reviewer.raw.jsonl" "the raw stream is kept"
+  assert_grep '"type":"turn.completed"' "$ev/reviewer.raw.jsonl" "and is the stream"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.raw.jsonl" "committed with the round"
+  assert_eq "$(cat "$ev/reviewer.md")" "(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)" "reviewer.md is the placeholder"
+}
+
+# One loader for the launcher too. launch.sh is `node ts/src/bin/launch.ts`
+# from seam 4 on, and its only way to the target's .fleet/config is
+# ts/src/lib/config.ts. With the stub in place the launcher must fail with
+# the stub's text before any agent runs; a bash launch.sh sources lib.sh,
+# reaches config.ts only through `mutation.ts classify`, whose import the
+# stub satisfies, and would run the story to done. Then the real thing: a
+# PASS run whose log carries no bin-level error and no stack frame. Red
+# while launch.sh is bash.
+case_113_launch_through_the_loader() {
+  CASE="113 launch.sh reaches the target through ts/src/lib/config.ts"; fixture c113
+  config_stub
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 1 "the stub's throw ends the launcher"
+  assert_grep 'fleet-test: config stub reached' "$LOG" "with its text"
+  assert_eq "$(calls claude)" 0 "before any agent ran"
+  fixture c113b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the real loader: a PASS run"
+  assert_eq "$(field status)" done "ends done"
+  assert_not_grep 'launch\.ts:' "$LOG" "no bin-level error in the log"
+  assert_not_grep '^ +at ' "$LOG" "no stack frames"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -2570,7 +2831,12 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
-       case_103_reviewer_model case_104_install_skills)
+       case_103_reviewer_model case_104_install_skills
+       case_105_fixture_excludes_node_modules case_106_one_classifier
+       case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
+       case_109_status_through_the_loader case_110_check_through_the_loader
+       case_111_builder_output_not_json case_111b_builder_output_wrong_shape
+       case_112_reviewer_without_a_message case_113_launch_through_the_loader)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue
