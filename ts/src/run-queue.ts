@@ -1,0 +1,237 @@
+// run-queue.ts — run-queue.sh in TypeScript (seam 6): drain every `ready`
+// story of a repo in turn, until the queue is empty. This is the piece that
+// makes the fleet a fleet: until it existed a human launched each story,
+// watched it, and launched the next one.
+//
+// A stopped story does not stop the queue — that has been the design since
+// bash's phase 4b. needs_human, blocked and a harness die all end that story
+// and the next one starts. Two guards against looping forever: --max N (a
+// hard ceiling, default 20) and the same-story-twice check — a story that
+// comes back `ready` without reaching a terminal state means something is
+// wrong with the story or the harness, not with that round.
+//
+// The launcher decides; the queue merges. A hand-run launch.sh never changes
+// a branch (launch.ts never calls merge.sh) — that separation is what keeps
+// a debugging session from landing something. AUTO_MERGE=0 turns the merge
+// off without turning the fleet off.
+//
+// Each story runs as a child process (`bash launch.sh <repo> <id>`, then, on
+// a computed PASS, `bash merge.sh <repo> <id>`) with stdio fully inherited —
+// not called in-process. That process boundary isolates one story's crash or
+// Die from the rest of the drain, the same reason --all re-execs this script
+// once per repo rather than looping over loaded configs in one process.
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { Die } from './lib/die.ts';
+import { storyField } from './lib/frontmatter.ts';
+import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, upstreamBranch } from './lib/git.ts';
+import { readKnobs, splitCommand } from './launch.ts';
+import { log, out, warn } from './lib/log.ts';
+import { formatIsoSeconds } from './lib/machine-block.ts';
+import { runInherit } from './lib/proc.ts';
+import { readReview } from './lib/review.ts';
+import type { RepoConfig } from './lib/config.ts';
+import { nextReady } from './status.ts';
+
+export const USAGE = 'usage: run-queue.sh <repo>|--all [--max N]';
+
+const DIM = '\x1b[2m';
+const RST = '\x1b[0m';
+
+/** run-queue.sh:37: `--max N` only where N is argv[0] right after the repo
+ *  name; anything else leaves MAX from the environment (default 20). */
+export function readMax(argv: readonly string[], env: NodeJS.ProcessEnv): number {
+  if (argv[0] === '--max') {
+    const n = argv[1];
+    if (n === undefined) throw new Die('--max needs a number');
+    return Number(n);
+  }
+  return Number(env['MAX'] ?? '20');
+}
+
+export interface RanLine {
+  id: string;
+  status: string;
+  verdict: string;
+  rc: number;
+}
+
+/** run-queue.sh:135: `"$id ${status:-?} ${verdict:-—} exit=$rc"`. */
+export function formatRanLine(r: RanLine): string {
+  return `${r.id} ${r.status || '?'} ${r.verdict || '—'} exit=${r.rc}`;
+}
+
+/** refresh_from_origin (run-queue.sh:79-100): never fails the drain — no
+ *  upstream, a merge/rebase already in progress, a failed fetch or a merge
+ *  conflict are all warnings, and pre-run HEAD stays an ancestor of any new
+ *  HEAD. */
+export function refreshFromOrigin(root: string): void {
+  const upstream = upstreamBranch(root);
+  if (upstream === '') {
+    warn('refresh failed: no upstream configured, continuing on local state');
+    return;
+  }
+  const gd = gitDir(root);
+  const rebaseMerge = `${gd}/rebase-merge`;
+  if (existsSync(`${gd}/MERGE_HEAD`) || (existsSync(rebaseMerge) && statSync(rebaseMerge).isDirectory())) {
+    warn('refresh skipped: a merge/rebase is already in progress, continuing on local state');
+    return;
+  }
+  if (fetchQuiet(root, 'origin') !== 0) {
+    warn('refresh failed: fetch from origin failed, continuing on local state');
+    return;
+  }
+  if (mergeNoEditQuiet(root, upstream) !== 0) {
+    mergeAbort(root);
+    warn(`refresh failed: merge conflict with ${upstream}, continuing on local state`);
+    return;
+  }
+  log(`refreshed from ${upstream}`);
+}
+
+/** `"$FLEET_REGISTRY_DIR"/*.env` (run-queue.sh:44), sorted the way a shell
+ *  glob is: the walk order --all uses. */
+export function registeredRepos(fleetHome: string, env: NodeJS.ProcessEnv): string[] {
+  const dir = env['FLEET_REGISTRY_DIR'] ?? `${fleetHome}/repos`;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => n.endsWith('.env') && !n.startsWith('.'))
+    .sort()
+    .map((n) => n.slice(0, -'.env'.length));
+}
+
+export interface RunAllOptions {
+  fleetHome: string;
+  /** After --all: `[]`, `['--max', 'N']`. */
+  argv: readonly string[];
+  env: NodeJS.ProcessEnv;
+}
+
+/** --all (run-queue.sh:42-52): a fresh `bash run-queue.sh <name> "$@"` per
+ *  registered repo, so no configuration, counter or die crosses from one
+ *  repo to the next, and --max stays a per-repo ceiling. Each child's own
+ *  exit status is not checked, as the bash never checked it. */
+export function runAll(o: RunAllOptions): number {
+  const dir = o.env['FLEET_REGISTRY_DIR'] ?? `${o.fleetHome}/repos`;
+  const repos = registeredRepos(o.fleetHome, o.env);
+  if (repos.length === 0) throw new Die(`no repos registered in ${dir}`);
+  for (const name of repos) {
+    log(`repo: ${name}`);
+    runInherit('bash', [`${o.fleetHome}/run-queue.sh`, name, ...o.argv]);
+  }
+  return 0;
+}
+
+export interface RunQueueOptions {
+  fleetHome: string;
+  /** After the repo name: `[]`, `['--max', 'N']`. */
+  argv: readonly string[];
+  env: NodeJS.ProcessEnv;
+}
+
+export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
+  const root = cfg.root;
+  const knobs = readKnobs(o.env, o.fleetHome);
+  const notify = (msg: string): void => {
+    const [cmd, ...args] = splitCommand(knobs.notifyCmd);
+    if (cmd === undefined) return;
+    spawnSync(cmd, [...args, msg], { stdio: 'ignore' });
+  };
+  const max = readMax(o.argv, o.env);
+  const autoMerge = o.env['AUTO_MERGE'] ?? '1';
+
+  // A crash leaves a story at `in_progress` with nothing running. Any scan
+  // for `ready` misses it, so the queue would report itself empty while a
+  // stranded story sat there forever. Reap first — launch.ts owns that logic
+  // and knows to check the worktree for live processes before declaring
+  // anything an orphan. Its exit status is not checked, as the bash never
+  // checked it: a die here (a live orphan) does not stop the drain.
+  log('reaping orphans from any interrupted run');
+  runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, '--reap']);
+
+  log('refreshing from origin before scan');
+  refreshFromOrigin(root);
+
+  const started = formatIsoSeconds(new Date());
+  const ran: RanLine[] = [];
+  let prev = '';
+  let n = 0;
+
+  while (n < max) {
+    const id = nextReady(root);
+    if (id === '') {
+      log('queue empty');
+      break;
+    }
+    if (id === prev) {
+      warn(`${id} is ready again without having finished — stopping rather than looping`);
+      warn(`read .review/${id}.md and .stories/${id}.md before re-running`);
+      break;
+    }
+    prev = id;
+    n += 1;
+
+    log(`story ${id} (${n} of at most ${max})`);
+    const rc = runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, id]);
+
+    const status = storyField(root, id, 'status');
+    const reviewPath = `${root}/.review/${id}.md`;
+    // run-queue.sh also awk-scraped `computed:`'s reasons here (:138), but
+    // never read the result — dropped, not ported: it had no observable
+    // effect on any output or decision.
+    const verdict = existsSync(reviewPath) ? (readReview(readFileSync(reviewPath, 'utf8')).verdict ?? '') : '';
+    ran.push({ id, status, verdict, rc });
+
+    const base = storyField(root, id, 'base') || cfg.baseBranch;
+
+    switch (status) {
+      case 'done':
+        log(`${id}: done`);
+        // Only a COMPUTED PASS merges. merge.ts checks this again and
+        // refuses on its own; asking here keeps a FAIL from even reaching it.
+        if (verdict === 'PASS' && autoMerge === '1') {
+          if (runInherit('bash', [`${o.fleetHome}/merge.sh`, cfg.name, id]) === 0) {
+            notify(`${cfg.name}/${id} merged → ${base} (computed PASS)\nundo: /revert ${cfg.name} ${id}`);
+          } else {
+            warn(`${id} passed but did not merge`);
+            notify(`${id} computed PASS but did not merge into ${base} — see the queue log`);
+          }
+        } else if (verdict === 'PASS') {
+          log(`${id}: PASS, not merged (AUTO_MERGE=0)`);
+          notify(`${id} computed PASS and is waiting for a human to merge it into ${base}`);
+        }
+        break;
+      // blocked and needs_human are announced by the launcher, in setStatus:
+      // a story can stop without a queue, and saying it twice is how a
+      // channel stops being read.
+      case 'blocked':
+        warn(`${id}: blocked — a question is waiting in .blocked/${id}.md`);
+        break;
+      case 'needs_human':
+        warn(`${id}: needs_human — see .review/${id}.md`);
+        break;
+      default:
+        warn(`${id}: ended as '${status || 'unknown'}' (launcher exit ${rc})`);
+        notify(`${id} ended as '${status || 'unknown'}' (launcher exit ${rc}) — that is not a state the queue expects`);
+    }
+  }
+
+  if (n >= max) warn(`stopped at the --max ceiling of ${max} stories`);
+
+  out('\n');
+  out(`${DIM}─── queue finished, started ${started} ───${RST}\n`);
+  if (ran.length === 0) {
+    out('nothing was ready to run\n');
+  } else {
+    for (const r of ran) out(`  ${formatRanLine(r)}\n`);
+  }
+  out('\n');
+  runInherit('bash', [`${o.fleetHome}/status.sh`, cfg.name]);
+
+  return 0;
+}
