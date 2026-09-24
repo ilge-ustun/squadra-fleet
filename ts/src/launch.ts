@@ -52,6 +52,7 @@ import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
 import { setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushQuiet, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
+import { Die } from './lib/die.ts';
 import { withFleetLock } from './lib/lock.ts';
 import { dieMessage, log, out, warn } from './lib/log.ts';
 import { REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
@@ -63,8 +64,8 @@ import { checkScope } from './lib/scope.ts';
 import { computeVerdict } from './lib/verdict.ts';
 import { byCodePoint } from './status.ts';
 
-/** lib.sh's `die`: the message goes to stderr as an XX line, the status is 1. */
-export class Die extends Error {}
+/** lib.sh's `die`, from lib/die.ts; still exported here for launch.test.ts. */
+export { Die };
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
 
