@@ -50,8 +50,8 @@ describe('refusal — merge.sh:100-125, in that order', () => {
   it.each([
     ['not done', row({ status: 'needs_human' }), ctx, die('900 is needs_human, not done — nothing to merge')],
     ['not PASS', row({ verdict: 'FAIL' }), ctx, die('900 computed FAIL, not PASS — the machine vetoed it')],
-    ['no review file (non-parity: bash said "computed —")', row({ verdict: DASH }), ctx, die('900 has no .review/900.md — nothing computed a PASS')],
-    ['no verdict line (non-parity: bash said "computed ,")', row({ verdict: '' }), ctx, die("900's review has no verdict line — nothing computed a PASS")],
+    ['no review file (non-parity: bash said "computed null")', row({ verdict: DASH }), ctx, die('900 has no .review/900.md — nothing computed a PASS')],
+    ['no verdict line (non-parity: bash said "computed null" here too)', row({ verdict: '' }), ctx, die("900's review has no verdict line — nothing computed a PASS")],
     ['live', row({ live: true }), ctx, die('900 has something running in its worktree')],
     ['no branch', row({ branch: DASH }), ctx, die('900 has no branch')],
     ['--land on an epic story, before "already merged" can answer', row({ merged: true }), { ...ctx, land: true },

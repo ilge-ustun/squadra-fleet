@@ -80,12 +80,15 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   launch.sh              the launcher — wrapper over ts/src/bin/launch.ts
   check-mutation.sh      the classifier on a working tree (a builder's, or yours) — wrapper over `mutation.ts check`
   status.sh              what the fleet is doing — wrapper over ts/src/bin/status.ts
-  ts/                    the TypeScript side (branch ts-classifier): src/launch.ts (the story loop), src/classifier.ts,
-                         src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,lock,config,
-                         verdict,machine-block,review,frontmatter,procs,git,proc,log}.ts, src/bin/{launch,mutation,status}.ts;
-                         run by node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
+  merge.sh               story → epic, --land, --epic, MERGE_MODE — wrapper over ts/src/bin/merge.ts
+  revert.sh reset.sh     undo a story's merge; a story back to the queue — wrappers over ts/src/bin/{revert,reset}.ts
+  ts/                    the TypeScript side: src/launch.ts (the story loop), src/merge.ts, src/revert.ts, src/reset.ts,
+                         src/classifier.ts, src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,
+                         lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks}.ts,
+                         src/bin/{launch,merge,revert,reset,mutation,status}.ts; run by node as is, no build, no runtime
+                         deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
-  run-queue.sh merge.sh write-story.sh lint-story.sh new-epic.sh revert.sh reset.sh
+  run-queue.sh write-story.sh lint-story.sh new-epic.sh
   telegram.sh            send | poll           render.sh          render_prompt() for write-story.sh (the launcher: ts/src/lib/render.ts)
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
@@ -380,7 +383,8 @@ a per-case copy, only the fakes come through `PATH`.
 **Status:** all four seams landed on `main` on 24 Sep 2026 (PR #1; the model
 policy in PR #2, the first fixes in PR #3): the classifier, the verdict and
 the round section, `status.sh` and `check-mutation.sh` with the config
-loader, and the launcher. Seam 5 (landing) is in progress. Step 2's
+loader, and the launcher. Seam 5 (`merge.sh`, `revert.sh`, `reset.sh`) is
+built on branch `ts-landing`, 24 Sep; seams 6–8 are next. Step 2's
 "with the agent calls moved to the SDKs" was weighed at seam 4 and
 declined, with the human: `@anthropic-ai/claude-agent-sdk` runs a 234 MB CLI
 it bundles over a stream-json protocol, not the `claude` on PATH, and needs

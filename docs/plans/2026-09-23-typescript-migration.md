@@ -349,3 +349,97 @@ shas and the two clock lines are normalised. `launch.sh khaita --reap`
 under the queue unit's exact `PATH`, read-only: exit 0, the checkout
 unchanged. No `sleep` survives the suite (the group kill). The fixture
 never carries `ts/node_modules`, so every run proves the runtime needs none.
+
+## Seam 5: `merge.sh`, `revert.sh` and `reset.sh`, as built (branch `ts-landing`, 24 Sep 2026)
+
+```
+ts/src/merge.ts                merge.sh's order and its every line of output: parseArgs, refusal (the row from status.ts
+                               in-process, in merge.sh:100-125's order), the throwaway worktree at origin's tip, the
+                               post-merge baseline, MERGE_MODE=pr, the record, the builder worktree's removal
+ts/src/revert.ts               revert.sh: checkStory, the throwaway worktree, revert -m 1, the push, the record
+ts/src/reset.ts                reset.sh: parseArgs, the liveness and unmerged refusals, the six steps, the per-path staging
+ts/src/bin/{merge,revert,reset}.ts   argv → loadRepo → the module; Die and ConfigError as the other bins; merge and revert
+                               remove their worktree on SIGTERM/SIGINT/SIGHUP through lib/exit-hooks.ts
+ts/src/lib/die.ts              Die, out of launch.ts (still exported there)
+ts/src/lib/exit-hooks.ts       the EXIT trap, out of bin/launch.ts: makeExitHooks (tested alone), installExitHooks
+ts/src/lib/git.ts              += pushRef, mergeNoFf, mergeAbort, revertMerge, revertAbort, branchForce, branchDelete,
+                               worktreePrune, worktreeCheckedOutBranches, lsFilesTracked, addAll, logOneline;
+                               worktreeRemoveForce returns the status
+ts/src/lib/proc.ts             += runToFile, the argv form of runBashTo
+ts/src/lib/frontmatter.ts      += replaceFrontmatterField, deleteFrontmatterField, recordMergedSha — record-scoped (below)
+ts/src/lib/baseline.ts         += runMergeBaseline: whole logs under .runs/<logid>-merge-*.log, no summary; runVitestJson shared
+merge.sh revert.sh reset.sh    wrappers: source lib.sh, require node, exec the bin
+test-lib.sh                    cases 118-124 (characterised before the move, each seen red against a copy with the block
+                               deleted), 125-127 (the loader stub, red under bash)
+```
+
+What changed in substance:
+
+- **The story's state is read in-process.** `merge.sh` shelled to
+  `status.sh --json` and read six fields through `jq -r`; `merge.ts` calls
+  `statusOf(cfg, { one: id })` and reads the typed row (`merged`, `live`,
+  `branch === DASH`). One node start per merge instead of two; the
+  "exactly one story" check stays (`TEMPLATE` passes the file check and
+  `storyIds` drops it).
+- **Nothing new is locked.** None of the three took the fleet lock and none
+  does now: the bot holds `flock -w 900` around `merge.sh` (`telegram.sh:230`)
+  and `with_lock` around `revert.sh`; an inner `withFleetLock` would have
+  waited `FLEET_LOCK_WAIT` on every `/merge`, then warned and gone ahead.
+- **Two latent bugs found by the port**, both about a log written before its
+  directory existed: `merge.sh:167` wrote `.runs/<logid>-merge.log` before
+  the `mkdir -p` at `:181`, and `revert.sh:51` never made `.runs/` at all —
+  on a checkout without it (a fresh clone, an `--epic` merge from a
+  terminal) the failed redirect made a clean merge read "does not merge
+  cleanly" and a clean revert "did not apply". Fixed and pinned (cases 125b
+  and 126b, red under bash). L-29.
+- **The record-commit sequences stay inline**, one per script: their
+  messages differ four ways (the phone reads them) and a shared helper would
+  have hidden which script said what. Only two git primitives were added
+  for them (`lsFilesTracked`, `addAll`).
+- **`runMergeBaseline` is a second function, not a generalisation** of
+  `runBaseline`: the launcher's is pinned by the seam-4 record (`tail -n 200`,
+  the summary file, `round-N/baseline/`); the merge's logs are whole and the
+  die names them. The suite rule is shared.
+
+Deliberate non-parities, each pinned by a test: the frontmatter writers touch
+the record between the `---` lines only — `merge.sh:229-233` grepped and
+sed'd `^merged:` over the whole file, `revert.sh:67` deleted every
+`^merged:` line, `reset.sh:83` substituted the first `status:`/`round:`
+anywhere, so a `merged:` or `status:` in a story's prose was edited too
+(`frontmatter.test.ts`, the "non-parity, pinned" rows; kept from bash: an
+empty `merged:` replaced in place, nothing inserted by `reset`, nothing
+recorded when line 1 is not `---`); a story with no review file or no
+`verdict:` line is refused in words (`has no .review/<id>.md — nothing
+computed a PASS`, `'s review has no verdict line — …`) where bash printed
+`computed null, not PASS` (`merge.test.ts`); a seed file that cannot be
+copied into the merge worktree is a die, as in the launcher, where bash
+printed cp's error and went on (`seedMergeWorktree`); the config commands
+run as a bash line (seam 4's choice); `.runs/` is made first (above).
+Reproduced, not fixed: `diff --cached --quiet` commits anything else staged;
+`reset`'s `.runs/<id>-*` glob also takes `900-b-*` for 900 (`runsOfStory`);
+the status snapshot is taken before `git fetch`; `revert` moves the local
+base with `branch -f` without `merge.sh:211`'s checked-out check (a warning
+on failure); `reset`'s pid list ends in a trailing space.
+
+Verified: `bash test-lib.sh` 745 → 856 (cases 118–127, every one seen red
+first); 427 unit tests (350 before), tsc clean; every merge, revert and
+reset case green on the first run against each port. Parity beyond the
+suite: 41 scenarios run under the bash scripts at `e2f20ea` and under the
+TypeScript ones on the suite's own fixture — a story into its epic, twice,
+`--land` and its three refusals, `--epic` and its four, the usage paths,
+FAIL, not done, no review, no verdict line, no branch, live, a red build,
+a red suite, a failing install, a conflict, a local branch ahead of origin,
+`PUSH_STATUS=0`, pr mode for a story and an epic, a failing `PR_CMD`, pr
+without push, a revert and a second, none recorded, a landed story, a sha
+not on origin, a conflict, the usage paths, a reset with `--force`, `--draft`
+twice, unmerged, live, against origin's branch, the usage paths, a reset
+after a merge — 343 files diffed per side (every script's stdout+stderr and
+exit status, the story file, every ref's subjects and tree, `.runs/*`, the
+porcelain, the worktree list) after normalising shas, paths and clocks:
+identical except the two verdict-wording lines above. On the live khaita
+registry, read-only, each wrapper's first refusal: `merge.sh khaita 021` →
+`021 is draft, not done`, `--epic epic/nope` → `origin has no epic/nope`,
+`revert.sh khaita 021` → `no recorded merge`, `reset.sh khaita 021 --bogus`
+→ `unknown option`, exit 1 each, the checkout at `ec02943` untouched. The
+fixture never carries `ts/node_modules`, so every run proves the runtime
+needs none.

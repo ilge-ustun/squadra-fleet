@@ -468,3 +468,27 @@ same trap). The differential test renders a value holding `& \& \\ $& $1`
 through both and requires the same bytes.
 
 **Enforced by:** `ts/src/lib/render.test.ts` — the row "a value is inserted literally"
+
+### L-29 — a redirect into a directory that may not exist reports the command as failed
+
+`merge.sh` ran `git merge … > "$REPO_ROOT/.runs/$LOGID-merge.log" 2>&1` at
+line 167 and `mkdir -p "$REPO_ROOT/.runs"` at line 181; `revert.sh` never
+made `.runs/` at all. On a checkout without that directory — a fresh clone,
+or an `--epic` merge from a terminal before any story ran there — the shell
+could not open the log, the command never ran, and the `if !` branch
+reported a clean merge as "does not merge cleanly into <base> — a human has
+to resolve it" (a revert: "did not apply"). Nothing in the suite had a
+target without `.runs/`: the launcher makes the four directories on its
+first run, and every merge case runs after a launch. Found while porting
+the script (seam 5), by reading it in the order the port had to reproduce.
+
+**Lesson:** `cmd > log || die "cmd failed"` conflates two failures — the
+command's and the log's — and the message names the wrong one. The
+directory a log lives in is part of the command's precondition, not its
+aftermath.
+
+**Prevention:** `merge.ts` and `revert.ts` make `.runs/` before the first
+log; a case removes `.runs/` before an `--epic` merge and before a revert.
+
+**Enforced by:** `case_125_merge_through_the_loader` (125b, red under the bash: a
+checkout without `.runs/` merges), `case_126_revert_through_the_loader` (126b).

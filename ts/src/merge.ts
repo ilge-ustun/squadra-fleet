@@ -19,7 +19,7 @@
 // .runs/ reported a clean merge as a conflict); the `merged:` record touches
 // the frontmatter only; a seed file that cannot be copied is a die, as in the
 // launcher; a story with no review or no verdict line is refused in words,
-// where bash printed "computed —". No fleet lock here, as there was none:
+// where bash printed "computed null". No fleet lock here, as there was none:
 // the bot holds it around this script.
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { runMergeBaseline } from './lib/baseline.ts';
