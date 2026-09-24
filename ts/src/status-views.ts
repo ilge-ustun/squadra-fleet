@@ -62,10 +62,13 @@ export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): strin
     const word = e.total === 1 ? 'story' : 'stories';
     if (o.bot) {
       out += `${e.name}\n  ${e.total} ${word}, ${e.merged} merged\n`;
+      if (e.exists === false) { out += '  no branch yet\n'; continue; }
       out += e.ahead > 0 ? `  ${e.ahead} ahead of ${o.baseBranch} → /merge ${o.repoName} ${e.name}\n` : `  in ${o.baseBranch}\n`;
       continue;
     }
-    const state = e.ahead > 0
+    const state = e.exists === false
+      ? `${p.ylw}no branch yet${p.rst}  → new-epic.sh ${o.repoName} ${e.name.replace(/^epic\//, '')}`
+      : e.ahead > 0
       ? `${p.ylw}${e.ahead} ahead of ${o.baseBranch}${p.rst}  → merge.sh ${o.repoName} --epic ${e.name}`
       : `${p.dim}in ${o.baseBranch}${p.rst}`;
     out += `${pad(e.name, 22)} ${e.total} ${word}, ${e.merged} merged  ${state}\n`;

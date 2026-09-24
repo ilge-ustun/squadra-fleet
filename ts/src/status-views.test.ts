@@ -119,6 +119,14 @@ describe('the edges the goldens cannot hold', () => {
     expect(out).toBe('epic/a\\tb              1 story, 0 merged  1 ahead of base  → merge.sh t --epic epic/a\\tb\n');
   });
 
+  it('24 Sep: an epic whose branch does not exist yet says so, not "in base"', () => {
+    const plain = { red: '', grn: '', ylw: '', dim: '', rst: '' };
+    const e = { name: 'epic/search', total: 1, merged: 0, ahead: 0, exists: false };
+    expect(renderEpics([e], view('default'), plain)).toBe('epic/search            1 story, 0 merged  no branch yet  → new-epic.sh t search\n');
+    expect(renderEpics([e], { ...view('default'), bot: true }, plain)).toBe('epic/search\n  1 story, 0 merged\n  no branch yet\n');
+    expect(renderEpics([{ ...e, exists: true }], view('default'), plain)).toBe('epic/search            1 story, 0 merged  in base\n');
+  });
+
   it('non-parity, pinned: a verdict holding a quote keeps its JSON row (jq dropped it); DEL is raw', () => {
     const out = renderJson([row({ id: '1', verdict: 'PA"SS' }), row({ id: '2', title: 'a\x7fb' })]);
     const arr = JSON.parse(out) as Array<{ id: string; verdict: string | null; title: string }>;

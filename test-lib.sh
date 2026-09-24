@@ -1571,6 +1571,15 @@ case_80_status_epics() {
   out="$( status_run --epics )"
   assert_contains "$out" "1 merged" "which changes when one does"
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
+
+  # 24 Sep: a story may name an epic before new-epic.sh has made it (024 on
+  # epic/search). Status said "in develop", as if it had landed. Red while
+  # a missing branch reads as landed.
+  CASE="80b an epic with no branch yet says so"; fixture c80b draft
+  sed -i '2a base: epic/ghost' "$REPO/.stories/$STORY.md"
+  out="$( status_run --epics )"
+  assert_contains "$out" "no branch yet" "not 'in base'"
+  assert_contains "$out" "new-epic.sh t ghost" "with the command that makes it"
 }
 
 # AC1. Red when the refresh call is deleted from run-queue.sh: the
