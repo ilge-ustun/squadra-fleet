@@ -253,6 +253,23 @@ review_line() { sed -n "${1}p" "$REPO/.review/$STORY.md" 2>/dev/null; }
 calls()       { grep -c "^$1\$" "$TRACE/calls"; }
 set_ready()   { sed -i '0,/^status:.*/s//status: ready/' "$REPO/.stories/$STORY.md"; }
 
+# A launcher in the background, for the cases about two at once. The same
+# environment as run(), its own log; BG_PID is the launcher's node process
+# itself (fleet execs node), so it is the pid the launch lock records.
+launch_bg() {                         # launch_bg <tag> <story-id|--reap> [VAR=value …] → BG_PID, $FX/bg-<tag>.log
+  local tag="$1" id="$2"; shift 2
+  ( cd "$FX" && exec env PATH="$(FAKES)" \
+      PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      bash "$FLEET/fleet" launch t "$id" ) > "$FX/bg-$tag.log" 2>&1 &
+  BG_PID=$!
+}
+wait_for() {                          # wait_for <seconds> <command…> — poll until it succeeds; 1 if it never does
+  local limit=$(( $1 * 20 )) i=0; shift
+  until "$@"; do (( i++ >= limit )) && return 1; sleep 0.05; done
+}
+open_gate() { : > "$TRACE/gate-open"; }   # releases every FAKE_REVIEWER=gate reviewer
+
 # ── cases ────────────────────────────────────────────────────────────────────
 
 # Red when the outcome block's `set_status "$STORY_ID" done` is deleted.
@@ -3418,7 +3435,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
-       case_136_fleet_entry_point)
+       case_136_fleet_entry_point case_137_one_launch_per_repo)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3520,6 +3537,65 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && "$FX/bin/fleet" status t 2>&1)"; rc=$?
   assert_eq "$rc" 0 "a symlinked fleet runs, executable as it is"
   assert_contains "$out" "fixture story" "and reaches the registry and ts/ of its own tree"
+}
+
+# One launch per repo. The launcher holds <target>/.git/fleet-launch.lock
+# for as long as it lives; another launch — a bare one, one for another
+# story, the queue's --reap — finds it held, exits 75 and touches nothing.
+# The 21 Sep incident (khaita 015) is (a): a drain's --reap looked for life
+# only in wt-<id>, found none while the story was being reviewed in
+# wt-<id>-review, and returned it to `ready`. (c) is a stretch with no
+# process in either tree at all — a launcher waiting on the fleet lock at
+# its in_progress commit — which only a lock can see. Red while
+# ts/src/bin/launch.ts takes no launch lock: (a) reaps 900, (b) runs 901,
+# (c) reaps 901.
+case_137_one_launch_per_repo() {
+  CASE="137 one launch per repo: a second launch exits 75 and touches nothing"; fixture c137
+  sed "s/Story $STORY/Story 901/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  local holder rc
+  codex_called() { grep -q '^codex$' "$TRACE/calls"; }
+
+  launch_bg 900 "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=gate MAX_ROUNDS=1 AGENT_TIMEOUT=120
+  holder=$BG_PID
+  wait_for 60 codex_called || fail "the background launcher never reached its reviewer"
+
+  CASE="137a --reap while a story is being reviewed"
+  run --reap
+  assert_eq "$RC" 75 "busy is its own exit code"
+  assert_grep "pid $holder" "$LOG" "the message names the holder's pid"
+  assert_grep "$STORY" "$LOG" "…and its story"
+  assert_eq "$(field status)" in_progress "the live story is not reaped"
+  assert_eq "$(git -C "$REPO" log --format=%s | grep -c "^story($STORY): ready")" 0 "no ready commit"
+
+  CASE="137b a launch for another story at the same time"
+  run 901 FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 75 "busy"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" ready "901 is left as it was"
+  assert_eq "$(calls claude)" 1 "only the first launcher's builder ran"
+
+  CASE="137d the holder finishes and leaves no lock behind"
+  open_gate
+  wait "$holder"; rc=$?
+  assert_eq "$rc" 0 "the background launcher ends normally"
+  assert_eq "$(field status)" done "…with its story done"
+
+  CASE="137c a launcher with no process in any tree is still alive"
+  ( exec 9>"$REPO/.git/fleet.lock"; flock 9; sleep 4 ) &
+  local fleetlock=$!
+  sleep 0.3
+  launch_bg 901 901 FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  holder=$BG_PID
+  wait_for 20 grep -q '^status: in_progress' "$REPO/.stories/901.md" || fail "901 never reached in_progress"
+  run --reap
+  assert_eq "$RC" 75 "busy, though nothing runs in wt-901 or wt-901-review"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" in_progress "901 is not reaped"
+  wait "$fleetlock"
+  wait "$holder"; rc=$?
+  assert_eq "$rc" 0 "901's launcher ran: the first launcher's lock went with it"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" done "…to done"
+  run --reap
+  assert_eq "$RC" 0 "and once nothing runs, --reap takes the lock"
 }
 
 for c in "${CASES[@]}"; do

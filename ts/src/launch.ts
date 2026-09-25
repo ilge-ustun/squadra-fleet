@@ -181,6 +181,10 @@ export interface LaunchOptions {
    *  or SIGHUP). The normal exit runs it through `finally`. */
   onExit: (fn: () => void) => void;
   procsInWorktree?: (path: string) => string[];
+  /** The launch lock bin/launch.ts took before calling (lib/lock.ts): one
+   *  launch per repo. Told the story once one is selected, so a launch that
+   *  finds the lock held can say what it is behind. */
+  launchLock: { name(what: string): void };
 }
 
 export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number> {
@@ -280,6 +284,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     log('queue empty — nothing ready');
     return 0;
   }
+  o.launchLock.name(`story ${storyId}`);
   const storyFile = `${root}/.stories/${storyId}.md`;
   if (!isFile(storyFile)) throw new Die(`no story file: ${storyFile}`);
 
