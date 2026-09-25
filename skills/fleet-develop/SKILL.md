@@ -38,8 +38,8 @@ re-executed under `env -i`. No network, no model.
   stripper rejects — `npm run check` (tsc, `erasableSyntaxOnly`) and the
   suite (real `node`) are the proofs. `ts/node_modules` is for tsc and
   vitest in a worktree only; nothing needs it at run time and the live
-  checkout never runs `npm`. Seams and rules:
-  `docs/plans/2026-09-23-typescript-migration.md`.
+  checkout never runs `npm`. The rules for the TypeScript are in
+  `CLAUDE.md`.
 - **One task, one commit**, the reason in the message, `git status --short`
   shown. A commit carrying three concerns cannot be extracted later (L-10).
 - **Show the `ts/src/launch.ts` diff before applying it.** `launch.sh` is a

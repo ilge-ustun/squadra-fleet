@@ -2879,8 +2879,7 @@ case_116_lint_story_model() {
   lint_model pinned "model: claude-opus-5";   assert_eq "$rc" 1 "a pinned id is an error"
   assert_contains "$out" "sonnet, opus or fable" "naming the aliases"
   lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
-  # 24 Sep: retired after both real trials (khaita 021, 025) needed round-2
-  # escalation on round 1 — see docs/plans/2026-09-23-typescript-migration.md.
+  # Retired: both of its real trials needed a second round.
   lint_model haiku "model: haiku";            assert_eq "$rc" 1 "haiku is retired, no longer an alias"
   assert_contains "$out" "sonnet, opus or fable" "the error still names the live aliases"
 }

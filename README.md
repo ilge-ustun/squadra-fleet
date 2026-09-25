@@ -434,7 +434,7 @@ ts/                 the harness: src/{launch,merge,revert,reset,run-queue,lint-s
                     review,frontmatter,config,env-file,lock,git,proc,procs,log,die,exit-hooks,telegram-api,types}.ts;
                     src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status,
                     telegram}.ts — the entry points; fixtures/ the status goldens. Run by node as is, no build
-.nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
+.nvmrc              the Node the units pin
 write-story.sh      intent → story (wrapper over ts/src/bin/write-story.ts)
 lint-story.sh       mechanical checks against the story's base (wrapper over ts/src/bin/lint-story.ts)
 new-epic.sh         an epic branch (wrapper over ts/src/bin/new-epic.ts)
