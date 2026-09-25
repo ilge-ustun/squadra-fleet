@@ -6,10 +6,10 @@ import { Die } from './lib/die.ts';
 import { USAGE, logIdOf, parseArgs, refusal, seedMergeWorktree } from './merge.ts';
 import { DASH, type StoryRow } from './status.ts';
 
-// The pure parts of merge.sh; the flow itself is proven by test/suite.sh
+// The pure parts of `fleet merge`; the flow itself is proven by test/suite.sh
 // (cases 56-59, 74, 75, 91, 92, 118-122, 125), as the launcher's is.
 
-describe('parseArgs — merge.sh:55-71', () => {
+describe('parseArgs', () => {
   it.each([
     [['900'], { mode: 'story', id: '900', land: false }],
     [['900', '--land'], { mode: 'story', id: '900', land: true }],
@@ -31,7 +31,7 @@ describe('parseArgs — merge.sh:55-71', () => {
   });
 });
 
-describe('logIdOf — merge.sh:72, ${ID//\\//-}', () => {
+describe('logIdOf — ${ID//\\//-}', () => {
   it('a story id is itself; an epic name has its slash replaced', () => {
     expect(logIdOf('900')).toBe('900');
     expect(logIdOf('epic/ui-a11y')).toBe('epic-ui-a11y');
@@ -39,7 +39,7 @@ describe('logIdOf — merge.sh:72, ${ID//\\//-}', () => {
   });
 });
 
-describe('refusal — merge.sh:100-125, in that order', () => {
+describe('refusal — the checks, in the order they are made', () => {
   const row = (o: Partial<StoryRow>): StoryRow => ({
     id: '900', title: 't', status: 'done', landing: 'awaiting merge', round: '1', verdict: 'PASS', base: 'epic/x',
     branch: 'story/900', merged: false, ahead: 1, worktree: true, live: false, blocked: false, reasons: '', notes: [], ...o,
@@ -50,8 +50,8 @@ describe('refusal — merge.sh:100-125, in that order', () => {
   it.each([
     ['not done', row({ status: 'needs_human' }), ctx, die('900 is needs_human, not done — nothing to merge')],
     ['not PASS', row({ verdict: 'FAIL' }), ctx, die('900 computed FAIL, not PASS — the machine vetoed it')],
-    ['no review file (non-parity: bash said "computed null")', row({ verdict: DASH }), ctx, die('900 has no .review/900.md — nothing computed a PASS')],
-    ['no verdict line (non-parity: bash said "computed null" here too)', row({ verdict: '' }), ctx, die("900's review has no verdict line — nothing computed a PASS")],
+    ['no review file', row({ verdict: DASH }), ctx, die('900 has no .review/900.md — nothing computed a PASS')],
+    ['no verdict line', row({ verdict: '' }), ctx, die("900's review has no verdict line — nothing computed a PASS")],
     ['live', row({ live: true }), ctx, die('900 has something running in its worktree')],
     ['no branch', row({ branch: DASH }), ctx, die('900 has no branch')],
     ['--land on an epic story, before "already merged" can answer', row({ merged: true }), { ...ctx, land: true },
@@ -69,10 +69,9 @@ describe('refusal — merge.sh:100-125, in that order', () => {
   });
 });
 
-// merge.sh:178-180: a seed file the checkout has is copied into the merge
-// worktree; one it does not have is skipped. Where the copy itself fails
-// (the worktree lacks the parent directory) bash printed cp's error and went
-// on; this dies, as the launcher does for its trees — pinned non-parity.
+// A seed file the checkout has is copied into the merge worktree; one it
+// does not have is skipped. Where the copy itself fails (the worktree lacks
+// the parent directory) it dies, as the launcher does for its trees.
 describe('seedMergeWorktree', () => {
   let dir: string;
   beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-merge-seed-')); });

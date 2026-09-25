@@ -1,8 +1,6 @@
-// The mutation classifier — what mutation.sh was (`git show
-// 8fe954a:mutation.sh`; the file is gone since seam 4). One classifier for
-// the verdict (ts/src/lib/evidence.ts, in-process) and for a builder
-// checking its own evidence (check-mutation.sh), so the two can never
-// disagree.
+// The mutation classifier. One classifier for the verdict
+// (ts/src/lib/evidence.ts, in-process) and for a builder checking its own
+// evidence (`fleet check-mutation`), so the two can never disagree.
 //
 // A mutation is ACn-<slug>.patch with a .test (vitest selector) or .cmd (any
 // command) beside it. In a clean tree:
@@ -45,7 +43,7 @@ export interface Selector {
   file: string;
 }
 
-/** The .test beside the patch, else the .cmd, else nothing (mutation.sh@8fe954a:45-50). */
+/** The .test beside the patch, else the .cmd, else nothing. */
 export function findSelector(patch: string): Selector | undefined {
   const base = patch.replace(/\.patch$/, '');
   if (existsSync(`${base}.test`)) return { kind: 'test', file: `${base}.test` };
@@ -63,9 +61,9 @@ export interface RunSelectorInput {
   vitestCmd: string;
 }
 
-/** One run of a selector in the tree as it stands (mutation.sh@8fe954a:29-43).
- *  The first line of the selector file is the selector; it is handed to bash
- *  unquoted, by contract — a .cmd is a command, and a .test may carry
+/** One run of a selector in the tree as it stands. The first line of the
+ *  selector file is the selector; it is handed to bash unquoted, by
+ *  contract — a .cmd is a command, and a .test may carry
  *  `-t "a pattern with spaces"`. */
 export function runSelector(i: RunSelectorInput): RunClass {
   const raw = `${i.rawPrefix}.json`;
@@ -84,7 +82,7 @@ export function runSelector(i: RunSelectorInput): RunClass {
 }
 
 /** Two ways back to the committed tree, both safe only because the tree was
- *  asserted clean first (mutation.sh@8fe954a:52-61). */
+ *  asserted clean first. */
 export function restoreTree(wt: string, mode: Restore, patch: string): void {
   switch (mode) {
     case 'checkout':
@@ -109,7 +107,7 @@ export interface Classification {
   mutJsonPath?: string;
 }
 
-/** The classifier (mutation.sh@8fe954a:65-88). Throws DirtyTreeError; returns every class. */
+/** The classifier. Throws DirtyTreeError; returns every class. */
 export function classifyMutation(i: ClassifyInput): Classification {
   const name = basename(i.patch, '.patch');
   const dirtyBefore = porcelain(i.wt);

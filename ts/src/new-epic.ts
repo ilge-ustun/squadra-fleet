@@ -1,8 +1,8 @@
-// new-epic.ts — new-epic.sh in TypeScript (seam 7). The one way an epic
-// branch comes into being: cut from ORIGIN's integration branch, not the
-// local one, and pushed at once — the launcher cuts every worktree from
-// origin, so the next story can use it. The checkout is never touched: no
-// checkout, no switch.
+// new-epic.ts — `fleet new-epic`, the one way an epic branch comes into
+// being: cut from ORIGIN's integration branch, not the local one, and
+// pushed at once — the launcher cuts every worktree from origin, so the
+// next story can use it. The checkout is never touched: no checkout, no
+// switch.
 import { Die } from './lib/die.ts';
 import { branchExists, fetch, fetchRef, pushRef, refExists, revParseShort } from './lib/git.ts';
 import { log, warn } from './lib/log.ts';

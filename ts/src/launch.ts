@@ -1,9 +1,9 @@
-// launch.ts — the story loop. launch.sh is a wrapper over this; run-queue.sh
-// and a human's hand run keep their command line:
+// launch.ts — the story loop, behind `fleet launch` (bin/launch.ts); the
+// queue and a human's hand run use the same command line:
 //
-//   launch.sh khaita           take the next ready story of the repo `khaita`
-//   launch.sh khaita 004       run one specific story
-//   launch.sh khaita --reap    reap orphans and exit
+//   fleet launch <repo>          take the repo's next ready story
+//   fleet launch <repo> 004      run one specific story
+//   fleet launch <repo> --reap   reap orphans and exit
 //
 // The repo is a name in repos/ (lib.sh: load_repo, reached through
 // lib/config.ts); how it is built and tested comes from its own
@@ -71,9 +71,9 @@ export const capture = (s: string): string => s.replace(/\n+$/, '');
 const isFile = (p: string): boolean => existsSync(p) && statSync(p).isFile();
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();
 
-/** `grep -oE '^\*\*AC[0-9]+' | tr -d '*' | sort -u` (launch.sh:377): the
- *  ids in code-point order — AC1 AC10 AC2. Split on \n only: grep's ^ does
- *  not break at \r or U+2028, and neither does this. */
+/** `grep -oE '^\*\*AC[0-9]+' | tr -d '*' | sort -u`: the ids in code-point
+ *  order — AC1 AC10 AC2. Split on \n only: grep's ^ does not break at \r or
+ *  U+2028, and neither does this. */
 export function acIds(storyText: string): string[] {
   const ids = new Set<string>();
   for (const line of storyText.split('\n')) {
@@ -83,7 +83,7 @@ export function acIds(storyText: string): string[] {
   return [...ids].sort(byCodePoint);
 }
 
-/** launch.sh:499-505. `grep -qE '^verdict: SPEC'` on the old review file:
+/** `grep -qE '^verdict: SPEC'` on the old review file:
  *  any line, prefix match. */
 export function chooseBuildPrompt(o: { round: number; roundStart: number; reviewText: string; reviewFileText: string }): string {
   if (o.round === o.roundStart + 1 && o.reviewText === '') return 'build-round1.md';
@@ -100,13 +100,13 @@ export function builderModelForRound(model: string, round: number, fallback: str
   return isHaiku(fallback) ? 'sonnet' : fallback;
 }
 
-/** launch.sh:408: `grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)'` — any line. */
+/** `grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)'` — any line. */
 export function priorFailingReview(text: string): boolean {
   return text.split('\n').some((l) => /^verdict: (FAIL|UNPARSEABLE|SPEC)/.test(l));
 }
 
-/** `awk '/^## Round /{p=1} p'` (launch.sh:477): from the first round
- *  heading on, every record ended with a newline as awk ends it. */
+/** `awk '/^## Round /{p=1} p'`: from the first round heading on, every
+ *  record ended with a newline as awk ends it. */
 export function keepEarlierRounds(text: string): string {
   const lines = text.split('\n');
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
@@ -144,9 +144,8 @@ export interface Knobs {
   notifyCmd: string;
 }
 
-/** launch.sh:57-71 and :96, `${X:-default}`: unset or empty means the
- *  default. The three numbers must be numbers here (bash's arithmetic read
- *  a name as 0 and `timeout` accepted `30m`) — pinned. */
+/** `${X:-default}`: unset or empty means the default. The three numbers
+ *  must be numbers: a name or `30m` is a die — pinned. */
 export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
   const v = (k: string, d: string): string => env[k] || d;
   const num = (k: string, raw: string, re: RegExp): number => {
@@ -178,8 +177,8 @@ export interface LaunchOptions {
   /** What followed the repo name: a story id, --reap, or nothing. */
   argv: readonly string[];
   env: NodeJS.ProcessEnv;
-  /** Registers what must run when the process is killed (the bash EXIT trap
-   *  ran on SIGTERM too). The normal exit runs it through `finally`. */
+  /** Registers what must run when the process is killed (SIGTERM, SIGINT
+   *  or SIGHUP). The normal exit runs it through `finally`. */
   onExit: (fn: () => void) => void;
   procsInWorktree?: (path: string) => string[];
 }
@@ -192,7 +191,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   const started = Date.now();
   const secs = (): number => Math.floor((Date.now() - started) / 1000);
 
-  /** Every .stories/*.md, TEMPLATE included — the bash glob did not skip it. */
+  /** Every .stories/*.md, TEMPLATE included. */
   const storyFiles = (): string[] => {
     let names: string[];
     try {
@@ -211,11 +210,11 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     spawnSync(cmd, [...args, msg], { stdio: 'ignore' });
   };
 
-  /** commit_status (launch.sh:88-114): under the fleet lock, each path added
-   *  on its own (git add stages nothing when one pathspec is missing, L-02),
-   *  the evidence directory too; nothing staged is fine; a failed commit is
-   *  a die — the story's state would otherwise live only in the working
-   *  tree; a failed push a warning. */
+  /** Under the fleet lock, each path added on its own (git add stages
+   *  nothing when one pathspec is missing, L-02), the evidence directory
+   *  too; nothing staged is fine; a failed commit is a die — the story's
+   *  state would otherwise live only in the working tree; a failed push a
+   *  warning. */
   const commitStatus = (id: string, st: string): void => {
     withFleetLock(root, knobs.lockWait, () => warn('waited for the fleet lock — going ahead'), () => {
       for (const p of [`.stories/${id}.md`, `.review/${id}.md`, `.blocked/${id}.md`]) {
@@ -228,9 +227,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     });
   };
 
-  /** set_status (launch.sh:273-287): write, commit, and say so for the two
-   *  states that need a human. `done` is not announced: merging is the
-   *  queue's news. */
+  /** Write, commit, and say so for the two states that need a human.
+   *  `done` is not announced: merging is the queue's news. */
   const setStatus = (id: string, st: string): void => {
     setStoryField(root, id, 'status', st);
     commitStatus(id, st);
@@ -243,9 +241,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     }
   };
 
-  /** reap_orphans (launch.sh:297-315): a story left in_progress with nothing
-   *  running in its worktree goes back to the queue; one with live processes
-   *  is not an orphan and the run stops. Found by cwd (L-04). */
+  /** A story left in_progress with nothing running in its worktree goes
+   *  back to the queue; one with live processes is not an orphan and the run
+   *  stops. Found by cwd (L-04). */
   const reapOrphans = (): void => {
     for (const id of storyFiles()) {
       if (storyField(root, id, 'status') !== 'in_progress') continue;
@@ -259,8 +257,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     }
   };
 
-  /** seed_env (launch.sh:332-345): the untracked files a fresh worktree does
-   *  not inherit, named by the target (SEED_FILES). Missing is a die. */
+  /** The untracked files a fresh worktree does not inherit, named by the
+   *  target (SEED_FILES). Missing is a die. */
   const seedEnv = (target: string): void => {
     for (const f of cfg.seedFiles) {
       if (!isFile(`${root}/${f}`)) throw new Die(`${f} is missing from ${root} — the worktree would not behave like production`);
@@ -380,7 +378,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     }
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
-    // The variables render.sh saw, as the round goes on.
+    // The variables the prompts are rendered with, as the round goes on.
     const state = { rules: '', headSha: '', round: '' };
     const render = (file: string): string => {
       const vars: RenderVars = {

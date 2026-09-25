@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeVerdict, parseReviewerVerdict, type VerdictInput } from './verdict.ts';
 
-describe('parseReviewerVerdict — grep -E per line (launch.sh:680-683)', () => {
+describe('parseReviewerVerdict — grep -E per line', () => {
   it.each([
     ['fake review, call 1.\nfinding: none.\nVERDICT: PASS', 'PASS', 'the fake reviewer, last line, no trailing newline'],
     ['VERDICT: FAIL\n', 'FAIL', 'first line'],
@@ -32,7 +32,7 @@ const green: VerdictInput = {
   reviewerText: 'VERDICT: PASS',
 };
 
-describe('computeVerdict — the rule (launch.sh:693-712)', () => {
+describe('computeVerdict — the rule', () => {
   it('everything green, reviewer PASS → PASS, no reasons', () => {
     expect(computeVerdict(green)).toEqual({ model: 'PASS', computed: 'PASS', reasons: [] });
   });
@@ -56,7 +56,7 @@ describe('computeVerdict — the rule (launch.sh:693-712)', () => {
   it('a GREEN probe is not a reason', () => {
     expect(computeVerdict({ ...green, probeRows: [{ name: 'p.test.tsx', cls: 'GREEN' }] }).reasons).toEqual([]);
   });
-  it('a NO_SELECTOR row still counts as coverage (bash grepped the raw rows)', () => {
+  it('a NO_SELECTOR row still counts as coverage: one reason, not two', () => {
     const r = computeVerdict({ ...green, mutRows: [{ ac: 'AC1', cls: 'NO_SELECTOR', slug: 'bad' }] });
     expect(r.reasons).toEqual(['AC1 bad NO_SELECTOR']);
   });
@@ -64,7 +64,7 @@ describe('computeVerdict — the rule (launch.sh:693-712)', () => {
     const r = computeVerdict({ ...green, acIds: ['AC1', 'AC10'], mutRows: [{ ac: 'AC10', cls: 'RED', slug: 'x' }] });
     expect(r.reasons).toEqual(['AC1 has no mutation']);
   });
-  it('reasons come in the bash order: baseline, scope, coverage in AC order, rows in row order, probes', () => {
+  it('reasons come in this order: baseline, scope, coverage in AC order, rows in row order, probes', () => {
     const r = computeVerdict({
       baseline: { test: 'RED', build: 'GREEN', lint: 'RED' },
       scope: 'VIOLATION', scopeHits: ['a'],

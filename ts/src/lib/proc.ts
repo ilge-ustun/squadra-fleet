@@ -1,7 +1,7 @@
 // Subprocesses. The harness's glue is git, the target's test runner and a
 // few shell lines; each is one synchronous call here. The two agent calls
 // are the exception: `run` is asynchronous, with the timeout and the
-// kill-after-grace that `timeout -k 30 N` gave the bash launcher.
+// kill-after-grace of `timeout -k 30 N`.
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 
@@ -42,15 +42,15 @@ export function runSync(cmd: string, args: readonly string[], o: RunOptions = {}
 
 export interface BashToOptions {
   cwd: string;
-  /** Created or truncated before the line runs, as bash's `> "$log" 2>&1`
-   *  would, so a log exists even when the command never starts. */
+  /** Created or truncated before the line runs, as `> "$log" 2>&1`
+   *  does, so a log exists even when the command never starts. */
   logFile: string;
 }
 
 /** `bash -c <line>` with stdout and stderr both appended to the log file.
- *  Always bash, never /bin/sh: a selector line is a bash contract
- *  (mutation.sh@8fe954a:21-23) and /bin/sh here is dash. Returns the exit status,
- *  -1 when the process could not be started or died of a signal. */
+ *  Always bash, never /bin/sh: a selector line is a bash contract and
+ *  /bin/sh here is dash. Returns the exit status, -1 when the process could
+ *  not be started or died of a signal. */
 export function runBashTo(line: string, o: BashToOptions): number {
   const fd = openSync(o.logFile, 'w');
   try {
@@ -68,8 +68,8 @@ export interface ToFileOptions {
 }
 
 /** The argv form of runBashTo: a program (no shell) with both streams to the
- *  log file — `git merge … > log 2>&1` (merge.sh:167, revert.sh:51). Returns
- *  the exit status, -1 when it could not start or died of a signal. */
+ *  log file — `git merge … > log 2>&1`. Returns the exit status, -1 when it
+ *  could not start or died of a signal. */
 export function runToFile(cmd: string, args: readonly string[], o: ToFileOptions): number {
   const fd = openSync(o.logFile, 'w');
   try {
@@ -82,9 +82,9 @@ export function runToFile(cmd: string, args: readonly string[], o: ToFileOptions
 
 /** Run a program with stdio fully inherited: the child's stdout and stderr
  *  reach ours as they happen, interleaved as they would in a shell — the
- *  queue's own calls into launch.sh and merge.sh, whose every log line is
- *  the point (run-queue.sh:107,130,146). Returns the exit status, -1 when
- *  it could not start or died of a signal. */
+ *  queue's own calls into `fleet launch` and `fleet merge`, whose every log
+ *  line is the point. Returns the exit status, -1 when it could not start
+ *  or died of a signal. */
 export function runInherit(cmd: string, args: readonly string[], o: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): number {
   const r = spawnSync(cmd, args, {
     ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
@@ -101,12 +101,12 @@ export interface AsyncRunOptions {
   /** The child's whole environment; absent means this process's. */
   env?: NodeJS.ProcessEnv;
   /** Seconds before the whole process group gets SIGTERM; 0 or absent means
-   *  no timeout, as `timeout 0` did. */
+   *  no timeout, as with `timeout 0`. */
   timeoutSec?: number;
   /** Seconds after SIGTERM before SIGKILL (`timeout -k`); default 30. */
   graceSec?: number;
-  /** 'merge' folds stderr into stdout in arrival order (the bash `2>&1`);
-   *  a descriptor is the bash `2> file`. */
+  /** 'merge' folds stderr into stdout in arrival order (`2>&1`); a
+   *  descriptor is `2> file`. */
   stderr: 'merge' | number;
 }
 
@@ -116,8 +116,8 @@ export interface AsyncRunResult {
   status: number;
   signal: NodeJS.Signals | null;
   /** The timer fired: SIGTERM went to the group, and SIGKILL after the
-   *  grace if it was still there. True on both, where `timeout` said 124
-   *  or 137. */
+   *  grace if it was still there. True on both (`timeout`'s 124 and
+   *  137). */
   timedOut: boolean;
   /** UTF-8; an invalid sequence becomes U+FFFD. */
   stdout: string;
@@ -128,10 +128,9 @@ export interface AsyncRunResult {
  *  reaches every descendant (a fake's `sleep 999`, a real agent's shells)
  *  and none is left in the worktree for procsInWorktree to find. The
  *  result arrives on 'close', when every pipe has drained: a grandchild that
- *  still holds stdout is read to the end, as `$(…)` did. A child that exits
- *  without reading its stdin is a status, not an EPIPE (bash's printf died
- *  of SIGPIPE quietly). Killing the launcher does not kill the group — bash
- *  left the agent running too (L-04). */
+ *  still holds stdout is read to the end, as `$(…)` reads it. A child that exits
+ *  without reading its stdin is a status, not an EPIPE. Killing the
+ *  launcher does not kill the group (L-04). */
 export function run(cmd: string, args: readonly string[], o: AsyncRunOptions): Promise<AsyncRunResult> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];

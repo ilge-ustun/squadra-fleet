@@ -1,18 +1,17 @@
-// status.sh's four outputs, from one Status: the terminal table (colour,
-// every column as wide as its longest value, so a title is never cut), the
-// epic block that leads it, the phone form for the bot (a <pre> block
-// wraps at ~40 columns there, so no table: id and title, then base | state
-// | round | verdict, between rules, newest first, no colour), and the JSON
-// merge.sh reads (one object per story, always an array, numbers as
+// `fleet status`'s four outputs, from one Status: the terminal table
+// (colour, every column as wide as its longest value, so a title is never
+// cut), the epic block that leads it, the phone form for the bot (a <pre>
+// block wraps at ~40 columns there, so no table: id and title, then base |
+// state | round | verdict, between rules, newest first, no colour), and the
+// JSON for machines (one object per story, always an array, numbers as
 // numbers, absent values null).
 //
-// Widths are bash's under the suite's C.UTF-8, quirk included: width_of
-// counts characters (${#v}), but bash's printf '%-Ns' pads to N BYTES, so a
-// `—` cell (one character, three bytes) gets two spaces fewer than an ASCII
-// one — the goldens hold it, and this reproduces it rather than fixing the
-// alignment behind a byte-for-byte seam. Pinned non-parities: the epic
-// state string is not run through printf's %b; a JSON row is never dropped
-// for an odd verdict; DEL is emitted raw.
+// Widths, quirk included: a column's width counts characters (${#v}), but
+// a cell is padded as printf '%-Ns' pads, to N BYTES, so a `—` cell (one
+// character, three bytes) gets two spaces fewer than an ASCII one — the
+// goldens hold it. Pinned: the epic state string is not run through
+// printf's %b; a JSON row is never dropped for an odd verdict; DEL is
+// emitted raw.
 import type { Detail, EpicRow, Status, StoryRow } from './status.ts';
 
 const ESC = {
@@ -21,10 +20,9 @@ const ESC = {
 type Palette = { [K in keyof typeof ESC]: string };
 const NONE: Palette = { red: '', grn: '', ylw: '', dim: '', rst: '' };
 
-/** status.sh:37-47,123-124,240,247: the three are independent flags. --epics
- *  wins (the block and nothing else), then --json, then --bot; --bot also
- *  turns colour off and puts the epic block in its phone form, even under
- *  --epics. */
+/** The three are independent flags. --epics wins (the block and nothing
+ *  else), then --json, then --bot; --bot also turns colour off and puts
+ *  the epic block in its phone form, even under --epics. */
 export interface ViewOptions {
   json: boolean;
   epics: boolean;
@@ -40,7 +38,7 @@ function cpLen(s: string): number {
   for (const _ of s) n++;
   return n;
 }
-/** printf '%-Ns': pads by bytes, whatever the locale (bash 5.2). */
+/** printf '%-Ns': pads by bytes, whatever the locale. */
 function pad(s: string, w: number): string {
   return s + ' '.repeat(Math.max(0, w - Buffer.byteLength(s)));
 }
@@ -54,7 +52,7 @@ function colourFor(landing: string, p: Palette): string {
   }
 }
 
-/** status.sh:84-121. undefined when no story names an epic. */
+/** The epic block; undefined when no story names an epic. */
 export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): string | undefined {
   if (epics.length === 0) return undefined;
   let out = '';
@@ -82,7 +80,7 @@ function renderDetail(d: Detail, p: Palette): string {
   return `${s}\n`;
 }
 
-/** status.sh:276-292. */
+/** The terminal table. */
 export function renderTable(rows: StoryRow[], detail: Detail | undefined, p: Palette): string {
   const w = (h: string, vals: string[]): number => Math.max(cpLen(h), ...vals.map(cpLen));
   const W = {
@@ -104,7 +102,7 @@ export function renderTable(rows: StoryRow[], detail: Detail | undefined, p: Pal
   return out;
 }
 
-/** status.sh:247-273: the phone. landed and done hidden unless --all or one id. */
+/** The phone: landed and done hidden unless --all or one id. */
 export function renderBot(rows: StoryRow[], detail: Detail | undefined, o: ViewOptions): string {
   let out = '';
   let shown = false;
@@ -126,7 +124,7 @@ export function renderBot(rows: StoryRow[], detail: Detail | undefined, o: ViewO
   return out;
 }
 
-/** status.sh:204-219, 240: the fourteen keys, in that order. */
+/** The fourteen keys, in that order. */
 export function renderJson(rows: StoryRow[]): string {
   const objs = rows.map((r) => ({
     id: r.id,

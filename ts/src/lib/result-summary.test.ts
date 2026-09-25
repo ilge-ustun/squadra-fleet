@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { resultSummaryLine } from './result-summary.ts';
 
-// The .result file's second line, as launch.sh wrote it with
+// The .result file's second line, as
 //   jq -c '{numTotalTests, numFailedTests, failed: [.testResults[].assertionResults[] | select(.status=="failed") | .fullName]}'
-// Parity with jq 1.7 was checked case by case; each row below is a decision.
+// prints it. Checked against jq 1.7 case by case; each row below is a decision.
 describe('resultSummaryLine', () => {
   const fail = '{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"success":false,"testResults":[{"name":"fake.test.tsx","status":"failed","assertionResults":[{"fullName":"fake suite a","status":"failed","failureMessages":["x"]},{"fullName":"fake suite b","status":"passed","failureMessages":[]}]}]}';
   it('the fake runner\'s failing JSON, byte for byte as jq -c', () => {
@@ -16,7 +16,7 @@ describe('resultSummaryLine', () => {
   it('a missing count is null, as jq prints it (JSON.stringify would drop the key)', () => {
     expect(resultSummaryLine('{"testResults":[]}')).toBe('{"numTotalTests":null,"numFailedTests":null,"failed":[]}');
   });
-  it('no testResults array → no line at all (jq errored and the unchecked block wrote nothing)', () => {
+  it('no testResults array → no line at all, where jq errors', () => {
     expect(resultSummaryLine('{"numTotalTests":0,"numFailedTests":0}')).toBeUndefined();
     expect(resultSummaryLine('{"testResults":[{"name":"x"}]}')).toBeUndefined();
   });

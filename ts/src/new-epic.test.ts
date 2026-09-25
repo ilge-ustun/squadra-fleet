@@ -40,7 +40,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('newEpic (new-epic.sh:36-39, seam 7)', () => {
+describe('newEpic', () => {
   it('creates the epic on origin, cut from origin/base, checkout untouched', () => {
     expect(newEpic(cfg, { argv: ['search'] })).toBe(0);
     expect(g(['rev-parse', 'origin/epic/search'])).toBe(g(['rev-parse', 'origin/base']));

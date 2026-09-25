@@ -1,12 +1,12 @@
-// A story's frontmatter — the fleet's state; there is no state file. This is
-// the bash frontmatter_field (lib.sh until seam 8) record by record: nothing unless line
-// 1 is exactly `---`; read to the second `---`; the first line starting
-// `key:`; strip the key and the whitespace after it; keep the rest as is,
-// trailing spaces and a carriage return included.
+// A story's frontmatter — the fleet's state; there is no state file. A field
+// is read record by record: nothing unless line 1 is exactly `---`; read to
+// the second `---`; the first line starting `key:`; strip the key and the
+// whitespace after it; keep the rest as is, trailing spaces and a carriage
+// return included.
 //
-// gawk's [[:space:]] under the suite's C.UTF-8 also strips Unicode spaces
-// (U+3000, U+2028, …); this strips ASCII whitespace only — a pinned
-// non-parity, the one seam 2 chose for the reviewer's verdict line too.
+// The whitespace stripped is ASCII only, not Unicode spaces (U+3000,
+// U+2028, …) — pinned in frontmatter.test.ts, and the same choice as for the
+// reviewer's verdict line (verdict.ts).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -40,14 +40,14 @@ export function storyField(root: string, id: string, key: string): string {
   return frontmatterField(join(root, '.stories', `${id}.md`), key);
 }
 
-/** The bash `set_story_field <id> <key> <value>`, byte for byte. Line
- *  1 exactly `---` (a `---\r` is not): when the reader finds the key with a
- *  non-empty value, the first `key:` line of the file is replaced; else a
- *  `key: value` line is inserted after line 1 — so a present-but-empty key
- *  gets a second line above it, as sed's `1a` gave it. No frontmatter: the
+/** `set_story_field <id> <key> <value>`, byte for byte as pinned in
+ *  frontmatter.test.ts. Line 1 exactly `---` (a `---\r` is not): when the
+ *  reader finds the key with a non-empty value, the first `key:` line of the
+ *  file is replaced; else a `key: value` line is inserted after line 1 — so
+ *  a present-but-empty key gets a second line above it. No frontmatter: the
  *  file is wrapped, its trailing newlines collapsed to one. The values that
- *  arrive here are statuses and round numbers; anything sed would expand or
- *  choke on (`/ & \` or a newline) is refused rather than reproduced. */
+ *  arrive here are statuses and round numbers; one with `/ & \` or a newline
+ *  is refused. */
 export function setStoryField(root: string, id: string, key: string, value: string): void {
   if (/[/&\\\n]/.test(value)) throw new Error(`set_story_field: a value with / & \\ or a newline would corrupt the file: '${value}'`);
   const f = join(root, '.stories', `${id}.md`);
@@ -66,14 +66,11 @@ export function setStoryField(root: string, id: string, key: string, value: stri
   }
 }
 
-// ── the writers landing needs (seam 5) ───────────────────────────────────────
+// ── the writers landing needs ────────────────────────────────────────────────
 //
-// The sed lines they replace searched the whole file: merge.sh:229-233
-// (`grep -q '^merged:'`, `0,/^merged:.*/`), revert.sh:67 (`/^merged:/d`),
-// reset.sh:83 (`0,/^status:.*/`, `0,/^round:.*/`). A `merged:` or `status:`
-// in a story's prose was edited too. These three touch the record only — the
-// lines between a `---` on line 1 and the next `---` — a deliberate
-// non-parity, pinned in frontmatter.test.ts.
+// These three touch the record only — the lines between a `---` on line 1
+// and the next `---` — so a `merged:` or `status:` in a story's prose is
+// never edited; pinned in frontmatter.test.ts.
 
 /** The index range of the record's lines: [1, end), end being the closing
  *  `---` or the file's end; undefined when line 1 is not `---`. */
@@ -109,10 +106,11 @@ export function deleteFrontmatterField(file: string, key: string): number {
   return n;
 }
 
-/** merge.sh:228-234: under a `---` first line, the record's first `merged:`
- *  line becomes `merged: <sha>` (an empty one replaced in place, not doubled
- *  as set_story_field would), else `merged: <sha>` is inserted after line 1.
- *  No frontmatter: nothing recorded, false — the caller warns as the bash did. */
+/** Under a `---` first line, the record's first `merged:` line becomes
+ *  `merged: <sha>` (an empty one replaced in place, not doubled as
+ *  set_story_field would), else `merged: <sha>` is inserted after line 1.
+ *  No frontmatter: nothing recorded, false — merge.ts then finds nothing
+ *  staged and warns. */
 export function recordMergedSha(file: string, sha: string): boolean {
   if (replaceFrontmatterField(file, 'merged', sha)) return true;
   const lines = readFileSync(file, 'utf8').split('\n');

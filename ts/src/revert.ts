@@ -1,20 +1,18 @@
-// revert.ts — revert.sh in TypeScript (seam 5), its order and its every line
-// of output. Auto-merge is allowed to change an epic branch without asking
+// revert.ts — auto-merge is allowed to change an epic branch without asking
 // because undoing it is one word on a phone; this is that word:
 //
-//   revert.sh <repo> <id>   revert the merge commit recorded in the story's
-//                           `merged:` — exactly what was merged, even if the
-//                           epic moved on. No baseline is re-run; the next
-//                           merge into that epic runs one.
+//   fleet revert <repo> <id>   revert the merge commit recorded in the story's
+//                              `merged:` — exactly what was merged, even if the
+//                              epic moved on. No baseline is re-run; the next
+//                              merge into that epic runs one.
 //
-// The integration branch is a human's in both directions (revert.sh:34-36).
-// The revert is made in a throwaway worktree at origin's tip, pushed, and
-// the story's `merged:` line removed, or the next status would claim a
-// merge that has been taken back.
+// The integration branch is a human's in both directions. The revert is
+// made in a throwaway worktree at origin's tip, pushed, and the story's
+// `merged:` line removed, or the next status would claim a merge that has
+// been taken back.
 //
-// What changed from the bash, pinned: .runs/ is created before the revert
-// log (the bash never made it here); the `merged:` line is removed from the
-// frontmatter only, where `sed "/^merged:/d"` swept the whole file.
+// Pinned: .runs/ is created before the revert log; the `merged:` line is
+// removed from the frontmatter only, never from the body.
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
@@ -40,7 +38,7 @@ export interface StoryCheck {
   baseBranch: string;
 }
 
-/** revert.sh:31-36: the die text, or undefined to go on. */
+/** The die text, or undefined to go on. */
 export function checkStory(s: StoryCheck): string | undefined {
   if (s.merged === '') return `${s.id} has no recorded merge — nothing to revert`;
   const base = s.base || s.baseBranch;
@@ -52,7 +50,7 @@ export interface RevertOptions {
   /** After the repo name. */
   argv: readonly string[];
   env: NodeJS.ProcessEnv;
-  /** The bin's EXIT-trap hook: the throwaway worktree is removed on a signal too. */
+  /** The bin's exit hook: the throwaway worktree is removed on a signal too. */
   onExit: (fn: () => void) => void;
 }
 

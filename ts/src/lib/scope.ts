@@ -1,9 +1,8 @@
-// Scope — launch.sh:185-223. The story's `scope_deny:` frontmatter, space-
-// separated bash globs, names files the builder must not touch. Deny-only,
-// by decision. A hit is a machine veto. Two paths the rules themselves
-// require are always allowed, and .fleet/ is always denied: the harness
-// sources .fleet/config, so a builder that could change it could change
-// what runs.
+// Scope. The story's `scope_deny:` frontmatter, space-separated bash globs,
+// names files the builder must not touch. Deny-only, by decision. A hit is a
+// machine veto. Two paths the rules themselves require are always allowed,
+// and .fleet/ is always denied: the harness sources .fleet/config, so a
+// builder that could change it could change what runs.
 
 const SYNTAX = /[\\^$.*+?()[\]{}|/]/;
 const escapeRe = (c: string): string => (SYNTAX.test(c) ? `\\${c}` : c);
@@ -73,10 +72,10 @@ export interface ScopeInput {
 export interface ScopeResult {
   scope: 'CLEAN' | 'VIOLATION';
   hits: string[];
-  /** round-N/scope.txt, byte for byte (launch.sh:217-221) — note the space
-   *  after the scope word is unconditional, as `$SCOPE ${SCOPE_HITS}` had it. */
+  /** round-N/scope.txt — note the space after the scope word is
+   *  unconditional (pinned in scope.test.ts). */
   fileText: string;
-  /** The `scope: …` log line (launch.sh:222), the same unconditional space. */
+  /** The `scope: …` log line, the same unconditional space. */
   logLine: string;
 }
 

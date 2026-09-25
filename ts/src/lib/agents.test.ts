@@ -18,7 +18,7 @@ function shadowed(env: NodeJS.ProcessEnv, name: string): NodeJS.ProcessEnv {
   return env;
 }
 
-describe('the argv the CLIs get — launch.sh:521-524, 628-630', () => {
+describe('the argv the CLIs get', () => {
   it('builder: claude -p, the model, the turn ceiling, the tools, JSON out', () => {
     expect(builderArgv({ model: 'claude-sonnet-4-6', maxTurns: '60' })).toEqual([
       '-p', '--model', 'claude-sonnet-4-6', '--max-turns', '60', '--allowedTools', ALLOWED_TOOLS, '--output-format', 'json',
@@ -32,9 +32,9 @@ describe('the argv the CLIs get — launch.sh:521-524, 628-630', () => {
   });
 });
 
-// The rows of launch.sh:535-541 as jq 1.7 evaluates them (checked, 23 Sep):
-//   BUILD_ERR  = jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end'  (stderr dropped)
-//   BUILD_MSG  = jq -r '.result // "no result field"'                                             (stderr dropped)
+// The rows as jq 1.7 evaluates them (checked, 23 Sep):
+//   isError    = jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end'  (stderr dropped)
+//   message    = jq -r '.result // "no result field"'                                             (stderr dropped)
 //   evidence   = jq . || the raw text
 describe('parseBuilderOutput — the jq rows', () => {
   it.each([
@@ -62,9 +62,9 @@ describe('parseBuilderOutput — the jq rows', () => {
   });
 });
 
-// launch.sh:637 — per line: fromjson? | select(.type=="item.completed" and
+// Per line: fromjson? | select(.type=="item.completed" and
 // .item.type=="agent_message") | .item.text // empty — and what jq says on
-// stderr for JSON that is not an object (no 2>/dev/null there).
+// stderr for JSON that is not an object, kept (no 2>/dev/null).
 describe('reviewerMessages — the codex stream', () => {
   const fake = [
     '{"type":"thread.started","thread_id":"fake"}',

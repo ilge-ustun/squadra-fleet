@@ -5,9 +5,9 @@ import { join, resolve } from 'node:path';
 import { runSync } from './proc.ts';
 import { RunnerError, runMutations, runProbes, writeResultFile } from './evidence.ts';
 
-// launch.sh:161-183 (run_mutations) and :239-267 (run_probes): the
-// reviewer's files under round-N/mutations and round-N/probes, run by the
-// harness in the reviewer's worktree, a .result beside each.
+// runMutations and runProbes: the reviewer's files under round-N/mutations
+// and round-N/probes, run by the harness in the reviewer's worktree, a
+// .result beside each.
 const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/fakes/vitest');
 
 let dir: string; let wt: string; let ev: string; let runs: string;
@@ -45,7 +45,7 @@ afterEach(() => {
 const rawPrefix = (name: string): string => join(runs, `900-round1-${name}`);
 const log = (msg: string): void => { logged.push(msg); };
 
-describe('writeResultFile — the .result file the classify verb wrote (bin/mutation.ts, seam 2)', () => {
+describe('writeResultFile — the .result evidence file', () => {
   it('class alone without a mutated run; class and the summary line with one; class alone when the JSON is unusable', () => {
     const p = join(dir, 'x.result');
     writeResultFile(p, 'NO_SELECTOR');
@@ -62,7 +62,7 @@ describe('writeResultFile — the .result file the classify verb wrote (bin/muta
   });
 });
 
-describe('runMutations — launch.sh:161-183', () => {
+describe('runMutations', () => {
   it('no mutations directory: no rows, nothing logged', () => {
     expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log })).toEqual([]);
     expect(logged).toEqual([]);
@@ -102,7 +102,7 @@ describe('runMutations — launch.sh:161-183', () => {
     expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log }).map((r) => r.cls)).toEqual(['GREEN', 'PATCH_INVALID']);
   });
 
-  it('a dirty tree is the classifier\'s message and then the launcher\'s, as two lines (mutation.sh@14f675e:45-46, the shim)', () => {
+  it('a dirty tree is the classifier\'s message and then the launcher\'s, as two lines', () => {
     const m = join(ev, 'mutations'); mkdirSync(m);
     markerPatch(m, 'AC1-marker', 'test');
     writeFileSync(join(wt, 'dirty.txt'), 'x\n');
@@ -115,7 +115,7 @@ describe('runMutations — launch.sh:161-183', () => {
   });
 });
 
-describe('runProbes — launch.sh:239-267', () => {
+describe('runProbes', () => {
   it('no probes directory: no rows', () => {
     expect(runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, log })).toEqual([]);
   });

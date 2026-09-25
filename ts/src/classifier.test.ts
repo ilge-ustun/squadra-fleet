@@ -9,7 +9,7 @@ import { DirtyTreeError, classifyMutation, findSelector, runSelector } from './c
 // The fleet's one fake runner, the same one test/suite.sh points VITEST_CMD at.
 const FAKE_VITEST = resolve(import.meta.dirname, '../../test/fakes/vitest');
 
-describe('classFromVitestJson — the decision, row by row (mutation.sh@8fe954a:36-39)', () => {
+describe('classFromVitestJson — the decision, row by row', () => {
   it.each([
     [undefined, 'NO_TESTS', 'no file'],
     ['', 'GREEN', 'empty file (jq -e exits 4 → falls through)'],
@@ -134,7 +134,7 @@ describe('runSelector', () => {
   });
 });
 
-describe('classifyMutation — the classes (mutation.sh@8fe954a:65-88)', () => {
+describe('classifyMutation — the classes', () => {
   it('RED: caught; the tree is restored byte for byte and every raw file exists', () => {
     const p = markerPatch();
     const before = hashOf('src/marker.txt');

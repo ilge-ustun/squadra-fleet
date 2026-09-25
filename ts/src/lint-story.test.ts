@@ -4,7 +4,7 @@ import {
   skipCitation, splitCitation,
 } from './lint-story.ts';
 
-describe('extractAcs / firstAcGap (lint-story.sh:74-83)', () => {
+describe('extractAcs / firstAcGap', () => {
   it('extracts unique AC ids in numeric order, not textual order', () => {
     expect(extractAcs('**AC10 — x\n**AC2 — y\n**AC2 — y again (dup)\n**AC1 — z')).toEqual(['AC1', 'AC2', 'AC10']);
   });
@@ -21,7 +21,7 @@ describe('extractAcs / firstAcGap (lint-story.sh:74-83)', () => {
   });
 });
 
-describe('acHeadingLines / isUnboundedDomain / mentionsBaseline (lint-story.sh:86-97, L-20)', () => {
+describe('acHeadingLines / isUnboundedDomain / mentionsBaseline (L-20)', () => {
   it('only lines starting with **ACn are headings', () => {
     expect(acHeadingLines('**AC1 — every widget.\nprose about every thing\n**AC2 — bounded.')).toEqual(['**AC1 — every widget.', '**AC2 — bounded.']);
   });
@@ -41,7 +41,7 @@ describe('acHeadingLines / isUnboundedDomain / mentionsBaseline (lint-story.sh:8
   });
 });
 
-describe('isValidModel / isValidBaseName (lint-story.sh:56,67-70)', () => {
+describe('isValidModel / isValidBaseName', () => {
   it('accepts the live aliases and the empty default, not haiku or a pinned id', () => {
     for (const m of ['sonnet', 'opus', 'fable', '']) expect(isValidModel(m)).toBe(true);
     for (const m of ['haiku', 'claude-opus-5', 'sonet']) expect(isValidModel(m)).toBe(false);
@@ -54,7 +54,7 @@ describe('isValidModel / isValidBaseName (lint-story.sh:56,67-70)', () => {
   });
 });
 
-describe('citations: extractCitations / splitCitation / skipCitation / citationRange (lint-story.sh:105-176)', () => {
+describe('citations: extractCitations / splitCitation / skipCitation / citationRange', () => {
   it('extracts backticked path-like tokens, deduped and sorted, not JS expressions or bare filenames', () => {
     expect(extractCitations('See `src/a.ts:5` and `src/a.ts:5` again, plus `req.method` and `sw.js`.')).toEqual(['req.method', 'src/a.ts:5', 'sw.js']);
   });

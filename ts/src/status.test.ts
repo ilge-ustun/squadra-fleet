@@ -9,7 +9,7 @@ let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
-describe('landingOf — the table in status.sh\'s header', () => {
+describe('landingOf — the table in status.ts\'s header', () => {
   const base = { branch: 'story/1', base: 'base', baseBranch: 'base', intoInBase: () => false };
   it.each([
     ['draft', { status: 'draft', merged: false, verdict: 'PASS' }, 'draft'],
@@ -103,7 +103,7 @@ describe('listDir — ls -1 of the evidence directory', () => {
   });
 });
 
-describe('titleOf — status.sh:76-78, against the awk', () => {
+describe('titleOf — against the awk', () => {
   const AWK = '/^# / { sub(/^# +/, ""); sub(/^[Ss]tory +[0-9]+[[:space:]]*[:—-]+[[:space:]]*/, ""); print; exit }';
   function awk(text: string): string {
     const p = join(dir, 'title.md');

@@ -1,7 +1,6 @@
 // telegram.ts — the fleet's way of reaching a human, and the human's way of
-// reaching back (seam 8; telegram.sh was the bash). bin/telegram.ts is the
-// entry point behind the unchanged `telegram.sh send [--pre] <text>` and
-// `telegram.sh poll`.
+// reaching back. bin/telegram.ts is the entry point behind
+// `fleet telegram send [--pre] <text>` and `fleet telegram poll`.
 //
 // Why polling. The box is behind NAT with no public HTTPS endpoint, so a
 // webhook is impossible without a tunnel. getUpdates is a pull, exactly like
@@ -25,7 +24,7 @@
 // notification is not part of a verdict, and killing a round because
 // Telegram was unreachable would be strictly worse than being told late.
 // Inside a command, a die (an unknown repo, a config the loader refuses) is
-// that command's reply, as it was when dispatch ran in a `$(… 2>&1)`.
+// that command's reply.
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,11 +49,10 @@ export interface BotConfig {
   chatId: string;
 }
 
-/** telegram.sh:37-41. The environment wins: with TELEGRAM_BOT_TOKEN set,
- *  .env.fleet is not read at all; without it, the file supplies both
- *  values (sourced under set -a, so the file's TELEGRAM_CHAT_ID replaces
- *  an environment one — as the bash had it). A file bash cannot source is
- *  one warning and "not configured". */
+/** The environment wins: with TELEGRAM_BOT_TOKEN set, .env.fleet is not
+ *  read at all; without it, the file supplies both values (sourced under
+ *  set -a, so the file's TELEGRAM_CHAT_ID replaces an environment one). A
+ *  file bash cannot source is one warning and "not configured". */
 export function configuredFrom(env: NodeJS.ProcessEnv, fleetHome: string, warned: string[] | ((m: string) => void)): BotConfig | undefined {
   const warn = typeof warned === 'function' ? warned : (m: string): void => { warned.push(m); };
   let token = env['TELEGRAM_BOT_TOKEN'] ?? '';
@@ -127,17 +125,16 @@ export interface BotContext {
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-// The job telegram.sh:228-233 started with `setsid nohup bash -c '…' &`. A
+// The /merge job, run detached: its own session, stdio to /dev/null. A
 // merge installs deps and runs the whole post-merge baseline — minutes of
 // work — and the poll is a systemd oneshot with TimeoutStartSec=2min, so a
 // merge run inside it hands systemd the power to kill it (khaita's epic/pwa
 // merge died at exactly two minutes on 22 Sep 2026: worktree left behind,
 // nothing landed, no reply at all). So: detach, acknowledge now, let the
 // merge send its own result. It takes the fleet lock itself, because the
-// poll's lock goes the moment the command returns. (The bash also closed
-// its inherited lock descriptor first — `9>&-` — or the job would have
-// waited on a lock it already held a handle to. Node hands a child only
-// the stdio it names, so there is no descriptor to close here.)
+// poll's lock goes the moment the command returns. (The job inherits no
+// descriptor of the poll's lock — Node hands a child only the stdio it
+// names — so it cannot wait on a lock it already holds a handle to.)
 const DETACHED_JOB = [
   'fleet="$1"; lock="$2"; shift 2',
   'out="$(flock -w 900 "$lock" bash "$fleet/fleet" merge "$@" 2>&1 | sed "s/\\x1b\\[[0-9;]*m//g")"',
@@ -161,9 +158,8 @@ export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile:
       if (cmd === undefined) return 1;
       return runSync(cmd, args, { env }).status;
     },
-    // LOG_TAG=bot was a shell variable of the bash bot, seen by lib.sh's die
-    // in the same process; the child bash that runs load_repo needs it in
-    // its environment for the same `XX [bot] …` line.
+    // The child bash that runs load_repo needs LOG_TAG=bot in its
+    // environment for lib.sh's die to print `XX [bot] …`.
     loadRepo: (home, name) => loadRepoThroughBash(home, name, { env: { ...env, LOG_TAG: 'bot' }, captureStderr: true }),
     now: () => new Date(),
   };
@@ -171,11 +167,10 @@ export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile:
 
 // ── out ──────────────────────────────────────────────────────────────────────
 
-/** telegram.sh:55-62. Lines are packed into chunks of at most `max`
- *  characters, split only on line boundaries so no table row is cut in
- *  half; a single line longer than `max` goes alone, whole. The text was a
- *  herestring, which ends in a newline: a text ending in '\n' has an empty
- *  last line, kept; an empty text is nothing. */
+/** Lines are packed into chunks of at most `max` characters, split only
+ *  on line boundaries so no table row is cut in half; a single line longer
+ *  than `max` goes alone, whole. A text ending in '\n' has an empty last
+ *  line, kept; an empty text is nothing. */
 export function splitText(text: string, max: number): string[] {
   const out: string[] = [];
   let chunk = '';
@@ -250,9 +245,8 @@ export function isoSeconds(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
 }
 
-/** The /why awk (telegram.sh:160-161): the last `### Machine` block's
- *  lines, without the heading — lib/review.ts reads the block, this drops
- *  its first line. */
+/** What /why sends: the last `### Machine` block's lines, without the
+ *  heading — lib/review.ts reads the block, this drops its first line. */
 export function machineBlockBody(review: string): string {
   const block = readReview(review).machineBlock;
   if (block === undefined) return '';
@@ -261,7 +255,7 @@ export function machineBlockBody(review: string): string {
 
 const registryDir = (c: BotContext): string => c.env['FLEET_REGISTRY_DIR'] ?? join(c.fleetHome, 'repos');
 
-/** repo_names: one registered repo per line, the glob's order. */
+/** The registered repos, in the glob's order. */
 function repoNames(c: BotContext): string[] {
   let names: string[];
   try {
@@ -382,14 +376,13 @@ function cmdMerge(c: BotContext, cfg: RepoConfig, what: string): string {
 
 export type Resolved = { repo: string; arg: string; rest: string } | { reply: string };
 
-/** telegram.sh:251-269. The repo comes first, but with one repo registered
- *  naming it every time is ceremony, and forgetting it used to answer
- *  "unknown repo '012'" — a true statement about the registry, and no use to
- *  anyone. With exactly one repo the words shift right and that repo is
- *  used — only when the word in the repo slot is plainly not a repo name:
- *  absent, a story id, or an epic. A misspelt repo is told so rather than
- *  quietly read as a story id. With several, nothing is guessed: the reply
- *  names the ones that exist. */
+/** The repo comes first, but with one repo registered naming it every time
+ *  is ceremony, and forgetting it used to answer "unknown repo '012'" — a
+ *  true statement about the registry, and no use to anyone. With exactly one
+ *  repo the words shift right and that repo is used — only when the word in
+ *  the repo slot is plainly not a repo name: absent, a story id, or an epic.
+ *  A misspelt repo is told so rather than quietly read as a story id. With
+ *  several, nothing is guessed: the reply names the ones that exist. */
 export function resolveRepo(c: BotContext, cmd: Command): Resolved {
   const { repo, arg, rest } = cmd;
   if (repo !== '' && existsSync(join(registryDir(c), `${repo}.env`))) return { repo, arg, rest };
@@ -400,9 +393,8 @@ export function resolveRepo(c: BotContext, cmd: Command): Resolved {
   return { reply: `unknown repo: ${repo === '' ? '(none given)' : repo}\nknown: ${only.join(' ')}\n/help lists the commands` };
 }
 
-/** dispatch <text> → the reply. What the bash printed inside `$(dispatch
- *  "$text" 2>&1)`: a die anywhere in a command is the reply, and the trailing
- *  newlines the substitution removed are removed here. */
+/** dispatch <text> → the reply: a die anywhere in a command is the reply,
+ *  and trailing newlines are removed, as `$(…)` removes them. */
 export function dispatch(c: BotContext, text: string): string {
   return dispatchRaw(c, text).replace(/\n+$/, '');
 }
@@ -420,9 +412,8 @@ function dispatchRaw(c: BotContext, text: string): string {
   if ('reply' in r) return r.reply;
   try {
     const cfg = c.deps.loadRepo(c.fleetHome, r.repo);
-    // with_lock (telegram.sh:145-152). The bash's warn went to stdout inside
-    // the substitution, so it is part of the reply — here without lib.sh's
-    // colour codes, which a phone shows as they are.
+    // Under the fleet lock. A wait that runs out heads the reply as a `!!`
+    // line — without colour codes, which a phone shows as they are.
     const locked = (fn: () => string): string => {
       let waited = false;
       const v = withFleetLock(cfg.root, c.knobs.lockWait, () => { waited = true; }, fn);

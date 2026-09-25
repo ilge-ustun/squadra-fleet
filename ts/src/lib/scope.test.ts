@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { runSync } from './proc.ts';
 import { bashGlobMatch, checkScope } from './scope.ts';
 
-// launch.sh:197-223 — the story's scope_deny globs against the round's
-// changed paths, judged with bash's own `[[ "$f" == $g ]]`.
+// The story's scope_deny globs against the round's changed paths, judged
+// as bash's own `[[ "$f" == $g ]]` judges them.
 describe('bashGlobMatch — [[ $s == $pattern ]], extglob off, against bash itself', () => {
   const rows: Array<[string, string, boolean]> = [
     ['src/a/b.ts', 'src/*', true],           // * crosses /
@@ -50,8 +50,8 @@ describe('bashGlobMatch — [[ $s == $pattern ]], extglob off, against bash itse
   });
 });
 
-// check_scope's body, copied from launch.sh:206-221, as the oracle for the
-// file and the hits string.
+// The scope check as a bash script, the oracle for the file and the hits
+// string.
 const BASH_CHECK_SCOPE =
   'STORY_ID="$1"; deny="$2"; changed="$3"\n' +
   'set -f; read -ra globs <<< "$deny"; set +f\n' +
@@ -76,7 +76,7 @@ function bashScope(storyId: string, deny: string, changed: string): { fileText: 
   return { fileText: fileText ?? '', logLine: (logLine ?? '').replace(/\n$/, '') };
 }
 
-describe('checkScope — launch.sh:197-223', () => {
+describe('checkScope', () => {
   it.each([
     ['nothing denied, nothing hit: CLEAN, <none>, a trailing space after CLEAN', '', 'src/a.ts\nREADME.md', 'CLEAN', []],
     ['a hit', 'src/*', 'src/a.ts\nREADME.md', 'VIOLATION', ['src/a.ts']],

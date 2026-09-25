@@ -2,12 +2,10 @@
 // `in_progress` in the frontmatter can be a stale orphan. The only
 // trustworthy answer is what is running in the worktree — found by cwd,
 // because the worktree path appears nowhere in the agents' command lines.
-// The bash procs_in_worktree this replaced lived in lib.sh until seam 8.
 import { readdirSync, readlinkSync, realpathSync } from 'node:fs';
 
 /** The pids whose cwd is the worktree or under it; none when the path does
- *  not resolve. Processes whose cwd we may not read are skipped, as
- *  `readlink … || continue` skipped them. */
+ *  not resolve. Processes whose cwd we may not read are skipped. */
 export function procsInWorktree(path: string): string[] {
   let wt: string;
   try {

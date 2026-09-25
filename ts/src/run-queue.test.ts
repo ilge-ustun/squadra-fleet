@@ -5,18 +5,18 @@ import { join } from 'node:path';
 import { Die } from './lib/die.ts';
 import { formatRanLine, readMax, registeredRepos } from './run-queue.ts';
 
-// The pure parts of run-queue.sh; the drain loop itself is proven by
+// The pure parts of `fleet run-queue`; the drain loop itself is proven by
 // test/suite.sh (cases 41, 69-71, 87, 91d, 99, 128-131), as the launcher's is.
 
-describe('readMax — run-queue.sh:32,37', () => {
+describe('readMax', () => {
   it('the default, MAX from the environment, and --max as argv[0]', () => {
     expect(readMax([], {})).toBe(20);
     expect(readMax([], { MAX: '5' })).toBe(5);
     expect(readMax(['--max', '3'], {})).toBe(3);
-    expect(readMax(['--max', '3'], { MAX: '5' })).toBe(3); // --max wins, as the bash order did
+    expect(readMax(['--max', '3'], { MAX: '5' })).toBe(3); // --max wins
   });
 
-  it('--max elsewhere in argv (not argv[0]) is not recognised, as the bash only checked $1', () => {
+  it('--max elsewhere in argv (not argv[0]) is not recognised', () => {
     expect(readMax(['story/1', '--max', '3'], {})).toBe(20);
   });
 
@@ -25,14 +25,14 @@ describe('readMax — run-queue.sh:32,37', () => {
   });
 });
 
-describe('formatRanLine — run-queue.sh:135', () => {
+describe('formatRanLine', () => {
   it('the id, status, verdict and exit code; ? and — for the empty ones', () => {
     expect(formatRanLine({ id: '900', status: 'done', verdict: 'PASS', rc: 0 })).toBe('900 done PASS exit=0');
     expect(formatRanLine({ id: '901', status: '', verdict: '', rc: 1 })).toBe('901 ? — exit=1');
   });
 });
 
-describe('registeredRepos — run-queue.sh:44, sorted as a shell glob is', () => {
+describe('registeredRepos — sorted as a shell glob is', () => {
   let dir: string;
   beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-queue-registry-')); });
   afterAll(() => { rmSync(dir, { recursive: true, force: true }); });

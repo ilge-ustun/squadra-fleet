@@ -1,4 +1,4 @@
-// The verdict rule — what launch.sh computed in bash at its lines 677-712.
+// The verdict rule.
 //
 // The reviewer's line is one input. The machine may veto a PASS; it never
 // grants one, and it never touches SPEC (the story is wrong, not the build)
@@ -18,9 +18,9 @@ import type { Baseline, MutRow, ProbeRow, Verdict } from './types.ts';
 export interface VerdictInput {
   baseline: Baseline;
   scope: string;
-  /** Each hit as bash accumulated it — without its trailing space. */
+  /** Each hit without a trailing space. */
   scopeHits: string[];
-  /** AC ids in the story's order (AC_IDS). */
+  /** AC ids in the story's order. */
   acIds: string[];
   mutRows: MutRow[];
   probeRows: ProbeRow[];
@@ -44,8 +44,8 @@ const LINE: readonly [Verdict, RegExp][] = [
 ];
 
 /** `grep -qE '^VERDICT: PASS[[:space:]]*$'` per newline-delimited line, then
- *  FAIL, then SPEC (launch.sh:680-683). Split on \n, not a multiline regex:
- *  under /m, ^ and $ also break at \r, U+2028 and U+2029, which grep's do not. */
+ *  FAIL, then SPEC. Split on \n, not a multiline regex: under /m, ^ and $
+ *  also break at \r, U+2028 and U+2029, which grep's do not. */
 export function parseReviewerVerdict(text: string): Verdict {
   const lines = text.split('\n');
   for (const [verdict, re] of LINE) {
@@ -60,7 +60,7 @@ export function computeVerdict(i: VerdictInput): VerdictResult {
   if (i.baseline.test !== 'GREEN') reasons.push(`baseline test ${i.baseline.test}`);
   if (i.baseline.build !== 'GREEN') reasons.push(`baseline build ${i.baseline.build}`);
   if (i.baseline.lint !== 'GREEN') reasons.push(`baseline lint ${i.baseline.lint}`);
-  // bash: "scope $SCOPE: ${SCOPE_HITS}; " where every hit carries a trailing space
+  // "scope <scope>: <hits>; " where every hit carries a trailing space
   if (i.scope !== 'CLEAN') reasons.push(`scope ${i.scope}: ${i.scopeHits.map((h) => `${h} `).join('')}`);
   for (const ac of i.acIds) {
     if (!i.mutRows.some((r) => r.ac === ac)) reasons.push(`${ac} has no mutation`);

@@ -31,15 +31,15 @@ const YLW = '\x1b[33m';
 const GRN = '\x1b[32m';
 const RST = '\x1b[0m';
 
-// ── acceptance criteria (lint-story.sh:72-97) ────────────────────────────────
+// ── acceptance criteria ──────────────────────────────────────────────────────
 
-/** lint-story.sh:74: unique AC ids, in numeric order (`sort -u -V`). */
+/** Unique AC ids, in numeric order (`sort -u -V`). */
 export function extractAcs(text: string): string[] {
   const ids = [...text.matchAll(/^\*\*AC([0-9]+)/gm)].map((m) => `AC${m[1] ?? ''}`);
   return [...new Set(ids)].sort((a, b) => Number(a.slice(2)) - Number(b.slice(2)));
 }
 
-/** lint-story.sh:78-83: the first gap from AC1, or undefined when contiguous. */
+/** The first gap from AC1, or undefined when contiguous. */
 export function firstAcGap(acs: readonly string[]): string | undefined {
   let n = 1;
   for (const ac of acs) {
@@ -49,7 +49,7 @@ export function firstAcGap(acs: readonly string[]): string | undefined {
   return undefined;
 }
 
-/** lint-story.sh:89: every line starting with `**ACn` — the same prefix the
+/** Every line starting with `**ACn` — the same prefix the
  *  launcher's own AC extraction (and extractAcs above) uses. */
 export function acHeadingLines(text: string): string[] {
   return text.split('\n').filter((l) => /^\*\*AC[0-9]+/.test(l));
@@ -58,44 +58,44 @@ export function acHeadingLines(text: string): string[] {
 const TEMPORAL = /\b(?:every|each|any|all)\s+(?:time|run|round)s?\b/i;
 const DOMAIN = /\b(?:every|all|any)\b/i;
 
-/** lint-story.sh:86-91 (L-20): an unquantified every/all/any in an AC
- *  heading — "every time/run/round" is exempted, checked first since a line
- *  with both a temporal phrase and an unbound one is exempted whole, as the
- *  bash's `grep -v` piped into `grep` was. */
+/** L-20: an unquantified every/all/any in an AC heading — "every
+ *  time/run/round" is exempted, checked first since a line with both a
+ *  temporal phrase and an unbound one is exempted whole, the same as
+ *  `grep -v` piped into `grep`. */
 export function isUnboundedDomain(line: string): boolean {
   return !TEMPORAL.test(line) && DOMAIN.test(line);
 }
 
 const SUITE = /suite|npm (?:test|run (?:build|lint))|stay green/i;
 
-/** lint-story.sh:94-97: an AC heading mentioning the baseline suite/build/lint. */
+/** An AC heading mentioning the baseline suite/build/lint. */
 export function mentionsBaseline(line: string): boolean {
   return SUITE.test(line);
 }
 
-// ── frontmatter fields (lint-story.sh:52-70) ─────────────────────────────────
+// ── frontmatter fields ───────────────────────────────────────────────────────
 
 export const MODEL_ALIASES = ['sonnet', 'opus', 'fable'] as const;
 
-/** lint-story.sh:67-70: '' (the default) or one of the live aliases — haiku
+/** '' (the default) or one of the live aliases — haiku
  *  stays rejected, case_116's regression guard. */
 export function isValidModel(model: string): boolean {
   return model === '' || (MODEL_ALIASES as readonly string[]).includes(model);
 }
 
-/** lint-story.sh:56: a base is the integration branch or an epic/* branch —
+/** A base is the integration branch or an epic/* branch —
  *  whether either actually exists is a separate, git-backed check. */
 export function isValidBaseName(base: string, baseBranch: string): boolean {
   return base === baseBranch || base.startsWith('epic/');
 }
 
-// ── citations (lint-story.sh:105-176) ────────────────────────────────────────
+// ── citations ────────────────────────────────────────────────────────────────
 
-// lint-story.sh:175: a backticked `path/to/x.ext[:N[-M]]` token.
+// A backticked `path/to/x.ext[:N[-M]]` token.
 const CITE_RE = /`[A-Za-z0-9_./@-]*\[?[A-Za-z0-9_.-]*\]?[A-Za-z0-9_./-]*\.[a-z]+(?::[0-9]+(?:-[0-9]+)?)?`/g;
 
-/** lint-story.sh:175-176: every backticked candidate in the story, deduped
- *  and sorted — the `grep -oE | tr -d '\`' | sort -u` pipeline. */
+/** Every backticked candidate in the story, deduped and sorted — the same
+ *  as `grep -oE | tr -d '\`' | sort -u`. */
 export function extractCitations(text: string): string[] {
   return [...new Set((text.match(CITE_RE) ?? []).map((c) => c.slice(1, -1)))].sort();
 }
@@ -106,17 +106,17 @@ export interface Citation {
   lines: string;
 }
 
-/** lint-story.sh:145: split on the FIRST ':' — the path's own character
+/** Split on the FIRST ':' — the path's own character
  *  class never includes one. */
 export function splitCitation(cite: string): Citation {
   const i = cite.indexOf(':');
   return i === -1 ? { path: cite, lines: '' } : { path: cite.slice(0, i), lines: cite.slice(i + 1) };
 }
 
-/** lint-story.sh:146-153: a candidate that looks like a path but is not one
- *  worth checking — a URL, an @-mention, node_modules, a URL path (leading
- *  `/`), a runtime `.blocked/` file, or too plain to be a citation (no
- *  directory, no extension: a bare filename in prose). */
+/** A candidate that looks like a path but is not one worth checking — a
+ *  URL, an @-mention, node_modules, a URL path (leading `/`), a runtime
+ *  `.blocked/` file, or too plain to be a citation (no directory, no
+ *  extension: a bare filename in prose). */
 export function skipCitation(path: string): boolean {
   if (path.startsWith('http') || path.includes('@') || path.startsWith('node_modules/')) return true;
   if (path.startsWith('/')) return true;
@@ -126,7 +126,7 @@ export function skipCitation(path: string): boolean {
   return false;
 }
 
-/** lint-story.sh:171: `${lines%%-*}` / `${lines##*-}` — the first and last
+/** `${lines%%-*}` / `${lines##*-}` — the first and last
  *  number of a `N` or `N-M` spec (equal for a bare `N`). */
 export function citationRange(lines: string): { first: number; last: number } {
   const dash = lines.indexOf('-');
@@ -152,8 +152,8 @@ export interface LintStoryOptions {
   argv: readonly string[];
 }
 
-/** lint-story.sh's own err()/warn() (lines 36-39): these count, so they
- *  replace lib.sh's warn deliberately — not ../lib/log.ts's. */
+/** The lint's own err()/warn(): these count, so ../lib/log.ts's warn is
+ *  deliberately not used. */
 function makeCounters(): { err: (msg: string) => void; warn: (msg: string) => void; errors: () => number; warnings: () => number } {
   let errors = 0;
   let warnings = 0;

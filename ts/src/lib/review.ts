@@ -1,9 +1,8 @@
-// The reader of .review/<id>.md — what status.sh:148, :151 and :234 read
-// with awk, against the labels lib/machine-block.ts writes, so the writer
-// and the reader cannot drift.
+// The reader of .review/<id>.md, against the labels lib/machine-block.ts
+// writes, so the writer and the reader cannot drift.
 //
-//   verdict       field 2 of the FIRST `verdict:` line (launch.sh writes the
-//                 computed verdict there); undefined when there is no such
+//   verdict       field 2 of the FIRST `verdict:` line (the launcher writes
+//                 the computed verdict there); undefined when there is no such
 //                 line, '' when the line has no second field
 //   reasons       on the LAST `computed:` line, what follows the first ` — `
 //                 up to the next one, minus trailing `; ` — the launcher's
@@ -11,7 +10,7 @@
 //   machineBlock  `### Machine` and the lines of the LAST such heading up to
 //                 the next `### ` heading, trailing newlines removed as
 //                 `$(…)` removed them; undefined when the file has none
-//                 (`### Machine…` is a prefix match, as the awk's was)
+//                 (`### Machine…` is a prefix match)
 import { COMPUTED_SEP, LABELS, MACHINE_HEADING } from './machine-block.ts';
 import { records } from './frontmatter.ts';
 

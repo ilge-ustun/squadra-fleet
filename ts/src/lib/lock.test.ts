@@ -6,9 +6,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { runSync } from './proc.ts';
 import { lockPath, withFleetLock } from './lock.ts';
 
-// launch.sh:95-96,103,112 — `exec 9>"$REPO_ROOT/.git/fleet.lock"; flock -w N 9`,
-// the same file telegram.sh's with_lock takes, so the bot and the launcher
-// never commit into one index at once.
+// `exec 9>"$REPO_ROOT/.git/fleet.lock"; flock -w N 9`, one file for the
+// launcher and the bot, so they never commit into one index at once.
 let root: string;
 let holder: ChildProcess | undefined;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'fleet-lock-')); mkdirSync(join(root, '.git')); });
@@ -44,7 +43,7 @@ describe('withFleetLock', () => {
     expect(Date.now() - t0).toBeGreaterThanOrEqual(200);
   });
 
-  it('a wait that runs out calls onWaitFailed and still runs fn (the bash warned and went ahead)', async () => {
+  it('a wait that runs out calls onWaitFailed and still runs fn (a lost status commit is a dead round)', async () => {
     await heldByAnother('3');
     let waited = false;
     let ran = false;

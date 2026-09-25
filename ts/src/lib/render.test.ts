@@ -18,12 +18,7 @@ function prompt(name: string, text: string): string {
 }
 
 /** The rendered text, or the thrown RenderError's XX line, or the
- *  unsubstituted-placeholder warning line render.sh printed (render.sh:44)
- *  prefixed to a successful render — the same shape case 10 (test/suite.sh)
- *  captured by running the bash and this side against each other, until
- *  render.sh retired with write-story.sh (seam 7). This file was proved
- *  byte-for-byte equal to render.sh through seam 6; it is the sole
- *  implementation now, so it is asserted directly. */
+ *  unsubstituted-placeholder warning line prefixed to a successful render. */
 function render(file: string, vars: RenderVars): string {
   try {
     const r = renderPrompt(dir, file, vars);
@@ -55,7 +50,7 @@ describe('renderPrompt', () => {
     );
   });
 
-  it('a value is inserted literally — &, \\&, \\\\, $& and $1 survive (the patsub_replacement finding)', () => {
+  it('a value is inserted literally — &, \\&, \\\\, $& and $1 survive (L-28)', () => {
     const f = prompt('amp.md', 'S={{STORY}} R={{REVIEW_TEXT}}');
     expect(render(f, { ...ALL, STORY_TEXT: 'R&D uses && and a \\& and \\\\', REVIEW_TEXT: 'cost $& or $1' })).toBe(
       'S=R&D uses && and a \\& and \\\\ R=cost $& or $1',
@@ -67,7 +62,7 @@ describe('renderPrompt', () => {
     expect(render(f, { ...ALL, STORY_TEXT: 'line 1\n\nline 3 — Über' })).toBe('# 900\nline 1\n\nline 3 — Über\nend');
   });
 
-  it('{{STORY}} is never guarded: the die list says STORY_TEXT, which no file uses (parity, pinned)', () => {
+  it('{{STORY}} is never guarded: the die list says STORY_TEXT, which no file uses', () => {
     const f = prompt('story-empty.md', 'S=[{{STORY}}] end');
     expect(render(f, { ...ALL, STORY_TEXT: '' })).toBe('S=[] end');
   });

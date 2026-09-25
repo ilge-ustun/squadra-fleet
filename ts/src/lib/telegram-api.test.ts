@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { apiUrl, getUpdates, sendMessage } from './telegram-api.ts';
 
-// telegram.sh:42,74-77,291-293 — one POST for a message, one GET for the
-// updates, twenty seconds each, and nothing here ever throws: the bot's
-// caller warns and goes on, because a notification is not part of a verdict.
+// One POST for a message, one GET for the updates, twenty seconds each, and
+// nothing here ever throws: the bot's caller warns and goes on, because a
+// notification is not part of a verdict.
 interface Seen { method: string; url: string; body: string; contentType: string }
 let server: Server;
 let base: string;
@@ -32,7 +32,7 @@ afterEach(async () => { server.closeAllConnections(); await new Promise<void>((r
 const TOKEN = '123:AA';
 
 describe('apiUrl', () => {
-  it('is https://api.telegram.org/bot<token>/<method> by default (telegram.sh:42)', () => {
+  it('is https://api.telegram.org/bot<token>/<method> by default', () => {
     expect(apiUrl(undefined, TOKEN, 'sendMessage')).toBe('https://api.telegram.org/bot123:AA/sendMessage');
   });
   it('TELEGRAM_API_BASE replaces the host, a trailing slash tolerated', () => {
@@ -55,7 +55,7 @@ describe('sendMessage', () => {
     expect(p.has('parse_mode')).toBe(false);
   });
 
-  it('carries parse_mode=HTML when asked (telegram.sh:72)', async () => {
+  it('carries parse_mode=HTML when asked', async () => {
     await sendMessage({ base, token: TOKEN, chatId: '42', text: '<pre>t</pre>', parseMode: 'HTML', timeoutSec: 5 });
     expect(new URLSearchParams(seen[0]!.body).get('parse_mode')).toBe('HTML');
   });
