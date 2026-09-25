@@ -7,7 +7,7 @@ import { procsInWorktree } from './procs.ts';
 
 // A child that sits in a subdirectory of the "worktree": the launcher's
 // agents are found the same way, by cwd, because the path appears nowhere in
-// their command lines (lib.sh:115-120).
+// their command lines (L-04).
 let dir: string;
 let child: ChildProcess;
 
@@ -25,7 +25,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('procsInWorktree — lib.sh:122-130', () => {
+describe('procsInWorktree — the bash procs_in_worktree', () => {
   it('finds a process whose cwd is under the worktree, by pid', () => {
     const pids = procsInWorktree(join(dir, 'wt'));
     expect(pids).toContain(String(child.pid));
