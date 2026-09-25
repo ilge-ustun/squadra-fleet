@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Die } from './lib/die.ts';
-import { formatRanLine, readMax, registeredRepos } from './run-queue.ts';
+import { busyLine, formatRanLine, readMax, registeredRepos } from './run-queue.ts';
 
 // The pure parts of `fleet run-queue`; the drain loop itself is proven by
 // test/suite.sh (cases 41, 69-71, 87, 91d, 99, 128-131), as the launcher's is.
@@ -29,6 +29,16 @@ describe('formatRanLine', () => {
   it('the id, status, verdict and exit code; ? and — for the empty ones', () => {
     expect(formatRanLine({ id: '900', status: 'done', verdict: 'PASS', rc: 0 })).toBe('900 done PASS exit=0');
     expect(formatRanLine({ id: '901', status: '', verdict: '', rc: 1 })).toBe('901 ? — exit=1');
+  });
+});
+
+describe('busyLine — the launch lock\'s holder, as the drain reports it', () => {
+  it('names the pid and what the holder is doing', () => {
+    expect(busyLine('4242 story 900')).toBe('a launch is already running (pid 4242, story 900) — leaving the queue to the next drain');
+    expect(busyLine('17 reap')).toBe('a launch is already running (pid 17, reap) — leaving the queue to the next drain');
+  });
+  it('a holder line it cannot read still gives a line', () => {
+    expect(busyLine('')).toBe('a launch is already running (pid ?, unknown) — leaving the queue to the next drain');
   });
 });
 

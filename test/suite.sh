@@ -3436,7 +3436,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point case_137_one_launch_per_repo
-       case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone)
+       case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
+       case_140_queue_leaves_a_busy_repo)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3644,6 +3645,52 @@ case_139_bot_leaves_in_progress_alone() {
   assert_eq "$(field status)" in_progress "/answer left the status alone"
   assert_not_grep 'go on' "$REPO/.blocked/$STORY.md" "…and the question file"
   assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "nothing was committed"
+}
+
+# A busy repo is the next drain's. When another launch holds the repo, the
+# queue's --reap exits 75: the drain says so and stops before its refresh
+# (an unlocked git merge in the checkout the holder commits to) and before
+# any launch. A launch that exits 75 — the lock taken between the reap and
+# it — stops the drain the same way. Neither is news: no notification. Red
+# while ts/src/run-queue.ts ignores the reap's exit and reads 75 as a story
+# that "ended as 'ready' … not a state the queue expects".
+case_140_queue_leaves_a_busy_repo() {
+  CASE="140a a drain while another launch holds the repo"; fixture c140
+  sed "s/Story $STORY/Story 901/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  local holder
+  codex_called() { grep -q '^codex$' "$TRACE/calls"; }
+  launch_bg 900 "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=gate MAX_ROUNDS=1 AGENT_TIMEOUT=120
+  holder=$BG_PID
+  wait_for 60 codex_called || fail "the background launcher never reached its reviewer"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_grep "a launch is already running \(pid $holder, story $STORY\) — leaving the queue to the next drain" "$FX/queue.log" "it says who has the repo"
+  assert_not_grep 'refreshing from origin' "$FX/queue.log" "no refresh beside a live launcher"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" ready "901 waits"
+  assert_eq "$(calls claude)" 1 "only the holder's builder ran"
+  assert_no_file "$TRACE/notified" "nobody was told"
+  open_gate; wait "$holder"
+
+  CASE="140b a launch that finds the repo taken after the reap"; fixture c140b
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  mv "$FLEET/fleet" "$FLEET/fleet.real"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'if [[ "$1" == launch && "$3" != --reap ]]; then\n'
+    printf '  printf "4242 story 777\\n" > "%s/.git/fleet-launch.lock"\n' "$REPO"
+    printf '  exit 75\n'
+    printf 'fi\n'
+    printf 'exec bash "%s/fleet.real" "$@"\n' "$FLEET"
+  } > "$FLEET/fleet"
+  chmod +x "$FLEET/fleet"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_grep 'a launch is already running \(pid 4242, story 777\) — leaving the queue to the next drain' "$FX/queue.log" "the same line"
+  assert_eq "$(grep -c 'is ready again without having finished' "$FX/queue.log")" 0 "not mistaken for a story that never finished"
+  assert_eq "$(field status)" ready "the story waits"
+  assert_no_file "$TRACE/notified" "nobody was told"
 }
 
 for c in "${CASES[@]}"; do

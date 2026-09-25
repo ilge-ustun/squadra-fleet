@@ -26,6 +26,7 @@ import { Die } from './lib/die.ts';
 import { storyField } from './lib/frontmatter.ts';
 import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, upstreamBranch } from './lib/git.ts';
 import { readKnobs, splitCommand } from './launch.ts';
+import { EXIT_LAUNCH_BUSY, launchLockHolder } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
 import { formatIsoSeconds } from './lib/machine-block.ts';
 import { runInherit } from './lib/proc.ts';
@@ -63,6 +64,13 @@ export interface RanLine {
 /** `"$id ${status:-?} ${verdict:-—} exit=$rc"`. */
 export function formatRanLine(r: RanLine): string {
   return `${r.id} ${r.status || '?'} ${r.verdict || '—'} exit=${r.rc}`;
+}
+
+/** What the drain says when another launch holds the repo, from the launch
+ *  lock's `<pid> <what>` line. */
+export function busyLine(holder: string): string {
+  const [pid = '', ...what] = holder.split(' ');
+  return `a launch is already running (pid ${pid || '?'}, ${what.join(' ') || 'unknown'}) — leaving the queue to the next drain`;
 }
 
 /** Never fails the drain — no upstream, a merge/rebase already in progress,
@@ -151,11 +159,16 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   // A crash leaves a story at `in_progress` with nothing running. Any scan
   // for `ready` misses it, so the queue would report itself empty while a
   // stranded story sat there forever. Reap first — launch.ts owns that logic
-  // and knows to check the worktree for live processes before declaring
-  // anything an orphan. Its exit status is not checked: a die here (a live
-  // orphan) does not stop the drain.
+  // and checks both of a story's trees before declaring anything an orphan.
+  // One exit ends the drain here: 75, another launch holds the repo — a hand
+  // launch, say — and the repo is left to the next drain, before the refresh
+  // merges into the checkout that launcher commits to (L-31). Any other
+  // failure (a live orphan's die) does not stop the drain.
   log('reaping orphans from any interrupted run', TAG);
-  runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, '--reap']);
+  if (runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, '--reap']) === EXIT_LAUNCH_BUSY) {
+    log(busyLine(launchLockHolder(root)), TAG);
+    return 0;
+  }
 
   log('refreshing from origin before scan', TAG);
   refreshFromOrigin(root);
@@ -164,6 +177,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   const ran: RanLine[] = [];
   let prev = '';
   let n = 0;
+  let busy = false;
 
   while (n < max) {
     const id = nextReady(root);
@@ -181,6 +195,13 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
 
     log(`story ${id} (${n} of at most ${max})`, TAG);
     const rc = runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, id]);
+    // The lock was taken between the reap and this launch, which touched
+    // nothing: not a story that ran, not news.
+    if (rc === EXIT_LAUNCH_BUSY) {
+      log(busyLine(launchLockHolder(root)), TAG);
+      busy = true;
+      break;
+    }
 
     const status = storyField(root, id, 'status');
     const reviewPath = `${root}/.review/${id}.md`;
@@ -226,7 +247,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   out('\n');
   out(`${DIM}─── queue finished, started ${started} ───${RST}\n`);
   if (ran.length === 0) {
-    out('nothing was ready to run\n');
+    out(busy ? 'nothing ran: another launch holds the repo\n' : 'nothing was ready to run\n');
   } else {
     for (const r of ran) out(`  ${formatRanLine(r)}\n`);
   }
