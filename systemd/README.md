@@ -11,7 +11,7 @@ has to answer while one is running.
 
 ## What happens when there is nothing to do
 
-`launch.sh <repo> --reap` scans the target's `.stories/` and `/proc` and exits quickly. A
+`fleet launch <repo> --reap` scans the target's `.stories/` and `/proc` and exits quickly. A
 `git fetch` runs before each scan to pick up remote promotions, and `git merge`
 follows if the fetch advanced the upstream. Both are fast on an idle repo. No
 model call, no story processing. So an idle fleet polling every 15 minutes is
@@ -26,13 +26,13 @@ nothing in the fleet has to know about it.
 
 `Persistent=true` makes a firing missed while the box was off run shortly
 after boot. That is also the crash-recovery path: the first thing
-`run-queue.sh` does is reap orphans, so a story stranded at `in_progress` by a
+`fleet run-queue` does is reap orphans, so a story stranded at `in_progress` by a
 power cut is returned to the queue and resumed — its worktree reused, the
 builder's existing commits intact, rounds continuing from the frontmatter
 rather than restarting at one. `test/suite.sh` case 42 covers exactly that
 state.
 
-The queue unit runs `run-queue.sh --all`: every repo in `repos/` is drained in
+The queue unit runs `fleet run-queue --all`: every repo in `repos/` is drained in
 turn, each in its own process, and `--max` is a per-repo ceiling.
 
 ## Install
@@ -55,7 +55,7 @@ systemctl --user enable --now fleet-bot.timer
 The fleet names models by alias (`sonnet`, `opus`, `fable`, codex's own
 default), and an alias is only as new as the CLI resolving it. Claude Code
 updates itself; codex, an npm global under nvm, does not.
-`fleet-agents-update.timer` runs `update-agents.sh` on Sundays at 04:30: it
+`fleet-agents-update.timer` runs `fleet update-agents` on Sundays at 04:30: it
 runs `claude update` and `npm install -g @openai/codex@latest`, and does
 nothing (exit 0) while `fleet-queue.service` is active.
 
@@ -85,7 +85,7 @@ TELEGRAM_CHAT_ID=987654321
 
 Never in a target: a target's `SEED_FILES` are copied into every builder and
 reviewer worktree, so a token there is a token handed to every agent.
-`.env.fleet` is read by `telegram.sh` alone.
+`.env.fleet` is read by `fleet telegram` alone.
 
 The token is write access to every registered repo, through `/promote` and
 `/answer`. What
@@ -110,12 +110,12 @@ systemctl --user list-timers 'fleet-*'           # when they next fire
 journalctl --user -u fleet-queue -f              # live
 journalctl --user -u fleet-queue --since today   # what it did
 journalctl --user -u fleet-bot --since today     # what was asked of it
-bash status.sh khaita                            # where every story of one repo stands
+./fleet status <repo>                            # where every story of one repo stands
 ```
 
-Or `/status khaita` on the phone, which is the same table.
+Or `/status <repo>` on the phone, which is the same table.
 
-`run-queue.sh` prints a per-story summary and then `status.sh`, so the tail of
+`fleet run-queue` prints a per-story summary and then `fleet status`, so the tail of
 each journal entry is the whole picture.
 
 ## Running one story by hand while the timer is enabled
@@ -142,14 +142,14 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 
 ## Promoting stories remotely
 
-`run-queue.sh` fetches from origin and merges before each scan. A story
-promoted from anywhere — editing frontmatter in the GitLab web UI from a phone,
+`fleet run-queue` fetches from origin and merges before each scan. A story
+promoted from anywhere — editing frontmatter in the host's web UI from a phone,
 say — is picked up on the next timer firing without anyone pulling manually.
 
 If the fetch fails (no network, bad credentials) the drain continues on local
 state and logs `refresh failed`. If the merge conflicts, it is aborted cleanly
 and the drain continues on the pre-refresh checkout; local work is never lost.
 
-The other route is the bot: `/promote khaita 013` writes the frontmatter,
+The other route is the bot: `/promote <repo> <id>` writes the frontmatter,
 commits and pushes for you, under the same lock the launcher's status commits
 take. Every command but `/run` names its repo first.
