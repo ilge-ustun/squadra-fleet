@@ -1,8 +1,7 @@
-// The Telegram Bot API, the two calls telegram.sh made with curl
-// (telegram.sh:42,74-77,291-293): a POST for a message, a GET for the
-// updates, each with a wall-clock limit (curl --max-time). Node's fetch
-// instead of curl: nothing else on this box needs curl once this is the
-// client, and the same call is one process, not two.
+// The Telegram Bot API, the two calls the bot makes: a POST for a message,
+// a GET for the updates, each with a wall-clock limit. Node's fetch, not
+// curl: nothing else on this box needs curl, and the call is one process,
+// not two.
 //
 // Nothing here throws. A notification is not part of a verdict, and a bot
 // that cannot reach Telegram must say so and go on; the caller warns.
@@ -22,15 +21,14 @@ export interface SendOptions {
   token: string;
   chatId: string;
   text: string;
-  /** 'HTML' for a <pre> block (telegram.sh:72); absent means plain text. */
+  /** 'HTML' for a <pre> block; absent means plain text. */
   parseMode?: 'HTML';
   timeoutSec: number;
 }
 
 /** sendMessage. True when Telegram accepted it (a 2xx); false on any
- *  failure — unreachable, timed out, or an error status (curl -sS without
- *  --fail counted a 400 as sent; this does not, and the caller's warning is
- *  the only difference). */
+ *  failure — unreachable, timed out, or an error status: a refused message
+ *  (a 400) is one the caller warns about, not a silent loss. */
 export async function sendMessage(o: SendOptions): Promise<boolean> {
   const body = new URLSearchParams({ chat_id: o.chatId, text: o.text });
   if (o.parseMode !== undefined) body.set('parse_mode', o.parseMode);
@@ -60,9 +58,8 @@ export interface GetUpdatesOptions {
   timeoutSec: number;
 }
 
-/** 'failed': the request did not complete (curl's non-zero exit —
- *  telegram.sh:292). 'no-result': it did, but the body is not
- *  `{"ok":true,"result":[…]}` (jq -e '.ok == true' — telegram.sh:293). */
+/** 'failed': the request did not complete. 'no-result': it did, but the
+ *  body is not `{"ok":true,"result":[…]}`. */
 export type GetUpdatesResult = { ok: true; updates: Update[] } | { ok: false; reason: 'failed' | 'no-result' };
 
 export async function getUpdates(o: GetUpdatesOptions): Promise<GetUpdatesResult> {

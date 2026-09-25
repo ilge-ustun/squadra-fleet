@@ -1,13 +1,13 @@
-// The baseline — launch.sh:129-152. The harness runs the suite, the build and
-// the lint itself, in the clean reviewer tree, before the reviewer is asked
-// anything; the results are files under round-N/baseline/, committed with
-// the status. A red baseline is a machine veto.
+// The baseline. The harness runs the suite, the build and the lint itself,
+// in the clean reviewer tree, before the reviewer is asked anything; the
+// results are files under round-N/baseline/, committed with the status. A
+// red baseline is a machine veto.
 //
 // Green requires tests to have actually run: vitest's JSON reporter says
 // numTotalTests=0 with success=false for a transform error, visually
-// identical to a caught bug in the terminal (L-08). The rule is the bash
-// one, `jq -e '.numTotalTests > 0 and .numFailedTests == 0'`, including
-// jq's ordering (a string or an array is "greater than 0"); it is NOT the
+// identical to a caught bug in the terminal (L-08). The rule is
+// `jq -e '.numTotalTests > 0 and .numFailedTests == 0'`, including jq's
+// ordering (a string or an array is "greater than 0"); it is NOT the
 // classifier's rule in vitest-json.ts, which falls through to GREEN — the
 // two differ on purpose, and case 106 stubs that file, so nothing here may
 // import it.
@@ -35,11 +35,10 @@ export function baselineColour(text: string | undefined): Colour {
   return jqGreaterThanZero(o['numTotalTests']) && o['numFailedTests'] === 0 ? 'GREEN' : 'RED';
 }
 
-/** test.summary.json (launch.sh:140-146): jq's `{numTotalTests,
- *  numPassedTests, numFailedTests, success, failed: [...]}`, pretty, with
- *  null for an absent count; or the error object when the runner wrote no
- *  file. Where jq failed on the shape and bash left an empty file, this
- *  writes an error object too — pinned in baseline.test.ts. */
+/** test.summary.json: jq's `{numTotalTests, numPassedTests, numFailedTests,
+ *  success, failed: [...]}`, pretty, with null for an absent count; or the
+ *  error object when the runner wrote no file. JSON of another shape gets
+ *  an error object too — pinned in baseline.test.ts. */
 function summary(text: string | undefined): string {
   if (text === undefined) return '{"error":"vitest wrote no JSON — see test.log"}\n';
   let doc: unknown;
@@ -73,8 +72,7 @@ function summary(text: string | undefined): string {
 
 /** `( cd "$wt" && $CMD ) 2>&1 | tail -n 200 > log` under pipefail: the
  *  status is the command's, the log its last 200 lines of both streams. The
- *  command is a bash line (the bash word-split it; khaita's values are the
- *  same either way — pinned). */
+ *  command is a bash line (pinned in baseline.test.ts). */
 function tailed(cmd: string, cwd: string, logFile: string): Colour {
   const fd = openSync(logFile, 'w');
   try {
@@ -117,11 +115,11 @@ export function runBaseline(i: BaselineInput): Baseline {
   return { test, build, lint };
 }
 
-/** merge.sh:186-193 — the post-merge baseline in the merge worktree. The same
- *  rule for the suite; build and lint by exit status with the whole of both
- *  streams in their logs (`> log 2>&1`, no tail); no summary file — the logs
- *  under .runs/<logid>-merge-*.log are what the die names. The install step
- *  (merge.sh:182-184) is the caller's, with its own log and its own die. */
+/** The post-merge baseline in the merge worktree. The same rule for the
+ *  suite; build and lint by exit status with the whole of both streams in
+ *  their logs (`> log 2>&1`, no tail); no summary file — the logs under
+ *  .runs/<logid>-merge-*.log are what the die names. The install step is
+ *  the caller's, with its own log and its own die. */
 export interface MergeBaselineInput {
   wt: string;
   rawJson: string;

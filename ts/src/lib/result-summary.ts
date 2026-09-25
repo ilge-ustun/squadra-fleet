@@ -2,13 +2,12 @@
 // purpose: that file is the one decision (case 106 stubs its two exports);
 // this is reporting.
 
-/** The .result file's second line: what launch.sh used to write with
- *  `jq -c '{numTotalTests, numFailedTests, failed: [...]}'` from the mutated
- *  run's JSON. Parity with jq 1.7, decided row by row in vitest-json.test.ts:
- *  a missing count prints null; when testResults or an assertionResults is
- *  not an array jq errored and no line was written, so none is returned;
- *  DEL is escaped as jq escapes it. Nobody reads this line today; the
- *  builder and a human may. */
+/** The .result file's second line: the mutated run's JSON through
+ *  `jq -c '{numTotalTests, numFailedTests, failed: [...]}'`, as jq 1.7
+ *  prints it, decided row by row in result-summary.test.ts: a missing count
+ *  prints null; when testResults or an assertionResults is not an array,
+ *  none is returned; DEL is escaped as jq escapes it. Nobody reads this
+ *  line today; the builder and a human may. */
 export function resultSummaryLine(text: string | undefined): string | undefined {
   if (text === undefined) return undefined;
   let doc: unknown;

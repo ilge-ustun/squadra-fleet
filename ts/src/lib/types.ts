@@ -45,15 +45,16 @@ export interface Baseline {
   lint: Colour;
 }
 
-/** One line of launch.sh's MUT_ROWS: "ACn CLASS slug". cls is a string
- *  because NO_SELECTOR, or nothing at all, can arrive from the bash side. */
+/** One mutation row: "ACn CLASS slug". cls is a string, not a
+ *  MutationClass: a row parsed from text (parseMutRows) can carry any word,
+ *  or none. */
 export interface MutRow {
   ac: string;
   cls: string;
   slug: string;
 }
 
-/** One line of PROBE_ROWS: "name CLASS". */
+/** One probe row: "name CLASS". */
 export interface ProbeRow {
   name: string;
   cls: string;

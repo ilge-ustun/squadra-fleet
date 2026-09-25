@@ -1,10 +1,9 @@
-// The bash `trap cleanup EXIT` for a bin: the hooks run once, in order, each
-// failure swallowed (cleanup is best effort, as the trap's was), on SIGTERM,
-// SIGINT or SIGHUP, and the process ends with 128+signal as bash did. The
-// normal-exit and the die path are the caller's `finally`; a signal is the
-// one path a `finally` cannot see, and the one this covers. runSync blocks
-// the event loop, so a signal during a child runs the hooks after the child
-// exits — bash waited for its foreground child before the trap too.
+// A bin's `trap cleanup EXIT`: the hooks run once, in order, each failure
+// swallowed (cleanup is best effort), on SIGTERM, SIGINT or SIGHUP, and the
+// process ends with 128+signal. The normal-exit and the die path are the
+// caller's `finally`; a signal is the one path a `finally` cannot see, and
+// the one this covers. runSync blocks the event loop, so a signal during a
+// child runs the hooks after the child exits.
 import { constants } from 'node:os';
 
 export interface ExitHooks {

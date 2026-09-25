@@ -1,7 +1,7 @@
-// The two agent calls, as launch.sh made them (launch.sh:516-546, 618-644):
-// `claude -p …` for the builder with stdout and stderr merged, `codex exec
-// --json …` for the reviewer with stderr kept as evidence; the prompt on
-// stdin for both (L-18); `timeout -k 30 $AGENT_TIMEOUT` as run()'s timer.
+// The two agent calls: `claude -p …` for the builder with stdout and stderr
+// merged, `codex exec --json …` for the reviewer with stderr kept as
+// evidence; the prompt on stdin for both (L-18); run()'s timer as
+// `timeout -k 30 $AGENT_TIMEOUT`.
 // The CLIs are found on PATH by bare name, which is what lets test/suite.sh's
 // fakes stand in (L-14). This file is the seam a later move to the agent
 // SDKs would replace; nothing else in the launcher knows how an agent is
@@ -37,7 +37,7 @@ export interface AgentCall {
 
 export interface BuilderRun {
   timedOut: boolean;
-  /** stdout and stderr merged, as `2>&1` had them. */
+  /** stdout and stderr merged, in arrival order. */
   output: string;
 }
 
@@ -72,12 +72,12 @@ export async function runReviewer(o: AgentCall & { model: string; stderrFile: st
 }
 
 export interface BuilderOutput {
-  /** BUILD_ERR: jq's `if has("is_error") then (.is_error|tostring) else
+  /** jq's `if has("is_error") then (.is_error|tostring) else
    *  "parse-failed" end` with its stderr dropped — so '' when the output is
    *  not JSON or not an object at all (jq failed and printed nothing),
    *  'parse-failed' for JSON without the key. */
   isError: string;
-  /** BUILD_MSG: `.result // "no result field"` — the alternative fires on
+  /** `.result // "no result field"` — the alternative fires on
    *  null and false (L-03: `//` is not "absent"); a non-string is printed as
    *  jq -r prints it, pretty. '' when jq failed. */
   message: string;
@@ -88,7 +88,7 @@ export interface BuilderOutput {
 
 const jqToString = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v));
 
-/** The rows of launch.sh:535-541 as jq 1.7 evaluated them (each pinned in
+/** BuilderOutput's jq expressions as jq 1.7 evaluates them (each pinned in
  *  agents.test.ts). One shape a single JSON.parse cannot mirror: an object
  *  followed by trailing garbage, where jq parsed the fields and then failed
  *  the pretty print — here the whole text is "not JSON". Unreachable from
@@ -110,19 +110,18 @@ export function parseBuilderOutput(output: string): BuilderOutput {
 }
 
 export interface ReviewerMessages {
-  /** The agent_message texts joined with '\n', trailing newlines stripped
-   *  (REVIEW_TEXT as `$(…)` held it); '' when there was none. */
+  /** The agent_message texts joined with '\n', trailing newlines stripped;
+   *  '' when there was none. */
   text: string;
-  /** What jq printed to stderr on the way — one line per JSON value that is
-   *  not an object, which `.type` cannot index — for the launcher to print
-   *  as bash's unredirected stderr did. */
+  /** jq's error line for each JSON value that is not an object, which
+   *  `.type` cannot index — for the launcher to print to stderr. */
   noise: string[];
 }
 
 const jqType = (v: unknown): string =>
   v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v === 'object' ? 'object' : typeof v;
 
-/** launch.sh:637: per input line, `fromjson? | select(.type=="item.completed"
+/** Per input line, `fromjson? | select(.type=="item.completed"
  *  and .item.type=="agent_message") | .item.text // empty`. A line that is
  *  not JSON is skipped silently (fromjson?); null indexes to null and is
  *  skipped; any other non-object is jq's error line and skipped. */

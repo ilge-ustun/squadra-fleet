@@ -1,7 +1,7 @@
 // A sourced env file — .env.fleet, the bot's token and chat id
-// (telegram.sh:37-39: `set -a; . "$FLEET_HOME/.env.fleet"; set +a`). The
-// file is bash: a value may be quoted or expand, so the one program that
-// can read it is bash, the same way lib/config.ts reads .fleet/config.
+// (`set -a; . "$FLEET_HOME/.env.fleet"; set +a`). The file is bash: a value
+// may be quoted or expand, so the one program that can read it is bash, the
+// same way lib/config.ts reads .fleet/config.
 // The named keys come back as NUL-separated pairs; a key the file leaves
 // unset is absent from the map.
 import { runSync } from './proc.ts';

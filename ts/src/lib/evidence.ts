@@ -1,10 +1,10 @@
-// The round's evidence runs — launch.sh:161-183 (run_mutations) and
-// :239-267 (run_probes). The reviewer proposes mutations and probes as files
-// under round-N/; the harness runs them in the reviewer's clean worktree,
-// through the same classifier a builder's check-mutation.sh uses, and writes
-// a .result beside each. A failure of the machinery — a dirty tree, a runner
-// that could not start — is a RunnerError the launcher turns into two XX
-// lines, as the bash printed the classifier's message and then its own.
+// The round's evidence runs: the mutations and the probes. The reviewer
+// proposes them as files under round-N/; the harness runs them in the
+// reviewer's clean worktree, through the same classifier a builder's
+// `fleet check-mutation` uses, and writes a .result beside each. A failure
+// of the machinery — a dirty tree, a runner that could not start — is a
+// RunnerError the launcher turns into two XX lines: the classifier's
+// message, then its own.
 import { copyFileSync, existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyMutation, findSelector, runSelector as classifierRunSelector, type RunSelectorInput } from '../classifier.ts';
@@ -24,8 +24,7 @@ export class RunnerError extends Error {
 }
 
 /** The .result evidence file: the class on line 1 and, when the mutated run
- *  produced JSON the summary can read, one line of it (seam 2's
- *  `classify --result`; the same file whether written by that verb or here). */
+ *  produced JSON the summary can read, one line of it. */
 export function writeResultFile(path: string, cls: string, mutJsonPath?: string): void {
   const line2 = mutJsonPath === undefined ? undefined : resultSummaryLine(readVitestJson(mutJsonPath));
   writeFileSync(path, `${cls}\n${line2 === undefined ? '' : `${line2}\n`}`);

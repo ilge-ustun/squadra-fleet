@@ -1,14 +1,13 @@
-// The git operations the classifier, status and the launcher need, each a
-// plain call. All take the tree as an absolute path (`git -C`), never the
-// cwd. Where the bash let git's stderr through to the log (a hook's output,
-// `Preparing worktree …`, a fatal), so does the call here; where it dropped
-// it (`push -q 2>/dev/null`, `worktree remove … 2>/dev/null`), so does this.
+// The git operations the harness needs, each a plain call. All take the tree as an absolute path (`git -C`), never the
+// cwd. Some let git's stderr through to the log (a hook's output,
+// `Preparing worktree …`, a fatal); others drop it (`push -q 2>/dev/null`,
+// `worktree remove … 2>/dev/null`).
 import { out } from './log.ts';
 import { runSync, runToFile, type RunResult } from './proc.ts';
 
 /** `git status --porcelain` minus the untracked .review-out/ line: the one
- *  thing a tree under review is allowed to carry (mutation.sh@8fe954a:27). Empty
- *  when clean — and empty on a git error, as the bash `|| true` made it. */
+ *  thing a tree under review is allowed to carry. Empty when clean — and
+ *  empty on a git error. */
 export function porcelain(wt: string): string {
   const r = runSync('git', ['-C', wt, 'status', '--porcelain']);
   if (r.status !== 0) return '';
@@ -32,14 +31,14 @@ export function applyReverse(wt: string, patch: string): number {
 }
 
 /** Back to the committed tree: tracked files reset, untracked swept,
- *  .review-out/ kept (mutation.sh@8fe954a:58). */
+ *  .review-out/ kept. */
 export function checkoutClean(wt: string): void {
   runSync('git', ['-C', wt, 'checkout', '-q', '--', '.']);
   runSync('git', ['-C', wt, 'clean', '-qfd', '-e', '.review-out']);
 }
 
 /** `rev-parse --verify --quiet <ref>`: does this checkout know the ref
- *  (status.sh:70 — origin/<branch> when it exists, else the local one). */
+ *  (status's refOf: origin/<branch> when it exists, else the local one). */
 export function refExists(root: string, ref: string): boolean {
   return runSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', ref]).status === 0;
 }
@@ -55,25 +54,25 @@ export function isAncestor(root: string, a: string, b: string): boolean {
 }
 
 /** `rev-list --count <range>`; 0 when git cannot answer or does not print a
- *  number (status.sh:103-104,173). */
+ *  number. */
 export function revListCount(root: string, range: string): number {
   const r = runSync('git', ['-C', root, 'rev-list', '--count', range]);
   const t = r.stdout.trim();
   return r.status === 0 && /^[0-9]+$/.test(t) ? Number(t) : 0;
 }
 
-// ── the launcher's operations (launch.sh:95-112, 428-449, 573-606) ───────────
+// ── the launcher's operations ────────────────────────────────────────────────
 
-/** `git fetch <remote> --quiet`; the status is returned and, as in the bash,
- *  nobody has to look at it. */
+/** `git fetch <remote> --quiet`; the status is returned and nobody has to
+ *  look at it. */
 export function fetch(root: string, remote: string): number {
   return runSync('git', ['-C', root, 'fetch', remote, '--quiet'], { stderr: 'inherit' }).status;
 }
 
 export type WorktreeAddOptions =
-  | { branch: string }                       // an existing branch (launch.sh:434)
-  | { newBranch: string; startPoint: string } // -b story/<id> origin/<base> (:436)
-  | { detach: string };                      // --detach <sha>, the reviewer's tree (:597)
+  | { branch: string }                       // an existing branch
+  | { newBranch: string; startPoint: string } // -b story/<id> origin/<base>
+  | { detach: string };                      // --detach <sha>, the reviewer's tree
 
 /** `git worktree add …` with stdout dropped (`>/dev/null`) and stderr through. */
 export function worktreeAdd(root: string, path: string, o: WorktreeAddOptions): number {
@@ -82,14 +81,14 @@ export function worktreeAdd(root: string, path: string, o: WorktreeAddOptions): 
 }
 
 /** `git worktree remove <path> --force 2>/dev/null`: both streams dropped,
- *  nothing thrown — cleanup_reviewer runs on every exit. The status is
- *  returned for merge.sh:253, which tells the human when it failed. */
+ *  nothing thrown — the launcher's cleanupReviewer runs on every exit. The
+ *  status is returned for merge.ts, which tells the human when it failed. */
 export function worktreeRemoveForce(root: string, path: string): number {
   return runSync('git', ['-C', root, 'worktree', 'remove', path, '--force']).status;
 }
 
-/** `git merge-base <a> <b>`; '' when git cannot answer (the bash logged
- *  `base ` and went on). */
+/** `git merge-base <a> <b>`; '' when git cannot answer (the launcher logs
+ *  `base ` and goes on). */
 export function mergeBase(root: string, a: string, b: string): string {
   const r = runSync('git', ['-C', root, 'merge-base', a, b], { stderr: 'inherit' });
   return r.status === 0 ? r.stdout.trim() : '';
@@ -100,7 +99,7 @@ export function revParse(root: string, ref: string): string {
   return r.status === 0 ? r.stdout.trim() : '';
 }
 
-/** `git diff --name-only <range>`, trailing newlines stripped as `$(…)` did. */
+/** `git diff --name-only <range>`, trailing newlines stripped. */
 export function diffNameOnly(root: string, range: string): string {
   return runSync('git', ['-C', root, 'diff', '--name-only', range], { stderr: 'inherit' }).stdout.replace(/\n+$/, '');
 }
@@ -127,16 +126,16 @@ export function pushQuiet(root: string): number {
   return runSync('git', ['-C', root, 'push', '-q']).status;
 }
 
-// ── landing's operations (merge.sh, revert.sh, reset.sh — seam 5) ────────────
+// ── landing's operations (merge, revert, reset) ──────────────────────────────
 
-/** `git push -q origin <src>:refs/heads/<dst>`, stderr through (merge.sh:143,205;
- *  revert.sh:57) — the one push whose refusal a human must read. */
+/** `git push -q origin <src>:refs/heads/<dst>`, stderr through — the one push
+ *  whose refusal a human must read. */
 export function pushRef(root: string, src: string, dstBranch: string): number {
   return runSync('git', ['-C', root, 'push', '-q', 'origin', `${src}:refs/heads/${dstBranch}`], { stderr: 'inherit' }).status;
 }
 
-/** `git merge --no-ff <ref> -m <msg> > log 2>&1` in the throwaway worktree
- *  (merge.sh:167): git's whole account goes to the file, nothing to the terminal. */
+/** `git merge --no-ff <ref> -m <msg> > log 2>&1` in the throwaway worktree:
+ *  git's whole account goes to the file, nothing to the terminal. */
 export function mergeNoFf(wt: string, ref: string, msg: string, logFile: string): number {
   return runToFile('git', ['-C', wt, 'merge', '--no-ff', ref, '-m', msg], { logFile });
 }
@@ -146,8 +145,8 @@ export function mergeAbort(wt: string): void {
   runSync('git', ['-C', wt, 'merge', '--abort']);
 }
 
-/** `git revert -m 1 --no-edit <sha> > log 2>&1` (revert.sh:51): -m 1 keeps
- *  the side that was merged into, i.e. the epic without the story. */
+/** `git revert -m 1 --no-edit <sha> > log 2>&1`: -m 1 keeps the side that
+ *  was merged into, i.e. the epic without the story. */
 export function revertMerge(wt: string, sha: string, logFile: string): number {
   return runToFile('git', ['-C', wt, 'revert', '-m', '1', '--no-edit', sha], { logFile });
 }
@@ -157,25 +156,24 @@ export function revertAbort(wt: string): void {
   runSync('git', ['-C', wt, 'revert', '--abort']);
 }
 
-/** `git branch -f <name> <sha> >/dev/null 2>&1` (merge.sh:214, revert.sh:60):
- *  non-zero when the branch is checked out somewhere, which the caller warns about. */
+/** `git branch -f <name> <sha> >/dev/null 2>&1`: non-zero when the branch is
+ *  checked out somewhere, which the caller warns about. */
 export function branchForce(root: string, name: string, sha: string): number {
   return runSync('git', ['-C', root, 'branch', '-f', name, sha]).status;
 }
 
-/** `git branch -D <name> >/dev/null` (reset.sh:77), stderr through. */
+/** `git branch -D <name> >/dev/null`, stderr through. */
 export function branchDelete(root: string, name: string): number {
   return runSync('git', ['-C', root, 'branch', '-D', name], { stderr: 'inherit' }).status;
 }
 
-/** `git worktree prune` (reset.sh:74). */
+/** `git worktree prune`. */
 export function worktreePrune(root: string): void {
   runSync('git', ['-C', root, 'worktree', 'prune'], { stderr: 'inherit' });
 }
 
 /** The `branch refs/heads/…` lines of `git worktree list --porcelain`: every
- *  ref some worktree has checked out (merge.sh:211's `grep -qx "branch …"`);
- *  a detached worktree contributes none. */
+ *  ref some worktree has checked out; a detached worktree contributes none. */
 export function worktreeCheckedOutBranches(root: string): string[] {
   const r = runSync('git', ['-C', root, 'worktree', 'list', '--porcelain']);
   if (r.status !== 0) return [];
@@ -185,19 +183,19 @@ export function worktreeCheckedOutBranches(root: string): string[] {
     .map((l) => l.slice('branch '.length));
 }
 
-/** `git ls-files --error-unmatch -- <path> >/dev/null 2>&1` (reset.sh:93): does
- *  git know the path, so that `add -A` on it cannot fail (L-02). */
+/** `git ls-files --error-unmatch -- <path> >/dev/null 2>&1`: does git know
+ *  the path, so that `add -A` on it cannot fail (L-02). */
 export function lsFilesTracked(root: string, path: string): boolean {
   return runSync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', path]).status === 0;
 }
 
-/** `git add -A -- <path>` (reset.sh:94): stages a deletion as well as a change. */
+/** `git add -A -- <path>`: stages a deletion as well as a change. */
 export function addAll(root: string, path: string): number {
   return runSync('git', ['-C', root, 'add', '-A', '--', path], { stderr: 'inherit' }).status;
 }
 
-/** `git --no-pager log --oneline <range>` (reset.sh:63), trailing newlines
- *  stripped; '' when git cannot answer. */
+/** `git --no-pager log --oneline <range>`, trailing newlines stripped; ''
+ *  when git cannot answer. */
 export function logOneline(root: string, range: string): string {
   const r = runSync('git', ['-C', root, '--no-pager', 'log', '--oneline', range], { stderr: 'inherit' });
   return r.status === 0 ? r.stdout.replace(/\n+$/, '') : '';
@@ -216,38 +214,37 @@ export function mergeFfOnly(root: string, ref: string): number {
   return runSync('git', ['-C', root, 'merge', '-q', '--ff-only', ref]).status;
 }
 
-// ── the queue's operations (run-queue.sh:79-100 — seam 6) ────────────────────
+// ── the queue's operations ───────────────────────────────────────────────────
 
 /** `git rev-parse --abbrev-ref @{u} 2>/dev/null`: the upstream's short name,
- *  '' when there is none (run-queue.sh:81). */
+ *  '' when there is none. */
 export function upstreamBranch(root: string): string {
   const r = runSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']);
   return r.status === 0 ? r.stdout.trim() : '';
 }
 
-/** `git rev-parse --absolute-git-dir 2>/dev/null`, `<root>/.git` on failure
- *  (run-queue.sh:85) — where MERGE_HEAD/rebase-merge would live. */
+/** `git rev-parse --absolute-git-dir 2>/dev/null`, `<root>/.git` on failure:
+ *  where MERGE_HEAD/rebase-merge would live. */
 export function gitDir(root: string): string {
   const r = runSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir']);
   return r.status === 0 ? r.stdout.trim() : `${root}/.git`;
 }
 
-/** `git fetch <remote> 2>/dev/null` (run-queue.sh:90): both streams dropped,
- *  a refresh's fetch failure is a warning, not a die. */
+/** `git fetch <remote> 2>/dev/null`: both streams dropped, a refresh's fetch
+ *  failure is a warning, not a die. */
 export function fetchQuiet(root: string, remote: string): number {
   return runSync('git', ['-C', root, 'fetch', remote]).status;
 }
 
-/** `git merge --no-edit <ref> 2>/dev/null` (run-queue.sh:94): only stderr is
- *  dropped — git's stdout (`Already up to date.`, a merge summary) reaches
- *  ours, as the bash's did. */
+/** `git merge --no-edit <ref> 2>/dev/null`: only stderr is dropped — git's
+ *  stdout (`Already up to date.`, a merge summary) reaches ours. */
 export function mergeNoEditQuiet(root: string, ref: string): number {
   const r = runSync('git', ['-C', root, 'merge', '--no-edit', ref]);
   if (r.stdout !== '') out(r.stdout);
   return r.status;
 }
 
-// ── lint-story's citation walk (lint-story.sh:127-140 — seam 7) ─────────────
+// ── lint-story's citation walk ──────────────────────────────────────────────
 
 /** `git cat-file -e <ref>:<path> 2>/dev/null`: does the path exist as a blob
  *  at that ref — false when the ref itself is unknown, not thrown, matching
@@ -257,25 +254,25 @@ export function catFileExists(root: string, ref: string, path: string): boolean 
 }
 
 /** `git show <ref>:<path> 2>/dev/null | wc -l`: the newline count, not a
- *  split length — a file with no trailing newline is one short, as wc -l
- *  always was; 0 when git cannot answer (missing path or unknown ref). */
+ *  split length — a file with no trailing newline is one short, as with
+ *  wc -l; 0 when git cannot answer (missing path or unknown ref). */
 export function showLineCount(root: string, ref: string, path: string): number {
   const r = runSync('git', ['-C', root, 'show', `${ref}:${path}`]);
   if (r.status !== 0) return 0;
   return (r.stdout.match(/\n/g) ?? []).length;
 }
 
-// ── new-epic's operations (new-epic.sh:36-39 — seam 7) ───────────────────────
+// ── new-epic's operations ────────────────────────────────────────────────────
 
-/** `git fetch -q <remote> <ref>` (new-epic.sh:38): the one fetch that names a
- *  single ref rather than the whole remote — the newly pushed epic, fetched
- *  back so the caller's own checkout knows it. */
+/** `git fetch -q <remote> <ref>`: the one fetch that names a single ref
+ *  rather than the whole remote — the newly pushed epic, fetched back so the
+ *  caller's own checkout knows it. */
 export function fetchRef(root: string, remote: string, ref: string): number {
   return runSync('git', ['-C', root, 'fetch', '-q', remote, ref], { stderr: 'inherit' }).status;
 }
 
-/** `git rev-parse --short <ref> 2>/dev/null` (new-epic.sh:39): the
- *  abbreviated sha for a log line; '' when git cannot answer. */
+/** `git rev-parse --short <ref> 2>/dev/null`: the abbreviated sha for a log
+ *  line; '' when git cannot answer. */
 export function revParseShort(root: string, ref: string): string {
   const r = runSync('git', ['-C', root, 'rev-parse', '--short', ref]);
   return r.status === 0 ? r.stdout.trim() : '';

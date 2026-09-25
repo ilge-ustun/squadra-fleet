@@ -1,7 +1,6 @@
-// The round section of .review/<id>.md — what launch.sh appended with a
-// heredoc at its lines 715-745 — rendered byte for byte. The labels and the
-// separators are exported so the reader that status.sh (seam 3) grows can
-// split the same text this writes.
+// The round section of .review/<id>.md, which the launcher appends. The
+// labels and the separators are exported so the reader, review.ts, splits
+// the same text this writes.
 //
 //   ## Round N — VERDICT            the computed verdict, after any veto
 //   head / commits this round / reviewed
@@ -10,9 +9,8 @@
 //   mutations: / probes: tables     each only when it has rows
 //   ### Builder said / ### Reviewer the two texts, verbatim
 //
-// The renderer takes structured values. Where bash carried a raw string
-// (acs, scope hits) the shape it could produce is reproduced exactly:
-// every id and every hit followed by one space.
+// The renderer takes structured values. In acs and the scope hits, every
+// id and every hit is followed by one space.
 import type { Baseline, MutRow, ProbeRow, Verdict } from './types.ts';
 
 export const MACHINE_HEADING = '### Machine';
@@ -71,7 +69,7 @@ export interface RoundSection {
   reviewerText: Buffer;
 }
 
-/** One line of MUT_ROWS, split as both `awk` and `read -r ac cls slug` split
+/** One mutation row, split as both `awk` and `read -r ac cls slug` split
  *  it: first word, second word, the rest. A missing word is ''. Blank lines
  *  are not rows. */
 export function parseMutRows(text: string): MutRow[] {
@@ -84,7 +82,7 @@ export function parseMutRows(text: string): MutRow[] {
   return rows;
 }
 
-/** One line of PROBE_ROWS: name, class (class may be missing). */
+/** One probe row: name, class (class may be missing). */
 export function parseProbeRows(text: string): ProbeRow[] {
   const rows: ProbeRow[] = [];
   for (const line of text.split('\n')) {

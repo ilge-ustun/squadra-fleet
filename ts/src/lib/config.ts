@@ -1,16 +1,16 @@
 // The target's configuration, as lib.sh loads it. `.fleet/config` is sourced
 // bash — a value may be quoted, may expand, may span lines — so the one
 // program that can read it is bash. load_repo runs in a child bash with the
-// same lib.sh every script sources, and hands the values back as
-// NUL-separated key/value pairs: nothing is quoted, nothing is parsed beyond
-// one split. The environment goes through unchanged, so a variable the
-// caller set still wins over the file (lib.sh:14-15), and FLEET_REGISTRY_DIR
-// and a substituted lib.sh (the FLEET_LIB_OVERRIDE seam) keep working.
+// same lib.sh `fleet` sources, and hands the values back as NUL-separated
+// key/value pairs: nothing is quoted, nothing is parsed beyond one split.
+// The environment goes through unchanged, so a variable the caller set still
+// wins over the file, and FLEET_REGISTRY_DIR and a substituted lib.sh (the
+// FLEET_LIB_OVERRIDE seam) keep working.
 //
 // lib.sh's `die` writes its line to stderr and exits 1. By default the child
-// inherits our stderr, so that line reaches the terminal exactly as it did
-// when the caller was bash; the ConfigError then says only that it was
-// already reported, and a bin exits 1 without a second message.
+// inherits our stderr, so that line reaches the terminal unchanged; the
+// ConfigError then says only that it was already reported, and a bin exits
+// 1 without a second message.
 import { runSync } from './proc.ts';
 
 export type MergeMode = 'direct' | 'pr';
@@ -25,7 +25,7 @@ export interface RepoConfig {
   vitestCmd: string;
   buildCmd: string;
   lintCmd: string;
-  /** `SEED_FILES` split on whitespace, as `read -ra` did; may be empty. */
+  /** `SEED_FILES` split on whitespace; may be empty. */
   seedFiles: string[];
   probeDir: string;
   /** A markdown file relative to the target, rendered into the prompts. */
@@ -52,10 +52,10 @@ export interface LoadOptions {
   captureStderr?: boolean;
 }
 
-// $1 = FLEET_HOME, $2 = the repo name. set -uo pipefail: every bash caller of
-// load_repo runs under it, so a config that reads an unset variable dies here
-// as it dies there. The loop's own status would be that of the last `[[ -v ]]`
-// — PR_CMD, usually unset — hence the explicit exit 0.
+// $1 = FLEET_HOME, $2 = the repo name. set -uo pipefail: a config that reads
+// an unset variable dies here (pinned in config.test.ts). The loop's own
+// status would be that of the last `[[ -v ]]` — PR_CMD, usually unset —
+// hence the explicit exit 0.
 const SCRIPT = [
   'set -uo pipefail',
   'source "$1/bin/lib.sh" || exit 1',
