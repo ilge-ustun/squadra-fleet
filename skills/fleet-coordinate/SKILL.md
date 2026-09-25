@@ -65,8 +65,10 @@ human should run instead.
   started — but the change reaches only the next launch.
 - Never write under `.fleet/` from a story; the harness sources it and
   denies it to builders. Change it only as a deliberate coordinator commit.
-- Never `pkill -f` a pattern; kill by worktree (`procs_in_worktree` in
-  `lib.sh`) or exact name, or the pattern matches your own command line.
+- Never `pkill -f` a pattern; kill by worktree — the processes whose cwd
+  is inside it, listed as in fleet-land's cleanup section; `status.sh`
+  shows `RUNNING` while there are any — or by exact name. A pattern
+  matches your own command line.
 - Commit to the target's integration branch only fleet state: `.stories/`,
   `.review/`, `.blocked/`, `.fleet/`. Product code is the builder's.
 - One task, one commit, with the reason in the message. Show

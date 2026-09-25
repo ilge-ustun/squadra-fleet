@@ -126,7 +126,7 @@ export interface AsyncRunResult {
 /** Run a program with an argument array (no shell), asynchronously, as the
  *  leader of its own process group — so that, like `timeout`, the timeout
  *  reaches every descendant (a fake's `sleep 999`, a real agent's shells)
- *  and none is left in the worktree for procs_in_worktree to find. The
+ *  and none is left in the worktree for procsInWorktree to find. The
  *  result arrives on 'close', when every pipe has drained: a grandchild that
  *  still holds stdout is read to the end, as `$(…)` did. A child that exits
  *  without reading its stdin is a status, not an EPIPE (bash's printf died

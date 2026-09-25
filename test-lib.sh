@@ -995,8 +995,8 @@ case_52_reset() {
 
 # The guard that matters. A launcher mid-round has a live process in the
 # worktree; removing it under the agent loses the round and leaves git holding
-# a worktree that is not there. Red when the procs_in_worktree check is
-# deleted: the reset proceeds and the branch is gone.
+# a worktree that is not there. Red when the liveness check (procsInWorktree)
+# is deleted: the reset proceeds and the branch is gone.
 case_53_reset_refuses_while_live() {
   CASE="53 reset refuses while something is running in the worktree"; fixture c53
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
@@ -1441,8 +1441,8 @@ case_75_merge_epic_refuses_non_epic() {
 
 # Phase F1. Every story got the same builder at the same model: a one-line CSS
 # fix and a service-worker rewrite cost the same. `model:` in the frontmatter
-# is the smallest thing that changes that — story_field and the BUILDER_MODEL
-# seam both already exist.
+# is the smallest thing that changes that — the frontmatter reader and the
+# BUILDER_MODEL seam both already exist.
 #
 # Red when the frontmatter is not consulted: the default model is used for a
 # story that asked for another.

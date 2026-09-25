@@ -27,7 +27,7 @@ export function reviewerArgv(o: { model: string }): string[] {
 
 export interface AgentCall {
   /** The worktree the agent works in: its cwd, which is also how it is
-   *  found later (procs_in_worktree). */
+   *  found later (procsInWorktree). */
   wt: string;
   prompt: string;
   timeoutSec: number;

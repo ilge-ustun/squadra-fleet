@@ -51,8 +51,9 @@ the whole call.
 finds nothing: the worktree path exists only in **cwd**, never in argv.
 **Lesson:** identify processes by what they are doing, not by how they were
 named.
-**Prevention:** by construction — `procs_in_worktree()` scans `/proc/*/cwd`
-with `readlink -f` normalisation. Side benefit: multiplexer-agnostic, so
+**Prevention:** by construction — `procs_in_worktree()` scanned `/proc/*/cwd`
+with `readlink -f` normalisation; `procsInWorktree` in `ts/src/lib/procs.ts`
+does the same since the migration. Side benefit: multiplexer-agnostic, so
 swapping tmux costs nothing.
 
 **Enforced by:** `case_53_reset_refuses_while_live`

@@ -74,8 +74,10 @@ never runs `npm`. The plan: `docs/plans/2026-09-23-typescript-migration.md`.
   the bash launcher never was). `status.sh <repo>` shows what is live.
 - Never run a launcher as a child of an interactive agent session; always
   `setsid nohup bash -c '…' > log 2>&1 < /dev/null &`.
-- Kill by cwd (`procs_in_worktree`) or exact process name, never by a
-  `pkill -f` pattern that can match your own command line.
+- Kill by cwd (the processes whose `/proc/<pid>/cwd` is inside the
+  worktree — `ts/src/lib/procs.ts`, and the loop in the fleet-land skill)
+  or exact process name, never by a `pkill -f` pattern that can match your
+  own command line.
 - Show the `ts/src/launch.ts` diff before applying it.
 - Prefer `die` over `warn` — a warning assumes a human is watching.
 - A check that cannot go red is absent, not weak.

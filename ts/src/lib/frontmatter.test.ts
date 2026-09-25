@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { runSync } from './proc.ts';
 import { deleteFrontmatterField, frontmatterField, recordMergedSha, replaceFrontmatterField, setStoryField, storyField } from './frontmatter.ts';
 
-const FLEET_HOME = join(import.meta.dirname, '../../..');
 
-// lib.sh:91-95, verbatim: the reader every bash script uses.
+// The awk the bash frontmatter_field ran (lib.sh until its retirement),
+// verbatim, kept here as the reader's oracle.
 const AWK =
   'NR==1 && $0!="---" { exit }\n' +
   '/^---$/ { if (++d==2) exit; next }\n' +
@@ -28,7 +28,7 @@ function awk(path: string, key: string): string {
   return r.stdout.replace(/\n$/, '');
 }
 
-describe('frontmatterField — lib.sh:89-96', () => {
+describe('frontmatterField — the bash frontmatter_field, row by row against its awk', () => {
   it.each([
     ['plain', '---\nstatus: ready\nround: 2\n---\n\n# Story 1\n', 'status', 'ready'],
     ['second key', '---\nstatus: ready\nround: 2\n---\n', 'round', '2'],
@@ -70,22 +70,15 @@ describe('frontmatterField — lib.sh:89-96', () => {
   });
 });
 
-// The writer, lib.sh:102-113, sourced in a child bash as the oracle: the
-// same file bytes out for every branch — the key present, absent, present
-// but empty (bash inserts a second line: `story_field | grep -q .` sees
-// nothing), present twice (the first is replaced), no frontmatter (the file
-// is wrapped, trailing newlines collapsed), and a CRLF first line, which
-// neither the writer's grep nor the reader's awk takes for `---`.
-describe('setStoryField — lib.sh:102-113, byte for byte', () => {
-  function bashWrite(text: string, key: string, value: string): string {
-    const root = mkdtempSync(join(dir, 'ssf-sh-'));
-    mkdirSync(join(root, '.stories'));
-    writeFileSync(join(root, '.stories/s.md'), text);
-    const r = runSync('bash', ['-c', 'source "$1/lib.sh"; REPO_ROOT="$2"; set_story_field s "$3" "$4"', '_', FLEET_HOME, root, key, value],
-      { env: { PATH: process.env['PATH'] ?? '', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' } });
-    if (r.status !== 0) throw new Error(`set_story_field: ${r.stderr}`);
-    return readFileSync(join(root, '.stories/s.md'), 'utf8');
-  }
+// The writer the bash set_story_field was. The expected bytes in each row
+// were proven equal to it while it existed (every row ran through both until
+// the bash one was retired, its last caller gone at seam 8): the key
+// present, absent, present but empty (bash inserted a second line: its
+// `story_field | grep -q .` saw nothing), present twice (the first is
+// replaced), no frontmatter (the file is wrapped, trailing newlines
+// collapsed), and a CRLF first line, which neither the writer's grep nor the
+// reader's awk took for `---`.
+describe('setStoryField — the bash set_story_field, byte for byte', () => {
   function tsWrite(text: string, key: string, value: string): string {
     const root = mkdtempSync(join(dir, 'ssf-ts-'));
     mkdirSync(join(root, '.stories'));
@@ -106,7 +99,6 @@ describe('setStoryField — lib.sh:102-113, byte for byte', () => {
     ['round, numeric', '---\nstatus: in_progress\nround: 1\n---\n', 'round', '2', '---\nstatus: in_progress\nround: 2\n---\n'],
   ])('%s', (_name, text, key, value, expected) => {
     expect(tsWrite(text, key, value)).toBe(expected);
-    expect(bashWrite(text, key, value)).toBe(expected);
   });
 
   it('a value sed would expand or choke on is refused here (never reachable: statuses and round numbers only)', () => {

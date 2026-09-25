@@ -2,6 +2,12 @@
 #
 # Nothing here runs on source beyond assignments and function definitions.
 #
+# What is left is what bash still has to do: FLEET_HOME, log/warn/die for the
+# wrappers, and load_repo — a target's .fleet/config is sourced bash, so
+# ts/src/lib/config.ts runs load_repo in a child bash. The frontmatter reader
+# and writer and procs_in_worktree lived here until seam 8 took their last
+# caller; they are ts/src/lib/frontmatter.ts and procs.ts.
+#
 # Where things are. FLEET_HOME is this directory: the scripts, prompts/, the
 # fakes in test/, the registry in repos/. The target repo is never assumed to
 # be the cwd — it is named, looked up in the registry, and checked.
@@ -79,52 +85,4 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
     pr) [[ -n "${PR_CMD:-}" ]] || die ".fleet/config for '$name' says MERGE_MODE=pr but sets no PR_CMD" ;;
     *)  die ".fleet/config for '$name' sets MERGE_MODE=$MERGE_MODE — direct or pr" ;;
   esac
-}
-
-# ── story frontmatter ────────────────────────────────────────────────────────
-#
-# One reader, used by every script; the writer is the launcher's and the
-# bot's. A story's frontmatter is the fleet's state — there is no state file.
-
-frontmatter_field() {                 # frontmatter_field <file> <key>
-  [[ -f "$1" ]] || { echo ""; return; }
-  awk -v k="$2" '
-    NR==1 && $0!="---" { exit }
-    /^---$/ { if (++d==2) exit; next }
-    d==1 && $0 ~ "^"k":" { sub("^"k":[[:space:]]*",""); print; exit }
-  ' "$1"
-}
-
-story_field() {                       # story_field <id> <key>
-  frontmatter_field "$REPO_ROOT/.stories/$1.md" "$2"
-}
-
-set_story_field() {                   # set_story_field <id> <key> <value>
-  local id="$1" k="$2" v="$3" f="$REPO_ROOT/.stories/$1.md"
-  if head -1 "$f" | grep -q '^---$'; then
-    if story_field "$id" "$k" | grep -q .; then
-      sed -i "0,/^$k:.*/s//$k: $v/" "$f"
-    else
-      sed -i "1a $k: $v" "$f"
-    fi
-  else
-    printf -- '---\n%s: %s\n---\n\n%s\n' "$k" "$v" "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
-  fi
-}
-
-# ── liveness ─────────────────────────────────────────────────────────────────
-#
-# L-04: a dead launcher does not stop the work it started, and `in_progress`
-# in the frontmatter can be a stale orphan. The only trustworthy answer is
-# what is actually running in the worktree — found by cwd, because the
-# worktree path appears nowhere in the agents' command lines.
-
-procs_in_worktree() {                 # procs_in_worktree <path> → prints pids
-  local wt p cwd
-  wt="$(readlink -f "$1" 2>/dev/null)" || return 0
-  [[ -n "$wt" ]] || return 0
-  for p in /proc/[0-9]*; do
-    cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
-    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && basename "$p"
-  done
 }

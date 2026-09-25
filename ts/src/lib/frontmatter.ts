@@ -1,5 +1,5 @@
-// A story's frontmatter — the fleet's state; there is no state file
-// (lib.sh:84-87). This is lib.sh:89-96 record by record: nothing unless line
+// A story's frontmatter — the fleet's state; there is no state file. This is
+// the bash frontmatter_field (lib.sh until seam 8) record by record: nothing unless line
 // 1 is exactly `---`; read to the second `---`; the first line starting
 // `key:`; strip the key and the whitespace after it; keep the rest as is,
 // trailing spaces and a carriage return included.
@@ -40,7 +40,7 @@ export function storyField(root: string, id: string, key: string): string {
   return frontmatterField(join(root, '.stories', `${id}.md`), key);
 }
 
-/** `set_story_field <id> <key> <value>` (lib.sh:102-113), byte for byte. Line
+/** The bash `set_story_field <id> <key> <value>`, byte for byte. Line
  *  1 exactly `---` (a `---\r` is not): when the reader finds the key with a
  *  non-empty value, the first `key:` line of the file is replaced; else a
  *  `key: value` line is inserted after line 1 — so a present-but-empty key
