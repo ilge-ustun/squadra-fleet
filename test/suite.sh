@@ -19,11 +19,11 @@
 # Every script is run from $TMP/<case>, never from inside the target: a script
 # that still depends on its cwd being the repo fails here.
 #
-# test/{claude,codex,npm} are put first on PATH; launch.sh resolves
-# `claude` and `codex` by bare name (`command -v`, and the calls at the
-# builder and reviewer steps), so no launcher change is needed for the
-# substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of repo/,
-# exactly as in production (launch.sh: "$REPO_ROOT/../wt-$STORY_ID").
+# test/fakes/{claude,codex,npm} are put first on PATH; the launcher resolves
+# `claude` and `codex` by bare name (`command -v` in ts/src/bin/launch.ts,
+# and the calls in ts/src/lib/agents.ts), so no launcher change is needed
+# for the substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of
+# repo/, exactly as in production (launch.ts: `${root}/../wt-${storyId}`).
 #
 # Observing red. Most cases characterise behaviour the scripts already have,
 # so "see it fail first" means: run the case against a copy with the named
@@ -31,10 +31,7 @@
 # fixture; FLEET_TS_OVERRIDE=<dir> lays a directory over ts/src/, and a case
 # may write a stub straight into the fixture's ts/src/lib/ after `fixture`
 # (cases 106-110, 113). The real scripts are never modified. Each case's
-# comment names the block whose deletion turns it red. (The launcher was
-# bash until seam 4; its override, FLEET_LAUNCH_OVERRIDE, went with it —
-# overriding a four-line wrapper proves nothing. render.sh's own override,
-# FLEET_RENDER_OVERRIDE, went the same way when it retired at seam 7.)
+# comment names the block whose deletion turns it red.
 #
 # Two guards, both learned the expensive way on the first run (17 Sep): the
 # fakes were named fake-claude/fake-codex, so `claude` resolved to the REAL
@@ -112,12 +109,12 @@ copy_fleet() {                        # copy_fleet <src> <dst>
   rm -rf "$2/.env.fleet" "$2/.bot-offset"
 }
 
-# The fake Telegram API (seam 8). The bash bot's curl was shadowed by a fake
-# on PATH; Node's fetch never looks at PATH, so the bot is pointed by
-# TELEGRAM_API_BASE at test/telegram-api.mts on a loopback port instead. One
-# server per fixture, started by the first bot call, stopped when the fixture
-# goes: a detached /merge sends its result after the poll that started it
-# has returned, and that late send must still find the recorder. It reads
+# The fake Telegram API. Node's fetch never looks at PATH, so no fake on PATH
+# can stand in for it; the bot is pointed by TELEGRAM_API_BASE at
+# test/fakes/telegram-api.mts on a loopback port instead. One server per
+# fixture, started by the first bot call, stopped when the fixture goes: a
+# detached /merge sends its result after the poll that started it has
+# returned, and that late send must still find the recorder. It reads
 # $FX/updates.json on every getUpdates — the file `update` writes — so a
 # case may rewrite it between polls.
 api_start() {                         # api_start → API_BASE
@@ -319,7 +316,7 @@ case_4_fail_two_rounds() {
   assert_grep 'fake review, call 1' "$TRACE/claude-prompt-2" "round 1 findings reached round 2"
 }
 
-# L-05. Red when the REVIEW_TEXT-from-file block at startup is deleted:
+# L-05. Red when launch.ts stops reading reviewText from the file at startup:
 # a restart after FAIL then renders the fresh-build prompt and the findings
 # are lost.
 case_5_restart_after_fail() {
@@ -515,7 +512,7 @@ case_25_veto_no_mutation() { veto_case c25 "25 an AC with no mutation vetoes PAS
 case_26_veto_wrong_ac()    { veto_case c26 "26 a mutation for another AC does not cover AC1" 'AC1 has no mutation' FAKE_MUTATIONS=ac2only; }
 
 # Phase 1.5. In-run round 2 must see the Machine block, not only the prose.
-# Red when the REVIEW_TEXT refresh after the round section is deleted.
+# Red when the reviewText refresh after the round section is deleted.
 case_27_round2_gets_machine_facts() {
   CASE="27 round 2 prompt carries the Machine block"; fixture c27
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_VITEST=pass
@@ -548,7 +545,7 @@ case_30_scope_elsewhere()  { scope_case c30 "30 deny names other files → CLEAN
 # Found on the first real run (007, round 1). codex prints "Reading
 # additional input from stdin..." to stderr when stdin is not a TTY — every
 # unattended run. Merged into the JSON stream it made jq abort at line 1;
-# the raw JSONL became REVIEW_TEXT and the VERDICT was UNPARSEABLE. The fake
+# the raw JSONL became the review text and the VERDICT was UNPARSEABLE. The fake
 # now always emits that line, so every reviewer case exercises this; this
 # case names it. Red when stderr is merged back or the filter is strict.
 case_31_codex_stderr_notice() {
@@ -701,7 +698,7 @@ case_38_story_base() {
   assert_grep 'EPIC_MARKER.txt' <(git -C "$REPO" show "origin/epic/test:EPIC_MARKER.txt" >/dev/null 2>&1 && echo EPIC_MARKER.txt) "epic base untouched by the run"
 }
 
-# lint-story.sh — mechanical, no fixture and no launcher needed.
+# fleet lint-story — mechanical, no launcher needed.
 # Red when a check is removed; the false-positive guard is red when the "/"
 # requirement on citations is dropped, which is how the first version of that
 # check behaved: 20 false positives across the real stories, zero findings.
@@ -945,9 +942,9 @@ case_49_install_failure() {
   assert_eq "$(calls claude)" 0 "the builder must not run"
 }
 
-# commit_status returns early when there is nothing staged, so a failure here
+# commitStatus returns early when there is nothing staged, so a failure here
 # is a real one: a hook, a lock, a broken identity. Continuing means the story
-# runs on with its state only in the working tree — invisible to status.sh,
+# runs on with its state only in the working tree — invisible to fleet status,
 # to the queue and to a resumed run after a crash.
 # Red while it is a warn: the run continues with uncommitted state.
 case_50_status_commit_failure() {
@@ -973,7 +970,7 @@ reset_run() {                         # reset_run <args…> → RLOG RRC
   RRC=$?
 }
 
-# Red without reset.sh, and red again if any one of the four steps is
+# Red without ts/src/reset.ts, and red again if any one of the four steps is
 # dropped from it.
 case_52_reset() {
   CASE="52 reset clears a story back to the queue"; fixture c52
@@ -1023,16 +1020,15 @@ case_54_reset_refuses_unmerged() {
   assert_eq "$(field status)" needs_human "and the status is untouched"
 }
 
-# Phase C3. status.sh is the only thing that knows where a story stands, and
-# it knows it by parsing frontmatter and asking git — there is no state file,
-# deliberately: a second source of truth would need keeping in sync with the
-# frontmatter, which is already authoritative. --json gives the same values a
-# shape that the Telegram bot and the merger can consume without re-parsing a
-# terminal table.
+# Phase C3. fleet status is the only thing that knows where a story stands,
+# and it knows it by parsing frontmatter and asking git — there is no state
+# file, deliberately: a second source of truth would need keeping in sync
+# with the frontmatter, which is already authoritative. --json gives the same
+# values a shape a machine can consume without re-parsing a terminal table.
 #
-# Red without --json: status.sh prints its table and jq rejects it.
+# Red without --json: fleet status prints its table and jq rejects it.
 case_55_status_json() {
-  CASE="55 status.sh --json is machine-readable"; fixture c55
+  CASE="55 fleet status --json is machine-readable"; fixture c55
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
   local out; out="$( status_run --json )"
   jq -e . >/dev/null 2>&1 <<< "$out" && ok || fail "output parses as JSON"
@@ -1045,14 +1041,14 @@ case_55_status_json() {
   # One story, still an array: a caller should not need two parsers.
   local one; one="$( status_run --json "$STORY" )"
   assert_eq "$(jq -r 'length' <<< "$one")" 1 "a single story is an array of one"
-  # The table must still be the default — status.sh is read by people too.
+  # The table must still be the default — fleet status is read by people too.
   local table; table="$( status_run )"
   assert_contains "$table" "ID" "the human table is still the default"
 }
 
 # Phase E1. Nothing merged itself in thirteen stories; every merge was a
-# human's. merge.sh is what the queue will call on a computed PASS, so most of
-# its cases are about the refusals — the point is not that it merges, it is
+# human's. fleet merge is what the queue will call on a computed PASS, so most
+# of its cases are about the refusals — the point is not that it merges, it is
 # that it merges only what it should and undoes itself when it is wrong.
 #
 # The post-merge baseline is the check that earns the autonomy: two stories
@@ -1067,7 +1063,7 @@ epic_story() {                        # epic_story <case-name> — a story on an
   sed -i '2a base: epic/test' "$REPO/.stories/$STORY.md"
 }
 
-merge_run() {                         # merge_run [VAR=value…] [-- <merge.sh flags…>] → MLOG MRC
+merge_run() {                         # merge_run [VAR=value…] [-- <fleet merge flags…>] → MLOG MRC
   local -a vars=() flags=(); local a after=0
   for a in "$@"; do
     if [[ "$a" == -- ]]; then after=1; continue; fi
@@ -1086,7 +1082,7 @@ merge_epic() {                        # merge_epic <log> [VAR=value…] → exit
 
 epic_head() { git -C "$REPO" rev-parse "origin/epic/test"; }
 
-# Red without merge.sh, and red again if the push or the frontmatter
+# Red without ts/src/merge.ts, and red again if the push or the frontmatter
 # record is dropped: a merge nobody can see, or one that cannot be reverted.
 case_56_merge() {
   CASE="56 a computed PASS merges into its epic"; epic_story c56
@@ -1104,8 +1100,8 @@ case_56_merge() {
   assert_contains "$(git -C "$REPO" log -1 --format=%s)" "merged" "and recorded as a commit on the integration branch"
   # 24 Sep: wt-020 and wt-025 stayed on disk after their merges; the launcher
   # only printed "when finished: git worktree remove". A merged story's work
-  # is in its epic, and revert.sh works from the recorded sha. Red while the
-  # worktree survives the merge.
+  # is in its epic, and fleet revert works from the recorded sha. Red while
+  # the worktree survives the merge.
   assert_eq "$(test -d "$REPO/../wt-$STORY" && echo present || echo gone)" gone "the story's builder worktree is removed"
   git -C "$REPO" rev-parse --verify --quiet "refs/heads/story/$STORY" >/dev/null && ok \
     || fail "the story's branch stays"
@@ -1226,7 +1222,7 @@ case_62_bot_ignores_strangers() {
   assert_grep 'ignored a message from 999' "$BLOG" "but it is recorded"
 }
 
-# Red when /status stops going through status.sh.
+# Red when /status stops going through fleet status.
 case_63_bot_status() {
   CASE="63 /status answers with the table"; fixture c63
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
@@ -1238,7 +1234,7 @@ case_63_bot_status() {
 }
 
 # The write path: this is what makes a phone a control plane.
-# Red when cmd_promote stops committing: the queue on the next drain sees
+# Red when cmdPromote stops committing: the queue on the next drain sees
 # nothing, because it reads what is committed.
 case_64_bot_promote() {
   CASE="64 /promote puts a story back in the queue"; fixture c64
@@ -1273,8 +1269,9 @@ revert_run() {                        # revert_run → RVLOG RVRC
   RVRC=$?
 }
 
-# Red when the revert, the push or the frontmatter cleanup is dropped: the
-# epic keeps the merge, or status.sh goes on claiming a merge that is undone.
+# Red when the revert, the push or the frontmatter cleanup is dropped:
+# the epic keeps the merge, or fleet status goes on claiming a merge that
+# is undone.
 case_66_revert() {
   CASE="66 revert undoes the merge it recorded"; epic_story c66
   # A builder that changes a file, not an empty commit: reverting a merge that
@@ -1323,9 +1320,9 @@ case_68_bot_revert() {
   assert_contains "$(sent_text)" "reverted" "and the human is told"
 }
 
-# Phase E2. The launcher decides; the queue merges. A hand-run launch.sh never
-# merges anything — that separation is what keeps a debugging session from
-# changing a branch.
+# Phase E2. The launcher decides; the queue merges. A hand-run fleet launch
+# never merges anything — that separation is what keeps a debugging session
+# from changing a branch.
 
 queue_run() {                         # queue_run [VAR=value…] → $FX/queue.log
   : > "$FX/notify.log"
@@ -1402,7 +1399,7 @@ case_72_lessons_name_real_cases() {
 # story → epic and story → develop. An untested path is where the next
 # surprise lives, so it gets the same post-merge baseline and a case.
 #
-# It stays human-run. The queue calls merge.sh with a story id and nothing
+# It stays human-run. The queue calls fleet merge with a story id and nothing
 # else; nothing in the fleet calls --epic.
 case_74_merge_epic_into_integration() {
   CASE="74 an epic merges into the integration branch, with the same baseline"; epic_story c74
@@ -1552,7 +1549,7 @@ case_79_writers_do_not_collide() {
 # thing a human actually decides to merge — was visible nowhere. Red without
 # --epics, and red again if it stops counting what is merged.
 case_80_status_epics() {
-  CASE="80 status.sh --epics says where each epic stands"; epic_story c80
+  CASE="80 fleet status --epics says where each epic stands"; epic_story c80
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
   local out; out="$( status_run --epics )"
   assert_contains "$out" "epic/test" "the epic is listed"
@@ -1563,8 +1560,8 @@ case_80_status_epics() {
   assert_contains "$out" "1 merged" "which changes when one does"
   assert_contains "$out" "ahead" "and says the epic is ahead of the integration branch"
 
-  # 24 Sep: a story may name an epic before new-epic.sh has made it (024 on
-  # epic/search). Status said "in develop", as if it had landed. Red while
+  # 24 Sep: a story may name an epic before fleet new-epic has made it (024
+  # on epic/search). Status said "in develop", as if it had landed. Red while
   # a missing branch reads as landed.
   CASE="80b an epic with no branch yet says so"; fixture c80b draft
   sed -i '2a base: epic/ghost' "$REPO/.stories/$STORY.md"
@@ -1573,7 +1570,7 @@ case_80_status_epics() {
   assert_contains "$out" "fleet new-epic t ghost" "with the command that makes it"
 }
 
-# AC1. Red when the refresh call is deleted from run-queue.sh: the
+# AC1. Red when the refresh call is deleted from ts/src/run-queue.ts: the
 # checkout never learns the story is ready and the queue reports nothing ready.
 # Also red when the refresh is replaced with `git pull --ff-only` (refused on
 # divergence) or with `git reset --hard` (pre-run HEAD is no longer ancestor).
@@ -1621,7 +1618,7 @@ case_44_refresh_fail() {
     && ok || fail "AC2: 'refresh failed' line does not say 'continuing on local state'"
 }
 
-# AC3. Red when run-queue.sh leaves a conflicted merge in place (abort
+# AC3. Red when the queue leaves a conflicted merge in place (abort
 # deleted), when -X theirs resolves it silently (no warning, conflict-file
 # gets origin's version), or when the uncommitted edit is lost.
 case_45_conflict_leaves_local_work() {
@@ -1669,9 +1666,9 @@ case_45_conflict_leaves_local_work() {
   assert_eq "$(field status)" done "AC3: story reached done"
 }
 
-# P1 guard. Red when the MERGE_HEAD guard is removed from run-queue.sh:
+# P1 guard. Red when the MERGE_HEAD guard is removed from ts/src/run-queue.ts:
 # the in-progress merge is aborted and the staged resolution is lost.
-# Uses --max 0 so commit_status never runs and MERGE_HEAD stays set.
+# Uses --max 0 so commitStatus never runs and MERGE_HEAD stays set.
 case_81_existing_merge_preserved() {
   CASE="81 an in-progress merge resolution is not discarded by the refresh"
   fixture c81
@@ -1873,7 +1870,7 @@ case_84_prompts_carry_the_targets_facts() {
 # Red when --all is not understood ("not a repo name"), or when the walk
 # stops at the first repo.
 case_87_queue_all_repos() {
-  CASE="87 run-queue.sh --all drains every registered repo"; fixture c87
+  CASE="87 fleet run-queue --all drains every registered repo"; fixture c87
   # A second target, in its own directory, with its own origin and story 901.
   local U="$FX/two/repo-u"
   mkdir -p "$FX/two"
@@ -1941,7 +1938,7 @@ case_88_suite_env_is_clean() {
 # the INTO column, without the epic line in the default output, and without
 # --bot (usage, exit 2).
 case_90_status_titles_and_landing() {
-  CASE="90 status.sh: title, landing state, INTO, epic summary, --bot"; fixture c90
+  CASE="90 fleet status: title, landing state, INTO, epic summary, --bot"; fixture c90
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   # A second story that has not run, so the table has one line per state.
   sed "s/Story $STORY/Story 901/; 0,/^status:.*/s//status: draft/" "$REPO/.stories/$STORY.md" \
@@ -2025,12 +2022,12 @@ case_93_bot_status_pre() {
   assert_eq "$(api_args | grep -cE "(^|<pre>)9[0-9][0-9] $long\$")" 25 "every title arrived whole on its own line, one opening the second message"
 }
 
-# Plan of 20 Sep. merge.sh refuses the integration branch because the QUEUE
-# must never land anything there. A human's word from a phone is a different
-# thing: --land lifts that one refusal for this invocation. The queue never
-# passes it, so auto-merge stays story → epic. main and master stay refused
-# whatever the flag, and a story that lives on an epic is not landed one by
-# one — its epic is, and the refusal says how.
+# Plan of 20 Sep. fleet merge refuses the integration branch because the
+# QUEUE must never land anything there. A human's word from a phone is a
+# different thing: --land lifts that one refusal for this invocation. The
+# queue never passes it, so auto-merge stays story → epic. main and master
+# stay refused whatever the flag, and a story that lives on an epic is not
+# landed one by one — its epic is, and the refusal says how.
 #
 # Red when --land is unknown or ignored, when it also lifts main, when it lets
 # an epic story skip its epic, or when the queue starts passing it.
@@ -2133,10 +2130,10 @@ EOP
 }
 
 # Plan of 20 Sep. Landing on the integration branch is a human's decision,
-# and the phone is where the human is. /merge <repo> <id> is merge.sh with
-# --land; /merge <repo> epic/<name> is --epic. The script owns every refusal
-# and the reply is what it said, colours stripped — in pr mode that is the
-# request's URL.
+# and the phone is where the human is. /merge <repo> <id> is fleet merge
+# with --land; /merge <repo> epic/<name> is --epic. fleet merge owns every
+# refusal and the reply is what it said, colours stripped — in pr mode that
+# is the request's URL.
 #
 # Red when /merge is an unknown verb, when the story form forgets --land
 # (refused), or when the epic form is not wired.
@@ -2173,17 +2170,17 @@ case_93b_bot_merge() {
 
 # Plan of 20 Sep. An epic was only a branch name a story's base: pointed at,
 # and nothing enforced the name. Now the name is enforced where a story is
-# born: write-story.sh takes --base epic/* only, lint-story.sh accepts a
-# base that is absent, the integration branch, or epic/*, and new-epic.sh
-# is the one way an epic branch comes into being — cut from origin's
-# integration branch and pushed, so the next story can name it.
+# born: fleet write-story takes --base epic/* only, fleet lint-story accepts
+# a base that is absent, the integration branch, or epic/*, and fleet
+# new-epic is the one way an epic branch comes into being — cut from
+# origin's integration branch and pushed, so the next story can name it.
 #
-# Red when write-story.sh accepts feat/x (the branch exists, so the old
-# existence check passes and the agent runs), when lint-story.sh accepts
-# base: feat/x, and when new-epic.sh is missing or accepts a second run or
+# Red when write-story accepts feat/x (the branch exists, so the old
+# existence check passes and the agent runs), when lint-story accepts
+# base: feat/x, and when new-epic is missing or accepts a second run or
 # a name that is not a name.
 case_94_epic_naming() {
-  CASE="94 an epic is named epic/* at creation, and created by new-epic.sh"; fixture c94
+  CASE="94 an epic is named epic/* at creation, and created by fleet new-epic"; fixture c94
   git -C "$REPO" push -q origin base:feat/x
   git -C "$REPO" push -q origin base:epic/test
   local out rc
@@ -2192,7 +2189,7 @@ case_94_epic_naming() {
             bash "$FLEET/fleet" write-story t "$1" "x" --base "$2" 2>&1 )"; rc=$?
   }
   ws 901 feat/x
-  assert_eq "$rc" 1 "write-story.sh refuses a base that is not epic/*"
+  assert_eq "$rc" 1 "write-story refuses a base that is not epic/*"
   assert_contains "$out" "fleet new-epic" "and says how an epic is made"
   assert_eq "$(calls claude)" 0 "before any agent runs"
   ws 902 epic/test
@@ -2216,7 +2213,7 @@ case_94_epic_naming() {
     out="$( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/fleet" new-epic t "$1" 2>&1 )"; rc=$?
   }
   new_epic search
-  assert_eq "$rc" 0 "new-epic.sh creates an epic"
+  assert_eq "$rc" 0 "new-epic creates an epic"
   assert_eq "$(git -C "$REPO" rev-parse --verify --quiet origin/epic/search)" "$(git -C "$REPO" rev-parse origin/base)" \
     "on origin, cut from origin's integration branch"
   assert_contains "$out" "epic/search" "and says so"
@@ -2429,12 +2426,12 @@ case_97_bot_repo_list() {
 
 # A1 (22 Sep). The builder hands its TDD evidence to the verdict and learns
 # one round later whether a patch applied or a selector named a test.
-# check-mutation.sh <repo> <patch…> [--wt <dir>] runs the verdict's own
-# classifier — the same run_selector, the same classes — on the builder's
+# fleet check-mutation <repo> <patch…> [--wt <dir>] runs the verdict's own
+# classifier — the same runSelector, the same classes — on the builder's
 # committed tree, restores with git apply -R, and exits 0 only when every
-# patch is RED. Red while the script does not exist.
+# patch is RED. Red while the command does not exist.
 case_100_check_mutation() {
-  CASE="100 check-mutation.sh classifies like the verdict"; fixture c100
+  CASE="100 fleet check-mutation classifies like the verdict"; fixture c100
   local m="$REPO/.review-out/mutations" before out rc
   mkdir -p "$m"
   printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
@@ -2488,11 +2485,11 @@ case_100_check_mutation() {
   assert_grep 'uncommitted' "$REPO/README.md" "dirty tree: the uncommitted work is untouched"
 }
 
-# A1 (22 Sep). The builder is told, in its rules, to run check-mutation.sh on
-# its own TDD evidence before it finishes — with the repo name rendered in,
-# so the line is runnable as printed. Red while rules.md does not say so.
+# A1 (22 Sep). The builder is told, in its rules, to run fleet check-mutation
+# on its own TDD evidence before it finishes — with the repo name rendered
+# in, so the line is runnable as printed. Red while rules.md does not say so.
 case_101_builder_told_to_check_evidence() {
-  CASE="101 the builder's rules name check-mutation.sh for this repo"; fixture c101
+  CASE="101 the builder's rules name fleet check-mutation for this repo"; fixture c101
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_grep "bash $FLEET/fleet check-mutation t " "$TRACE/claude-prompt-1" "the helper, with this fleet's path and this repo's name"
   assert_grep 'tdd-\*\.patch' "$TRACE/claude-prompt-1" "applied to the builder's own tdd- patches"
@@ -2602,14 +2599,14 @@ case_105_fixture_excludes_node_modules() {
   [[ -d "$dst/.git" || -d "$dst/repos" ]] && fail ".git or repos copied" || ok
 }
 
-# One classifier. The verdict (launch.sh) and a builder's own check
-# (check-mutation.sh) both reach ts/src/lib/vitest-json.ts, the one place a
-# runner's JSON becomes a class. Replace that file with a stub that answers
+# One classifier. The verdict (fleet launch) and a builder's own check
+# (fleet check-mutation) both reach ts/src/lib/vitest-json.ts, the one place
+# a runner's JSON becomes a class. Replace that file with a stub that answers
 # GREEN to everything: a marker mutation the fake runner would catch must
-# then come out GREEN from both, and the veto must follow. Red while either
-# caller still classifies in bash.
+# then come out GREEN from both, and the veto must follow. Red when either
+# caller turns a runner's JSON into a class without vitest-json.ts.
 case_106_one_classifier() {
-  CASE="106 the verdict and check-mutation.sh share one classifier"; fixture c106
+  CASE="106 the verdict and fleet check-mutation share one classifier"; fixture c106
   cat > "$FLEET/ts/src/lib/vitest-json.ts" <<'STUB'
 import type { RunClass } from './types.ts';
 export function classFromVitestJson(_text: string | undefined): RunClass { return 'GREEN'; }
@@ -2623,19 +2620,20 @@ STUB
   printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
           bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
-  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation.sh gives the stub's answer"
+  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation gives the stub's answer"
   assert_eq "$rc" 1 "and exits 1"
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the verdict gives the stub's answer"
   assert_eq "$(review_line 3)" "verdict: FAIL" "and the veto follows"
 }
 
-# A probe's class came from an unchecked $(run_selector …): a runner that
-# failed to start left cls empty, the .result empty, the probe row without a
-# class, and the veto had nothing to look at — a silent PASS marked done.
-# Break the runner for probes only (a probe's selector path carries
-# fleet-probe-; mutations do not) and the launcher must stop, not finish.
-# Red while launch.sh takes run_selector's output without its status.
+# A probe's class is only as good as the run behind it: a runner that failed
+# to start, taken unchecked, would leave the class empty, the .result empty,
+# the probe row without a class, and the veto nothing to look at — a silent
+# PASS marked done. Break the runner for probes only (a probe's selector path
+# carries fleet-probe-; mutations do not) and the launcher must stop, not
+# finish. Red when runProbes (ts/src/lib/evidence.ts) carries on past a
+# runSelector that threw.
 case_107_probe_runner_failure_is_not_a_pass() {
   CASE="107 a failing probe runner stops the round rather than passing it"; fixture c107
   sed -i "s|^export function runBashTo(line: string, o: BashToOptions): number {|&\n  if (line.includes('fleet-probe-')) throw new Error('injected: probe runner failure');|" "$FLEET/ts/src/lib/proc.ts"
@@ -2651,7 +2649,8 @@ case_107_probe_runner_failure_is_not_a_pass() {
 # nothing else; the launcher only carries the answer. Replace that file with
 # a rule that says PASS to everything and a round the real rule would veto
 # (a GREEN mutation under a reviewer PASS) must come out PASS, done, with an
-# empty computed line. Red while launch.sh still vetoes in bash.
+# empty computed line. Red when the launcher vetoes anywhere but
+# ts/src/lib/verdict.ts.
 case_108_one_verdict() {
   CASE="108 the launcher's verdict is computed by ts/src/lib/verdict.ts"; fixture c108
   cat > "$FLEET/ts/src/lib/verdict.ts" <<'STUB'
@@ -2667,15 +2666,16 @@ STUB
   assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the survivor is still in the table"
 }
 
-# One config loader. status.sh (and, from case 110, check-mutation.sh) run
-# as `node ts/src/bin/<x>.ts`, and the only way from there to the target's
-# .fleet/config is ts/src/lib/config.ts — which runs lib.sh's load_repo in a
-# child bash. Replace that module with one that throws and the entry point
-# must fail with its text; a bash status.sh never loads it and would answer
-# as usual. Then, with the real module, the things the wrapper must keep:
-# success is silent on stderr (telegram.sh merges stderr into the reply),
-# load_repo runs before the flag loop (an unknown repo exits 1 even with a
-# bad flag; a bad flag alone exits 2). Red while status.sh is bash.
+# One config loader. fleet status (and, from case 110, fleet check-mutation)
+# run as `node ts/src/bin/<x>.ts`, and the only way from there to the
+# target's .fleet/config is ts/src/lib/config.ts — which runs lib.sh's
+# load_repo in a child bash. Replace that module with one that throws and
+# the entry point must fail with its text. Then, with the real module, the
+# things the entry point must keep: success is silent on stderr (the bot
+# merges stderr into the reply), load_repo runs before the flag loop (an
+# unknown repo exits 1 even with a bad flag; a bad flag alone exits 2). Red
+# when ts/src/bin/status.ts reaches the config other than through
+# ts/src/lib/config.ts: it answers as usual.
 config_stub() {                       # config_stub — ts/src/lib/config.ts that throws on load
   cat > "$FLEET/ts/src/lib/config.ts" <<'STUB'
 export class ConfigError extends Error { readonly alreadyReported = false; }
@@ -2685,11 +2685,11 @@ export function loadRepo(_home: string, _name: string, _o?: unknown): never {
 STUB
 }
 case_109_status_through_the_loader() {
-  CASE="109 status.sh reaches the target through ts/src/lib/config.ts"; fixture c109
+  CASE="109 fleet status reaches the target through ts/src/lib/config.ts"; fixture c109
   config_stub
   local out rc err
   out="$( cd "$FX" && bash "$FLEET/fleet" status t --json 2>&1 )"; rc=$?
-  assert_contains "$out" "fleet-test: config stub reached" "status.sh --json went through the loader"
+  assert_contains "$out" "fleet-test: config stub reached" "status --json went through the loader"
   assert_eq "$rc" 1 "and failed with it"
   fixture c109b
   err="$FX/status.err"
@@ -2703,14 +2703,14 @@ case_109_status_through_the_loader() {
   assert_contains "$out" "unknown repo 'nope'" "lib.sh's own die text reaches the caller"
 }
 
-# The same loader for check-mutation.sh: `node ts/src/bin/mutation.ts check`
-# reaches VITEST_CMD and REPO_ROOT through ts/src/lib/config.ts. With the
-# stub it must fail with the stub's text (a bash check-mutation.sh sources
-# lib.sh and never loads it — it would print RED and exit 0). Then the real
-# thing: a RED run is silent on stderr, and any -flag but --wt is usage,
-# exit 1, as the bash had it. Red while check-mutation.sh is bash.
+# The same loader for fleet check-mutation: `node ts/src/bin/mutation.ts
+# check` reaches VITEST_CMD and REPO_ROOT through ts/src/lib/config.ts. With
+# the stub it must fail with the stub's text. Then the real thing: a RED run
+# is silent on stderr, and any -flag but --wt is usage, exit 1. Red when
+# ts/src/bin/mutation.ts reaches the config other than through
+# ts/src/lib/config.ts: it prints RED and exits 0.
 case_110_check_through_the_loader() {
-  CASE="110 check-mutation.sh reaches the target through ts/src/lib/config.ts"; fixture c110
+  CASE="110 fleet check-mutation reaches the target through ts/src/lib/config.ts"; fixture c110
   local m="$REPO/.review-out/mutations" out rc err
   mutation_patch() {                  # mutation_patch — AC1-tdd-marker.patch and its .test under $m
     mkdir -p "$m"
@@ -2722,7 +2722,7 @@ case_110_check_through_the_loader() {
   mutation_patch; config_stub
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
           bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
-  assert_contains "$out" "fleet-test: config stub reached" "check-mutation.sh went through the loader"
+  assert_contains "$out" "fleet-test: config stub reached" "check-mutation went through the loader"
   assert_eq "$rc" 1 "and failed with it"
   fixture c110b; m="$REPO/.review-out/mutations"; mutation_patch
   err="$FX/check.err"
@@ -2739,14 +2739,12 @@ case_110_check_through_the_loader() {
   assert_contains "$out" "usage: fleet check-mutation" "with the usage"
 }
 
-# Two paths of the builder block no case exercised, characterised before the
-# launcher moves to TypeScript (seam 4) so the move cannot change them. What
-# bash does when `claude` prints something other than its JSON object: jq's
-# `has("is_error")` fails on non-JSON, so BUILD_ERR is EMPTY — not
-# "parse-failed" — the warning does not fire, builder.json keeps the raw text
-# (the `|| printf` fallback), and builder.md is the empty BUILD_MSG. Red when
-# that fallback (launch.sh: `|| printf '%s\n' "$BUILD_OUT" > …/builder.json`)
-# is deleted: builder.json is then empty.
+# Two paths of the builder block. The first: when `claude` prints something
+# other than its JSON object, parseBuilderOutput (ts/src/lib/agents.ts)
+# cannot parse it, so buildErr is EMPTY — not "parse-failed" — the warning
+# does not fire, builder.json keeps the raw text, and builder.md is the empty
+# buildMsg. Red when that fallback (the raw text as the evidence when
+# JSON.parse throws) is deleted: builder.json is then empty.
 case_111_builder_output_not_json() {
   CASE="111 builder output that is not JSON is kept raw, silently"; fixture c111
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
@@ -2756,8 +2754,8 @@ case_111_builder_output_not_json() {
   assert_not_grep 'builder output was not JSON' "$LOG" "the warning is for JSON of the wrong shape, not for non-JSON"
   assert_eq "$(cat "$ev/builder.json")" "not json {" "builder.json holds the raw output"
   assert_contains "$(tracked)" ".review/$STORY/round-1/builder.json" "and is committed"
-  assert_eq "$(stat -c %s "$ev/builder.md")" 1 "builder.md is one empty line (BUILD_MSG is empty)"
-  # The empty BUILD_ERR is visible in the one message that prints it.
+  assert_eq "$(stat -c %s "$ev/builder.md")" 1 "builder.md is one empty line (buildMsg is empty)"
+  # The empty buildErr is visible in the one message that prints it.
   fixture c111n
   run "$STORY" FAKE_BUILDER=nocommit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=garbage
   assert_eq "$RC" 1 "no commit is still the die"
@@ -2765,10 +2763,10 @@ case_111_builder_output_not_json() {
 }
 
 # JSON that is not the CLI's object — no is_error key — is the path the
-# warning was written for: BUILD_ERR is "parse-failed", the first 20 lines
-# are shown, builder.json is jq's pretty print, builder.md says "no result
-# field". Red when the warning block (launch.sh: `if [[ "$BUILD_ERR" ==
-# "parse-failed" ]] … fi`) is deleted.
+# warning was written for: buildErr is "parse-failed", the first 20 lines
+# are shown, builder.json is the pretty print, builder.md says "no result
+# field". Red when the warning block (launch.ts: `if (buildErr ===
+# 'parse-failed') { … }`) is deleted.
 case_111b_builder_output_wrong_shape() {
   CASE="111b builder JSON of the wrong shape is warned about"; fixture c111b
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_BUILDER_OUTPUT=shape
@@ -2783,8 +2781,8 @@ case_111b_builder_output_wrong_shape() {
 
 # The reviewer's stream without any agent_message: the raw JSONL is kept as
 # evidence, reviewer.md carries the placeholder, and the verdict rule reads
-# that placeholder as UNPARSEABLE. Red when the empty-REVIEW_TEXT block
-# (launch.sh: `if [[ -z "$REVIEW_TEXT" ]]; then … fi`) is deleted:
+# that placeholder as UNPARSEABLE. Red when the empty-reviewText block
+# (launch.ts: `if (reviewText === '') { … }`) is deleted:
 # reviewer.raw.jsonl is never written and reviewer.md is an empty line.
 case_112_reviewer_without_a_message() {
   CASE="112 a reviewer that says nothing leaves its raw stream and an UNPARSEABLE round"; fixture c112
@@ -2800,16 +2798,14 @@ case_112_reviewer_without_a_message() {
   assert_eq "$(cat "$ev/reviewer.md")" "(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)" "reviewer.md is the placeholder"
 }
 
-# One loader for the launcher too. launch.sh is `node ts/src/bin/launch.ts`
-# from seam 4 on, and its only way to the target's .fleet/config is
-# ts/src/lib/config.ts. With the stub in place the launcher must fail with
-# the stub's text before any agent runs; a bash launch.sh sources lib.sh,
-# reaches config.ts only through `mutation.ts classify`, whose import the
-# stub satisfies, and would run the story to done. Then the real thing: a
-# PASS run whose log carries no bin-level error and no stack frame. Red
-# while launch.sh is bash.
+# One loader for the launcher too: fleet launch runs ts/src/bin/launch.ts,
+# whose only way to the target's .fleet/config is ts/src/lib/config.ts. With
+# the stub in place the launcher must fail with the stub's text before any
+# agent runs. Then the real thing: a PASS run whose log carries no bin-level
+# error and no stack frame. Red when ts/src/bin/launch.ts reaches the config
+# other than through ts/src/lib/config.ts: it runs the story to done.
 case_113_launch_through_the_loader() {
-  CASE="113 launch.sh reaches the target through ts/src/lib/config.ts"; fixture c113
+  CASE="113 fleet launch reaches the target through ts/src/lib/config.ts"; fixture c113
   config_stub
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
   assert_eq "$RC" 1 "the stub's throw ends the launcher"
@@ -2863,7 +2859,7 @@ case_115_block_records_the_models_used() {
 # stale silently (six stories named claude-opus-5 when opus had moved on);
 # a typo would reach the CLI and die a round in.
 #
-# Red while lint-story.sh does not read model:.
+# Red while fleet lint-story does not read model:.
 case_116_lint_story_model() {
   CASE="116 lint: model: is one of the aliases"; fixture c116
   local d="$FX/lint" out rc m
@@ -2912,11 +2908,11 @@ case_117_update_agents() {
   assert_grep '^npm install -g @openai/codex@latest' "$TRACE/calls" "codex updated to latest"
 }
 
-# Seam 5 (24 Sep). Before merge.sh moves to TypeScript, the paths no case
-# pinned. 118: the two exit-0 "nothing to do" answers and the argv refusals.
-# Red against a copy with the "already merged" test (merge.sh:113) or the
-# "already in base" test (:88) deleted — the second run merges again or
-# dies; and with the flag loop's `-*)` arm deleted, --bogus is an id.
+# 24 Sep. The merge paths no other case pins. 118: the two exit-0 "nothing
+# to do" answers and the argv refusals. Red against a copy of
+# ts/src/merge.ts with the "already merged" test (`if (r.merged)`) or the
+# epic's "already in base" test deleted — the second run merges again or
+# dies; and with parseArgs' `startsWith('-')` arm deleted, --bogus is an id.
 case_118_merge_nothing_to_do_and_usage() {
   CASE="118 a second merge of the same story is nothing to do, exit 0"; epic_story c118
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -2955,7 +2951,7 @@ case_118_merge_nothing_to_do_and_usage() {
 
 # 119: the liveness refusal, the mirror of case 53. A merge while the
 # launcher still runs in the worktree would merge a round in progress. Red
-# when the `live` check (merge.sh:102) is deleted: the merge goes.
+# when the `live` check (merge.ts: `if (r.live)`) is deleted: the merge goes.
 case_119_merge_refuses_while_live() {
   CASE="119 merge refuses while something runs in the story's worktree"; epic_story c119
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -2976,10 +2972,10 @@ case_119_merge_refuses_while_live() {
 
 # 120: the local copy of the base branch. The merge is made on origin's
 # branch in a throwaway worktree; a local branch that is ahead of origin
-# would be silently dropped when the local branch is moved over the result
-# (merge.sh:159-162), so that is refused; otherwise the local branch follows
-# (:214), unless it is checked out, where the human is told (:211). Red when
-# the ancestor check or the branch -f is deleted.
+# would be silently dropped when the local branch is moved over the result,
+# so that is refused; otherwise the local branch follows, unless it is
+# checked out, where the human is told. Red when the ancestor check or the
+# branch -f is deleted.
 case_120_merge_and_the_local_base_branch() {
   CASE="120 merge refuses when the local epic has commits origin does not"; epic_story c120
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -2999,11 +2995,11 @@ case_120_merge_and_the_local_base_branch() {
   assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(field merged)" "local epic/test is at the recorded sha"
   assert_eq "$(git -C "$REPO" rev-parse epic/test)" "$(epic_head)" "which is origin's"
 
-  # 24 Sep, after seam 5. The checkout is on the base (khaita's is on
-  # develop), so the merge is pushed but the local branch cannot be moved
-  # under it; the record was then committed on the stale local base and its
-  # push refused — `git pull --ff-only` failed for the human afterwards.
-  # Now a clean checkout is fast-forwarded to the merge before the record.
+  # 24 Sep. The checkout is on the base (khaita's is on develop), so the
+  # merge is pushed but the local branch cannot be moved under it; the
+  # record was then committed on the stale local base and its push refused
+  # — `git pull --ff-only` failed for the human afterwards. Now a clean
+  # checkout is fast-forwarded to the merge before the record.
   CASE="120c a clean checked-out base is fast-forwarded before the record"; fixture c120c
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
   merge_run -- --land
@@ -3027,8 +3023,8 @@ case_120_merge_and_the_local_base_branch() {
 }
 
 # 121: a story that does not merge cleanly. The merge is aborted, the throwaway
-# worktree removed by the EXIT trap, and nothing is recorded or run. Red when
-# the `merge --abort`/die branch (merge.sh:167-170) or the trap is deleted.
+# worktree removed by the cleanup, and nothing is recorded or run. Red when
+# the mergeAbort/die branch or the cleanup in merge()'s `finally` is deleted.
 case_121_merge_conflict() {
   CASE="121 a story that does not merge cleanly is refused and leaves nothing behind"; epic_story c121
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -3052,7 +3048,7 @@ case_121_merge_conflict() {
 
 # 122: PUSH_STATUS=0, the knob every writer honours. The merge happens on the
 # local branch only; pr mode, which is nothing but a push, refuses. Red when
-# the PUSH_STATUS guards (merge.sh:141, :205, :241) are deleted.
+# the three PUSH_STATUS guards in ts/src/merge.ts are deleted.
 case_122_merge_without_push() {
   CASE="122 PUSH_STATUS=0 merges locally and pushes nothing"; epic_story c122
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -3076,11 +3072,10 @@ case_122_merge_without_push() {
   assert_grep 'PR_CMD failed' "$MLOG" "naming it"
 }
 
-# 123: revert.sh's refusals, none pinned before seam 5. The integration
-# branch is a human's in both directions (revert.sh:34-36); a recorded sha
-# that is not on origin's branch was already reverted or never landed (:46);
-# a revert that does not apply is aborted and the throwaway worktree removed
-# (:51-54). Red when any of the three is deleted.
+# 123: revert's refusals. The integration branch is a human's in both
+# directions; a recorded sha that is not on origin's branch was already
+# reverted or never landed; a revert that does not apply is aborted and the
+# throwaway worktree removed. Red when any of the three is deleted.
 case_123_revert_refusals() {
   CASE="123 revert refuses a story landed on the integration branch"; fixture c123
   run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -3126,11 +3121,11 @@ case_123_revert_refusals() {
   assert_file "$REPO/.runs/$STORY-revert.log" "git's account is in .runs"
 }
 
-# 124: reset.sh's flags and its second run. --draft (reset.sh:37), the two
-# argv refusals (:38-39), a reset of a story that is already clear (:97), and
-# the base fallback to origin's branch when the local one is missing
-# (:59-60). Red when --draft is ignored, an argv arm is deleted, or the
-# fallback is dropped (the unmerged count reads 0 and the branch goes).
+# 124: reset's flags and its second run. --draft, the two argv refusals, a
+# reset of a story that is already clear, and the base fallback to origin's
+# branch when the local one is missing. Red when --draft is ignored, an argv
+# arm is deleted, or the fallback is dropped (the unmerged count reads 0 and
+# the branch goes).
 case_124_reset_flags_and_second_run() {
   CASE="124 --draft puts the story back as a draft"; fixture c124
   reset_run "$STORY" --draft
@@ -3173,15 +3168,15 @@ case_124_reset_flags_and_second_run() {
   git -C "$REPO" show-ref --verify --quiet "refs/heads/story/$STORY" && ok || fail "the branch survives"
 }
 
-# Seam 5. merge.sh is a wrapper over ts/src/bin/merge.ts, which reaches the
-# target through the same loader as the other bins. The stub is red under
-# bash only in epic mode: story mode shelled to status.sh, which already went
-# through the loader. Then two things the port changed: a checkout without
-# .runs/ merges (the bash wrote the merge log before mkdir -p, so a clean
-# merge there read "does not merge cleanly" — red under bash), and a normal
-# merge leaves no bin-level line in the log (case 113's shape).
+# fleet merge runs ts/src/bin/merge.ts, which reaches the target through the
+# same loader as the other bins: with the stub, the merge ends with its text.
+# Then a checkout without .runs/ merges (merge.ts makes .runs/ before git's
+# merge log goes there), and a normal merge leaves no bin-level line in the
+# log (case 113's shape). Red when ts/src/bin/merge.ts reaches the config
+# other than through ts/src/lib/config.ts; red again with the mkdirSync of
+# .runs/ deleted: the merge log cannot be opened and the epic does not land.
 case_125_merge_through_the_loader() {
-  CASE="125 merge.sh reaches the target through ts/src/lib/config.ts"; epic_story c125
+  CASE="125 fleet merge reaches the target through ts/src/lib/config.ts"; epic_story c125
   config_stub
   merge_epic "$FX/merge-epic.log"
   assert_eq "$?" 1 "the stub's throw ends the merge"
@@ -3202,11 +3197,13 @@ case_125_merge_through_the_loader() {
   assert_not_grep 'merge\.ts:' "$MLOG" "nor in the story merge's"
 }
 
-# Seam 5. revert.sh is a wrapper over ts/src/bin/revert.ts. The loader stub
-# is red under bash, which never loaded it; then the real loader through
-# case 66's revert, with no bin-level line in the log.
+# fleet revert runs ts/src/bin/revert.ts, through the same loader: the stub
+# ends a revert with its text; then the real loader through case 66's
+# revert, with no bin-level line in the log. Red when ts/src/bin/revert.ts
+# reaches the config other than through ts/src/lib/config.ts, and red again
+# with revert.ts's mkdirSync of .runs/ deleted.
 case_126_revert_through_the_loader() {
-  CASE="126 revert.sh reaches the target through ts/src/lib/config.ts"; epic_story c126
+  CASE="126 fleet revert reaches the target through ts/src/lib/config.ts"; epic_story c126
   config_stub
   revert_run
   assert_eq "$RVRC" 1 "the stub's throw ends the revert"
@@ -3218,17 +3215,19 @@ case_126_revert_through_the_loader() {
   assert_eq "$MRC" 0 "precondition: merged"
   rm -rf "$REPO/.runs"
   revert_run
-  assert_eq "$RVRC" 0 "reverted, with .runs/ made on the way (the bash never made it here)"
+  assert_eq "$RVRC" 0 "reverted, with .runs/ made on the way"
   assert_file "$REPO/.runs/$STORY-revert.log" "git's account is in .runs"
   assert_not_grep 'revert\.ts:' "$RVLOG" "no bin-level error in the log"
   assert_not_grep '^ +at ' "$RVLOG" "no stack frames"
 }
 
-# Seam 5. reset.sh is a wrapper over ts/src/bin/reset.ts. The loader stub is
-# red under bash, which never loaded it; then case 52's reset through the
-# real loader, with no bin-level line in the log.
+# fleet reset runs ts/src/bin/reset.ts, through the same loader: the stub
+# ends a reset with its text and the story untouched; then case 52's reset
+# through the real loader, with no bin-level line in the log. Red when
+# ts/src/bin/reset.ts reaches the config other than through
+# ts/src/lib/config.ts.
 case_127_reset_through_the_loader() {
-  CASE="127 reset.sh reaches the target through ts/src/lib/config.ts"; fixture c127
+  CASE="127 fleet reset reaches the target through ts/src/lib/config.ts"; fixture c127
   config_stub
   reset_run "$STORY" --force
   assert_eq "$RRC" 1 "the stub's throw ends the reset"
@@ -3244,11 +3243,11 @@ case_127_reset_through_the_loader() {
   assert_not_grep '^ +at ' "$RLOG" "no stack frames"
 }
 
-# Seam 6. run-queue.sh's next_ready always skipped TEMPLATE.md; launch.ts's
-# own nextReady did not (storyFiles() kept the bash glob's non-skipping
-# behaviour). A bare `launch.sh <repo>` picks a story to build when none is
-# named — TEMPLATE.md carrying status: ready is real, not hypothetical
-# (khaita's does). Red today: launch.ts would try to build the template.
+# A bare `fleet launch <repo>` picks a story to build when none is named,
+# through the queue's own choice, nextReady in ts/src/status.ts, which skips
+# TEMPLATE.md — and TEMPLATE.md carrying status: ready is real, not
+# hypothetical (khaita's does). Red when a bare launch picks from launch.ts's
+# storyFiles(), which keeps TEMPLATE.md: it tries to build the template.
 case_128_bare_launch_never_picks_template() {
   CASE="128 a bare launch never picks TEMPLATE.md, ready or not"; fixture c128 draft
   sed -i 's/^status: draft/status: ready/' "$REPO/.stories/TEMPLATE.md"
@@ -3263,10 +3262,9 @@ case_128_bare_launch_never_picks_template() {
   assert_eq "$(frontmatter "$REPO/.stories/TEMPLATE.md" status)" ready "TEMPLATE.md is untouched"
 }
 
-# Seam 6. run-queue.sh's own loop guards, characterised before the port so
-# the TypeScript drain preserves them. Red against a scratch copy with the
-# ceiling check (run-queue.sh:167) blanked: it would run all three stories
-# and never print the ceiling warning.
+# The queue's own loop guards. Red against a scratch copy of
+# ts/src/run-queue.ts with the ceiling (the loop's `n < max`) blanked: it
+# would run all three stories.
 case_129_queue_max_ceiling() {
   CASE="129 --max stops the drain and says so"; fixture c129
   for extra in 901 902; do
@@ -3284,15 +3282,15 @@ case_129_queue_max_ceiling() {
   assert_grep '^  901 done PASS exit=0' "$FX/queue.log" "…in the order they ran"
 }
 
-# Red against a scratch copy with the PREV comparison (run-queue.sh:122)
-# blanked: a story a fake builder leaves `ready` (never reaching a terminal
-# status) would be picked again and again, forever.
+# Red against a scratch copy with the `id === prev` comparison in
+# ts/src/run-queue.ts blanked: a story a fake builder leaves `ready` (never
+# reaching a terminal status) would be picked again and again, forever.
 case_130_queue_same_story_twice_stops() {
   CASE="130 a story ready again without finishing stops the queue, not loops it"; fixture c130
   # FAKE_REVIEWER=NONE: the launcher's own MAX_ROUNDS exhausts to needs_human
   # normally; here the fixture story is put back to `ready` by hand after the
   # launcher returns, standing in for a launcher bug that never reaches a
-  # terminal state — next_ready would pick it right back up.
+  # terminal state — nextReady would pick it right back up.
   mv "$FLEET/fleet" "$FLEET/fleet.real"
   cat > "$FLEET/fleet" <<EOF
 #!/usr/bin/env bash
@@ -3309,7 +3307,7 @@ EOF
   assert_eq "$(calls claude)" 1 "the launcher ran exactly once, not forever"
 }
 
-# refresh_from_origin (run-queue.sh:79-100) never fails the drain: a fetch
+# refreshFromOrigin (ts/src/run-queue.ts) never fails the drain: a fetch
 # failure is a warning, and the story still runs from local state. Red
 # against a scratch copy that lets a fetch failure `die` instead of `warn`.
 case_131_queue_refresh_resilience() {
@@ -3322,13 +3320,10 @@ case_131_queue_refresh_resilience() {
   assert_eq "$(field status)" done "the story still ran"
 }
 
-# No case exercised write-story.sh's full happy path end to end before now —
-# case 94 only characterises the --base validation slice. Seen here against
-# the bash first (proving the fixture and fake wiring are right), then
-# re-run unmodified against the TS port (seam 7): nothing about
-# write-story's behaviour changes, only its implementation.
+# fleet write-story's full happy path, end to end — case 94 only
+# characterises the --base validation slice.
 case_132_write_story_end_to_end() {
-  CASE="132 write-story.sh: worktree, render, agent, copy-back, lint — end to end"; fixture c132
+  CASE="132 fleet write-story: worktree, render, agent, copy-back, lint — end to end"; fixture c132
   git -C "$REPO" push -q origin base:epic/test
   local out rc
 
@@ -3425,11 +3420,11 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point)
 
-# Seam 8. The recorder the TypeScript bot is tested against, checked
-# against itself before any bot case relies on it: a sendMessage with a
-# multi-line text arrives decoded, one field per line, and a getUpdates
-# carries its query string into the call log and answers what
-# $FX/updates.json holds. Red while test/telegram-api.mts is absent.
+# The recorder the bot is tested against, checked against itself before
+# any bot case relies on it: a sendMessage with a multi-line text arrives
+# decoded, one field per line, and a getUpdates carries its query string
+# into the call log and answers what $FX/updates.json holds. Red while
+# test/fakes/telegram-api.mts is absent.
 case_133_telegram_api_fake() {
   CASE="133 the fake Telegram API records what it is sent"; fixture c133
   update 7 42 "/repo"
@@ -3456,12 +3451,11 @@ case_133_telegram_api_fake() {
   assert_eq "$(api_calls | grep -c '^api ')" 2 "two calls in all"
 }
 
-# Seam 8. Two states the bash-era fake curl could not express: Telegram
-# unreachable at all (its FAKE_CURL=fail was never used), and a poll answered with
-# something other than updates. Both are warnings and exit 0 — a bot whose
-# API is gone must say so and end normally, as fleet-bot.service runs it
-# every minute and a failed unit is noise, not information — and neither
-# moves the offset. Red when a failed request is allowed to throw.
+# Two ways the API can fail: Telegram unreachable at all, and a poll
+# answered with something other than updates. Both are warnings and exit 0 —
+# a bot whose API is gone must say so and end normally, as fleet-bot.service
+# runs it every minute and a failed unit is noise, not information — and
+# neither moves the offset. Red when a failed request is allowed to throw.
 case_134_bot_api_unreachable() {
   CASE="134 an unreachable API is a warning, not a failure"; fixture c134
   local rc
@@ -3487,12 +3481,10 @@ case_134_bot_api_unreachable() {
   assert_eq "$(sent)" 0 "nothing was sent"
 }
 
-# Seam 8's one behaviour change, found by the old-vs-new differential: the
-# bash escaped `<` as `<lt;` and `>` as `>gt;` — L-28 again, `&` in a
-# ${var//x/&lt;} replacement is the match under bash 5.2 — so any --pre
-# message with an angle bracket was invalid HTML that Telegram refused,
-# and curl -sS without --fail swallowed the refusal. Red against the bash
-# bot (main before this seam); the port escapes as HTML does.
+# --pre wraps the text in <pre> for Telegram's HTML parse mode, so &, <
+# and > go as &amp;, &lt; and &gt;: a --pre message with an angle bracket
+# left as it is would be invalid HTML that Telegram refuses. Red when the
+# escaping in htmlPre (ts/src/telegram.ts) is deleted.
 case_135_bot_pre_escapes_html() {
   CASE="135 --pre escapes the characters HTML would misread"; fixture c135
   bot send --pre "a & b <c> d"

@@ -3,9 +3,10 @@
 # fleet/test/fakes/codex — stand-in for the real `codex exec --json …` under fleet/test/suite.sh.
 #
 # The launcher invokes `codex` by bare name with the review prompt on stdin
-# (launch.sh: `printf '%s' "$REVIEW_PROMPT" | codex exec --json --sandbox …`),
-# cwd = the reviewer worktree, and keeps only the reviewer's own messages:
-#   fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text
+# (ts/src/lib/agents.ts: `codex exec --json --sandbox danger-full-access
+# [-m <model>]`), cwd = the reviewer worktree, and keeps only the reviewer's
+# own messages (reviewerMessages): the .item.text of each line that is an
+# `item.completed` event whose item is an `agent_message`.
 # The verdict rule then reads `^VERDICT: (PASS|FAIL|SPEC)` from that text.
 #
 #   FAKE_REVIEWER=PASS | FAIL | SPEC   a well-formed verdict line
@@ -44,9 +45,9 @@ set -euo pipefail
 : "${FAKE_REVIEWER:?FAKE_REVIEWER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
 
-# The prompt arrives on stdin (launch.sh pipes it; `codex exec` reads
-# instructions from stdin when no positional prompt is given) or, for older
-# callers, as the last argument.
+# The prompt arrives on stdin (agents.ts passes it as the child's input;
+# `codex exec` reads instructions from stdin when no positional prompt is
+# given) or, for older callers, as the last argument.
 if [[ ! -t 0 ]]; then prompt="$(cat)"; else prompt="${*: -1}"; fi
 echo codex >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^codex$' "$FAKE_TRACE_DIR/calls")"

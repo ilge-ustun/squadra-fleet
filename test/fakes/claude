@@ -3,9 +3,10 @@
 # fleet/test/fakes/claude — stand-in for the real `claude -p …` under fleet/test/suite.sh.
 #
 # The launcher invokes `claude` by bare name with cwd = the builder worktree
-# (launch.sh: `printf '%s' "$BUILD_PROMPT" | claude -p --model … --output-format json`,
-# the prompt on stdin). This script is found first on PATH and does exactly
-# one scripted thing:
+# (ts/src/lib/agents.ts: `claude -p --model … --max-turns … --allowedTools …
+# --output-format json`, the prompt on stdin); fleet write-story makes the
+# same call from its own worktree. This script is found first on PATH and
+# does exactly one scripted thing:
 #
 #   FAKE_BUILDER=commit     one empty commit  (the postcondition the launcher checks)
 #   FAKE_BUILDER=nocommit   nothing
@@ -13,13 +14,14 @@
 #   FAKE_BUILDER=hang       never returns — for the agent-timeout case
 #   FAKE_BUILDER=touch      appends a line to $FAKE_TOUCH and commits it
 #                           (Phase 2: a change the scope check can see)
-#   FAKE_BUILDER=story      writes .stories/$FAKE_STORY_ID.md — write-story.sh's
-#                           postcondition, not the launcher's. Dies loudly if
-#                           .stories/TEMPLATE.md is not already in the cwd (the
-#                           worktree write-story.sh seeds it into). A well-formed
-#                           story unless FAKE_STORY_NOAC=1, which omits the
-#                           Acceptance criteria section — a lint failure the
-#                           caller must still surface.
+#   FAKE_BUILDER=story      writes .stories/$FAKE_STORY_ID.md — fleet
+#                           write-story's postcondition, not the launcher's.
+#                           Dies loudly if .stories/TEMPLATE.md is not already
+#                           in the cwd (the worktree write-story seeds it
+#                           into). A well-formed story unless
+#                           FAKE_STORY_NOAC=1, which omits the Acceptance
+#                           criteria section — a lint failure the caller
+#                           must still surface.
 #
 # Phase 3: FAKE_BUILDER_MUTATIONS makes the builder hand the harness its own
 # TDD evidence — "the test I wrote goes red when the behaviour is removed" —
@@ -48,9 +50,10 @@ set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
 
-# The prompt arrives on stdin (launch.sh pipes it — a 134 KB round-2 prompt
-# exceeded the kernel's per-argument limit on 007's rerun) or, for older
-# callers, as the value after -p. A `-p` followed by another flag has no value.
+# The prompt arrives on stdin (agents.ts passes it as the child's input — a
+# 134 KB round-2 prompt exceeded the kernel's per-argument limit on 007's
+# rerun) or, for older callers, as the value after -p. A `-p` followed by
+# another flag has no value.
 prompt=""
 ARGV=("$@")                           # before the loop below consumes them
 while (($#)); do
