@@ -101,7 +101,7 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
 
 ```
 ~/work/fleet/
-  lib.sh                 FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree
+  lib.sh                 FLEET_HOME, load_repo (the .fleet/config contract), log/warn/die for the wrappers
   launch.sh              the launcher — wrapper over ts/src/bin/launch.ts
   check-mutation.sh      the classifier on a working tree (a builder's, or yours) — wrapper over `mutation.ts check`
   status.sh              what the fleet is doing — wrapper over ts/src/bin/status.ts

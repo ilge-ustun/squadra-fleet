@@ -54,8 +54,15 @@ git -C <target> worktree prune
 bash merge.sh <repo> --epic epic/<name>                       # the human's call; run detached, never inside a session
 ```
 
-Check with `procs_in_worktree` (`lib.sh`) or `ps` that nothing is still
-running in a worktree before removing it.
+Check that nothing is still running in a worktree before removing it.
+`status.sh <repo>` shows `RUNNING` on the story's row while anything is;
+to see the processes, find them by cwd — the worktree path never appears
+in an agent's command line (L-04):
+
+```bash
+wt="$(readlink -f <target>/../wt-<id>)"
+for p in /proc/[0-9]*; do c="$(readlink "$p/cwd" 2>/dev/null)"; [[ "$c" == "$wt" || "$c" == "$wt"/* ]] && echo "${p#/proc/}"; done
+```
 
 ## Undo
 

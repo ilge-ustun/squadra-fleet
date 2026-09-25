@@ -425,7 +425,7 @@ over `warn`. Prompts on stdin, never argv. One task, one commit.
 
 ```
 lib.sh              FLEET_HOME and load_repo (the .fleet/config contract, read by ts/src/lib/config.ts);
-                    the bash frontmatter reader, procs_in_worktree and log/warn/die for the wrappers
+                    log/warn/die for the wrappers. Nothing else: the rest of the harness is ts/
 launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain (wrapper over ts/src/bin/run-queue.ts)
 check-mutation.sh   the verdict's classifier on a working tree (wrapper over mutation.ts check)
 ts/                 the harness: src/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,
