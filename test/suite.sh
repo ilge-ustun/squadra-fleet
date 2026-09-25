@@ -3436,7 +3436,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point case_137_one_launch_per_repo
-       case_138_reap_sees_a_storys_trees)
+       case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3622,6 +3622,28 @@ case_138_reap_sees_a_storys_trees() {
     assert_eq "$(field status)" in_progress "the story is left alone"
     assert_eq "$(git -C "$REPO" log --format=%s | grep -c "^story($STORY): ready")" 0 "no ready commit"
   done
+}
+
+# /promote and /answer leave an in_progress story alone. The status is the
+# launcher's while it runs: /promote wrote `ready` over it unasked, and
+# /answer did the same for any story that had ever been blocked, since
+# .blocked/<id>.md outlives the answer. A story whose launcher died is the
+# reap's to return. Red while cmdPromote and cmdAnswer (ts/src/telegram.ts)
+# do not read the status first.
+case_139_bot_leaves_in_progress_alone() {
+  CASE="139 /promote and /answer refuse an in_progress story"; fixture c139 in_progress
+  mkdir -p "$REPO/.blocked"; printf '# Question\n\nwhich?\n' > "$REPO/.blocked/$STORY.md"
+  git -C "$REPO" add .blocked && git -C "$REPO" commit -qm "fixture: a question once asked"
+  local head; head="$(git -C "$REPO" rev-parse HEAD)"
+  update 139 42 "/promote t $STORY"
+  bot poll
+  assert_eq "$(field status)" in_progress "/promote left the status alone"
+  assert_contains "$(sent_text)" "in_progress" "…and said why"
+  update 140 42 "/answer t $STORY go on"
+  bot poll
+  assert_eq "$(field status)" in_progress "/answer left the status alone"
+  assert_not_grep 'go on' "$REPO/.blocked/$STORY.md" "…and the question file"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "nothing was committed"
 }
 
 for c in "${CASES[@]}"; do
