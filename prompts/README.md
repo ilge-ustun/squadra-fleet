@@ -83,7 +83,7 @@ nothing, or a shell command in a `.test` file), `PATCH_INVALID`,
 .review/<id>.md            summary; `verdict:` on line 3; one section per round,
                            each with a ### Machine block before the prose
 .review/<id>/round-N/      committed with the status
-  baseline/                test.summary.json (jq-trimmed), build.log, lint.log
+  baseline/                test.summary.json (trimmed by ts/src/lib/baseline.ts), build.log, lint.log
   mutations/               the reviewer's files, plus a .result per mutation
   reviewer.md              the reviewer's prose, verbatim
   builder.md               the builder's result message

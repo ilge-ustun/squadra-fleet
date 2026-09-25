@@ -2,7 +2,8 @@
 
 ## What this repo is
 
-`README.md` is the map — read it first. A bash harness that runs an autonomous builder/reviewer loop against **other**
+`README.md` is the map — read it first. A TypeScript harness (`ts/`, run by
+Node behind thin bash entry points) that runs an autonomous builder/reviewer loop against **other**
 repositories: a story is written, a builder agent (Claude Code) implements it in
 a worktree, a reviewer agent (Codex) proposes mutations, and the harness runs
 the baseline, applies every mutation, and computes the verdict itself. The
@@ -48,8 +49,8 @@ bash test-lib.sh blocked    # cases whose name contains "blocked"
 Nothing runs this for you. TDD is mandatory: write the failing case, run it,
 SEE IT FAIL, then change the script. Most cases characterise behaviour the
 scripts already have, so "see it fail" means running the case against a copy
-with the block deleted: `FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE`
-substitute that copy into the fixture; `FLEET_TS_OVERRIDE` lays a directory
+with the block deleted: `FLEET_LIB_OVERRIDE` substitutes a copy of
+`lib.sh` into the fixture; `FLEET_TS_OVERRIDE` lays a directory
 over `ts/src/`, or the case writes a stub into the fixture's `ts/src/lib/`
 after `fixture` (cases 106-110, 113). A case that has never been observed
 red is not a case.

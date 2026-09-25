@@ -1,6 +1,7 @@
 # fleet
 
-An autonomous coding fleet: a bash harness that turns a one-sentence intent
+An autonomous coding fleet: a TypeScript harness, run by Node behind thin
+bash entry points, that turns a one-sentence intent
 into a story, has a builder agent implement it, has a reviewer agent attack
 it, computes the verdict itself, and merges what passes. It runs against
 **other** repositories — its first target is `khaita-app` — and is never a
@@ -45,7 +46,8 @@ promotes a story.
 ## Roles
 
 Three agents run inside the harness, one judgment runs beside it, and the
-harness itself is bash. Each agent is one CLI call on stdin; each is
+harness itself is TypeScript under `ts/`, each `*.sh` a wrapper that execs
+`node ts/src/bin/<name>.ts`. Each agent is one CLI call on stdin; each is
 replaceable at that seam.
 
 | role | runs as | model | does | may not |
@@ -388,9 +390,10 @@ Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `env -i`); its last line is the count. Green before every commit; a case
 that has never been observed red is not a case — a new feature is red
 because it is absent, a characterisation is red by running it against a
-copy with the block deleted (`FLEET_RENDER_OVERRIDE`, `FLEET_LIB_OVERRIDE`;
+copy with the block deleted (`FLEET_LIB_OVERRIDE` substitutes `lib.sh`;
 `FLEET_TS_OVERRIDE` lays a directory over `ts/src/`, or a case writes a stub
-into the fixture's `ts/src/lib/` after `fixture`).
+into the fixture's `ts/src/lib/` after `fixture`). The bot is tested against
+`test/telegram-api.mts`, a fake Bot API that `TELEGRAM_API_BASE` points it at.
 The TypeScript side has its own unit tests beside the code: `cd ts && npm ci
 && npm run check && npm test`, green before every commit too; nothing under
 `ts/` needs `node_modules` at run time, so the live checkout never runs
@@ -402,17 +405,35 @@ while a launcher runs is safe (editing the bash launcher never was). `die`
 over `warn`. Prompts on stdin, never argv. One task, one commit.
 `docs/lessons.md` holds the rest.
 
+## What it runs on
+
+- **Node 24** (`.nvmrc`; the units carry it on `PATH`). Node strips the
+  types as it loads `ts/src/**/*.ts`: no build, no `dist/`, and no runtime
+  dependencies — `npm ci` is for `tsc` and vitest in a worktree only.
+- **bash, git, flock** (util-linux). bash runs the entry wrappers and
+  `lib.sh`'s `load_repo`, because a target's `.fleet/config` is sourced bash
+  and `ts/src/lib/config.ts` reads it through a child bash; `.env.fleet` is
+  read the same way. `lib/lock.ts` takes the fleet lock through `flock`.
+- **The `claude` and `codex` CLIs** on `PATH`, logged in; the agents are
+  spawned from `ts/src/lib/agents.ts`, not through an SDK.
+- **`gh` or `glab`**, logged in, only for a target with `MERGE_MODE=pr`.
+- **jq** only for `test-lib.sh`. Nothing at run time needs `jq` or `curl`
+  any more: the verdict parses JSON in TypeScript and the bot talks to
+  Telegram through `fetch`.
+
 ## Where things are
 
 ```
-lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
+lib.sh              FLEET_HOME and load_repo (the .fleet/config contract, read by ts/src/lib/config.ts);
+                    the bash frontmatter reader, procs_in_worktree and log/warn/die for the wrappers
 launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain (wrapper over ts/src/bin/run-queue.ts)
 check-mutation.sh   the verdict's classifier on a working tree (wrapper over mutation.ts check)
-ts/                 the TypeScript side: src/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,
-                    classifier,status,telegram}.ts, src/lib/{agents,render,baseline,scope,evidence,config,verdict,
-                    machine-block,review,frontmatter,lock,git,proc,die,exit-hooks,telegram-api,env-file}.ts,
-                    src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status,telegram}.ts
-                    — run by node as is, no build
+ts/                 the harness: src/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,
+                    classifier,status,status-views,telegram}.ts — one per command;
+                    src/lib/{agents,render,baseline,scope,evidence,vitest-json,result-summary,verdict,machine-block,
+                    review,frontmatter,config,env-file,lock,git,proc,procs,log,die,exit-hooks,telegram-api,types}.ts;
+                    src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status,
+                    telegram}.ts — the entry points; fixtures/ the status goldens. Run by node as is, no build
 .nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
 write-story.sh      intent → story (wrapper over ts/src/bin/write-story.ts)
 lint-story.sh       mechanical checks against the story's base (wrapper over ts/src/bin/lint-story.ts)
@@ -422,7 +443,8 @@ merge.sh            story → epic, --land, --epic, MERGE_MODE (wrapper over ts/
 revert.sh           undo a story's merge      reset.sh       back to the queue   (wrappers over ts/src/bin/{revert,reset}.ts)
 telegram.sh         send | poll — the notifications and the phone commands (wrapper over ts/src/bin/telegram.ts)
 prompts/            the agents' prompts, README = the verdict contract
-skills/             the coordinator's procedures, linked by install-skills.sh
+skills/             the coordinator's procedures, linked by install-skills.sh (bash)
+update-agents.sh    the weekly CLI update (bash)
 test-lib.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
 systemd/            the two timer pairs       docs/          handoff, lessons, coordinators, trials, plans
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
