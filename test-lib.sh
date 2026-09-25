@@ -27,14 +27,14 @@
 #
 # Observing red. Most cases characterise behaviour the scripts already have,
 # so "see it fail first" means: run the case against a copy with the named
-# block deleted. FLEET_RENDER_OVERRIDE=<file> and FLEET_LIB_OVERRIDE=<file>
-# substitute that copy into the fixture; FLEET_TS_OVERRIDE=<dir> lays a
-# directory over ts/src/, and a case may write a stub straight into the
-# fixture's ts/src/lib/ after `fixture` (cases 106-110, 113). The real
-# scripts are never modified. Each case's comment names the block whose
-# deletion turns it red. (The launcher was bash until seam 4; its override,
-# FLEET_LAUNCH_OVERRIDE, went with it — overriding a four-line wrapper
-# proves nothing.)
+# block deleted. FLEET_LIB_OVERRIDE=<file> substitutes that copy into the
+# fixture; FLEET_TS_OVERRIDE=<dir> lays a directory over ts/src/, and a case
+# may write a stub straight into the fixture's ts/src/lib/ after `fixture`
+# (cases 106-110, 113). The real scripts are never modified. Each case's
+# comment names the block whose deletion turns it red. (The launcher was
+# bash until seam 4; its override, FLEET_LAUNCH_OVERRIDE, went with it —
+# overriding a four-line wrapper proves nothing. render.sh's own override,
+# FLEET_RENDER_OVERRIDE, went the same way when it retired at seam 7.)
 #
 # Two guards, both learned the expensive way on the first run (17 Sep): the
 # fakes were named fake-claude/fake-codex, so `claude` resolved to the REAL
@@ -60,7 +60,6 @@ fi
 # three override seams are the red-observation mechanism and must survive.
 if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
-       FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
        FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
        FLEET_TS_OVERRIDE="${FLEET_TS_OVERRIDE:-}" \
        FLEET_TEST_CLEAN=1 bash "$0" "$@"
@@ -122,7 +121,6 @@ fixture() {                           # fixture <case-name> [story-status] → F
   # copy with a block deleted in place of a script (or, for TypeScript, lay a
   # directory over ts/src/) so a case can be observed red.
   copy_fleet "$FLEET_HOME" "$FLEET"
-  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
   [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
   [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"
   mkdir -p "$FLEET/repos"
@@ -361,47 +359,6 @@ case_9_spec() {
   assert_not_grep 'REJECTED' "$TRACE/claude-prompt-2" "rerun does not render round-2"
 }
 
-# render.sh alone, no fixture. Red when the empty-placeholder check is
-# deleted (a prompt with a gap reaches the agent) or the leftover warning is.
-case_10_render_prompt() {
-  CASE="10 render_prompt guards"
-  local pd="$TMP/prompts" render="${FLEET_RENDER_OVERRIDE:-$FLEET_HOME/render.sh}" out rc
-  mkdir -p "$pd"
-  printf 'id {{STORY_ID}}\n' > "$pd/a.md"
-  printf 'x {{NOPE}}\n'      > "$pd/b.md"
-
-  out="$( ( PROMPTS_DIR="$pd"; STORY_ID=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt a.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 1 "empty placeholder dies"
-  assert_contains "$out" "a.md uses {{STORY_ID}} but STORY_ID is empty" "names the placeholder"
-
-  out="$( ( PROMPTS_DIR="$pd"; STORY_ID=900
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt b.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 0 "unknown placeholder does not die"
-  assert_contains "$out" "unsubstituted in b.md: {{NOPE}}" "unknown placeholder is named"
-
-  # The target's optional rules may be empty; the target's commands may not.
-  printf 'rules {{REPO_RULES}} end\n' > "$pd/c.md"
-  printf 'run {{VITEST_CMD}}\n'       > "$pd/d.md"
-  out="$( ( PROMPTS_DIR="$pd"; REPO_RULES_TEXT=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt c.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 0 "an empty REPO_RULES is legal"
-  assert_not_contains "$out" "unsubstituted" "and is substituted, not left as a gap"
-  assert_contains "$out" "rules  end" "to nothing"
-  out="$( ( PROMPTS_DIR="$pd"; VITEST_CMD=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt d.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 1 "an empty VITEST_CMD dies"
-  assert_contains "$out" "d.md uses {{VITEST_CMD}} but VITEST_CMD is empty" "and is named"
-}
-
-# Phase 1.1. Red when the AC-extraction block before the builder is deleted:
-# a story with no `**ACn` heading then reaches the builder and spends quota
-# on something the runner can never verify. Goes to needs_human, not left
-# ready — a plain die would leave it first in the queue forever.
 case_11_no_acs() {
   CASE="11 story without ACs → needs_human before any agent"; fixture c11
   cat > "$REPO/.stories/$STORY.md" <<'EOF'
@@ -3376,7 +3333,7 @@ case_132_write_story_end_to_end() {
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
-       case_10_render_prompt case_11_no_acs case_12_baseline_test_red
+       case_11_no_acs case_12_baseline_test_red
        case_13_baseline_build_red case_14_baseline_lint_red
        case_15_baseline_notests case_16_reviewer_dirty_tree
        case_17_reviewer_output_copied case_18_mutation_red
