@@ -1,12 +1,9 @@
-// status.ts — what the fleet is doing and what it decided. status.sh is a
-// wrapper over this; every caller (merge.sh, telegram.sh, run-queue.sh, a
-// human over ssh) keeps its command line.
-//
-//   status.ts <repo> [--json|--epics|--bot] [--all] [story-id]
+// fleet status <repo> [--json|--epics|--bot] [--all] [story-id] — what the
+// fleet is doing and what it decided.
 //
 //   <repo>              the epics, then every story of the repo
 //   <repo> 007          one story, with the latest round's machine block
-//   <repo> --json       the same values as JSON, for the bot and merge.sh
+//   <repo> --json       the same values as JSON, for the bot and merge
 //   <repo> --epics      only the epic block — what a human decides to merge
 //   <repo> --bot        the phone form: a <pre> block wraps at ~40 columns
 //                       there, so no table — per story: id and title, then
@@ -18,12 +15,11 @@
 // Read-only: safe to run while a launcher is working. The walk and the
 // landing rule are src/status.ts; the views src/status-views.ts.
 //
-// Exit codes, as the bash had them: the repo is loaded before the flags are
-// read, so an unknown repo is 1 whatever follows; an unknown flag is 2 with
-// the usage on stderr; everything else 0. lib.sh's die line for a bad repo
-// or config reaches stderr from the child bash itself — nothing is added,
-// and on success nothing at all goes to stderr (telegram.sh merges it into
-// the reply).
+// Exit codes: the repo is loaded before the flags are read, so an unknown
+// repo is 1 whatever follows; an unknown flag is 2 with the usage on stderr;
+// everything else 0. lib.sh's die line for a bad repo or config reaches
+// stderr from the child bash itself — nothing is added, and on success
+// nothing at all goes to stderr (the bot merges it into the reply).
 import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';

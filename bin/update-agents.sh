@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# update-agents.sh — bring the two agent CLIs to their newest release.
+# bin/update-agents.sh — bring the two agent CLIs to their newest release.
 #
 # The fleet names models by alias (sonnet, opus, fable; codex's own default),
 # and an alias means "the newest model this CLI knows". Claude Code updates

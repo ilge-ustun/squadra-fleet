@@ -171,7 +171,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
     pushStatus: v('PUSH_STATUS', '1'),
     reviewOnly: v('REVIEW_ONLY', '0'),
     lockWait: num('FLEET_LOCK_WAIT', lockWaitRaw, /^[0-9]+(\.[0-9]+)?$/),
-    notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/telegram.sh send`),
+    notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/fleet telegram send`),
   };
 }
 
@@ -382,7 +382,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         throw new Die(`REPO_RULES ${cfg.repoRules} is not readable in ${root}`);
       }
     }
-    const checkMutation = `bash ${o.fleetHome}/check-mutation.sh ${cfg.name}`;
+    const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables render.sh saw, as the round goes on.
     const state = { rules: '', headSha: '', round: '' };

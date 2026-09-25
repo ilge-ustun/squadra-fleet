@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# install-skills.sh — link skills/<name> into every harness on this machine.
+# bin/install-skills.sh — link skills/<name> into every harness on this machine.
 #
-#   bash install-skills.sh
+#   fleet install-skills
 #
 # The coordinator's procedures live in skills/<name>/SKILL.md, one format
 # two harnesses read. Claude Code loads personal skills from

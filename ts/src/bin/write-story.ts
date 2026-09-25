@@ -1,10 +1,17 @@
-// write-story.ts — the entry point behind write-story.sh (seam 7). What
-// write-story.sh checked before its main body: `claude` on PATH, before even
-// the story id is parsed, as the bash's `command -v claude` did. Exit codes
-// as the bash had them: every die is 1 with an XX line on stderr; a linted
-// draft is 0, one with errors is 1. On SIGTERM, SIGINT or SIGHUP the
-// throwaway worktree is removed and the process ends with 128+signal, as the
-// bash EXIT trap did.
+// fleet write-story <repo> <story-id> "<what you want>" [--base epic/<name>]
+//
+//   fleet write-story khaita 011 "the dark-theme toggle shows a sun, should be a moon" --base epic/ui-polish
+//
+// An intent → a draft story, linted (src/write-story.ts). Authoring a story
+// by hand costs a careful session — read the code, verify every citation,
+// bound each criterion, name its mutation — and that cost, not the supply of
+// ideas, is what limits how much work the fleet can be given. This converts
+// authoring into approving.
+//
+// `claude` must be on PATH before even the story id is parsed. Every die is
+// 1 with an XX line on stderr; a linted draft is 0, one with errors 1. On
+// SIGTERM, SIGINT or SIGHUP the throwaway worktree is removed and the
+// process ends with 128+signal.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

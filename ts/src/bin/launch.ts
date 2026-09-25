@@ -1,12 +1,17 @@
-// launch.ts — the entry point behind launch.sh. What launch.sh did before its
-// main body (launch.sh:44-81): the repo, the two agents on PATH, the four
-// directories; then src/launch.ts. Exit codes as the bash had them: every
-// die is 1 with an XX line on stderr; a finished run, a blocked story, an
-// empty queue and --reap are 0. lib.sh's die line for a bad repo or config
-// reaches stderr from the child bash itself. On SIGTERM, SIGINT or SIGHUP
-// the reviewer worktree is removed and the process ends with 128+signal, as
-// the bash EXIT trap did — the agent's process group is left alone, as bash
-// left it (L-04).
+// fleet launch <repo> [story-id|--reap] — one story through the loop, or
+// --reap to clear the orphans an interrupted run left. The loop — builder,
+// baseline, reviewer, mutations, probes, verdict — is src/launch.ts, which
+// documents the states, the rounds and the verdict contract. Before it, this
+// checks the repo, the two agents on PATH and the four directories.
+//
+// Every die is 1 with an XX line on stderr; a finished run, a blocked story,
+// an empty queue and --reap are 0. lib.sh's die line for a bad repo or
+// config reaches stderr from the child bash itself. On SIGTERM, SIGINT or
+// SIGHUP the reviewer worktree is removed and the process ends with
+// 128+signal; the agent's process group is left alone (L-04).
+//
+// Run it detached, never as a child of an interactive session:
+//   setsid nohup bash -c 'fleet launch <repo> <id>' > log 2>&1 < /dev/null &
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';

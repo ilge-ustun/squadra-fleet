@@ -15,7 +15,7 @@ Type=oneshot
 WorkingDirectory=/home/fleet/work/fleet
 
 # claude lives in ~/.local/bin and codex under nvm, neither of which is on a
-# systemd unit's default PATH. launch.sh resolves both by bare name, so
+# systemd unit's default PATH. The launcher resolves both by bare name, so
 # without this the run dies at "claude not on PATH" — loudly, but pointlessly.
 Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/fleet
@@ -23,7 +23,7 @@ Environment=HOME=/home/fleet
 # Per-agent wall clock. The queue's own ceiling is --max stories, per repo.
 Environment=AGENT_TIMEOUT=1800
 
-ExecStart=/bin/bash /home/fleet/work/fleet/run-queue.sh --all --max 5
+ExecStart=/bin/bash /home/fleet/work/fleet/fleet run-queue --all --max 5
 
 # A full queue is long: several stories, each up to MAX_ROUNDS rounds, each
 # round a builder and a reviewer plus the mutation runs. Generous, because

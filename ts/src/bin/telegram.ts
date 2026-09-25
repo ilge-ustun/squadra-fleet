@@ -1,14 +1,13 @@
-// telegram.ts — the entry point behind telegram.sh (seam 8).
+// fleet telegram send [--pre] "<text>" | poll — the fleet's way of reaching
+// a human, and the human's way of reaching back; src/telegram.ts documents
+// the commands, the configuration and the security model. fleet-bot.timer
+// runs `poll` every minute; the launcher's FLEET_NOTIFY_CMD is `send`.
 //
-//   telegram.sh send [--pre] "<text>"
-//   telegram.sh poll
-//
-// Exit codes as the bash had them: usage is 2; everything else is 0 — a
-// notification that fails, a poll that finds Telegram unreachable, a
-// command that dies, all warn and end normally, because nothing that
-// happens here is part of a verdict. The one exception is a bug in this
-// program itself: an exception nothing caught is an XX line and 1, so the
-// journal shows it rather than a silent 0.
+// Usage is 2; everything else is 0 — a notification that fails, a poll that
+// finds Telegram unreachable, a command that dies, all warn and end
+// normally, because nothing that happens here is part of a verdict. The one
+// exception is a bug in this program itself: an exception nothing caught is
+// an XX line and 1, so the journal shows it rather than a silent 0.
 import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dieMessage } from '../lib/log.ts';

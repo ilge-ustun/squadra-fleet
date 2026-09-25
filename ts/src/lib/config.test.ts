@@ -148,8 +148,8 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
   it('a lib.sh that hands back no value for a required key is an error, not an undefined field', () => {
     // A broken lib.sh (the FLEET_LIB_OVERRIDE seam) must not produce a half config.
     const home = join(dir, 'home');
-    mkdirSync(home);
-    writeFileSync(join(home, 'lib.sh'), 'FLEET_REPO_KEYS=""\nload_repo() { REPO_NAME=$1; REPO_ROOT=/x; }\n');
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    writeFileSync(join(home, 'bin/lib.sh'), 'FLEET_REPO_KEYS=""\nload_repo() { REPO_NAME=$1; REPO_ROOT=/x; }\n');
     expect(() => loadRepo(home, 't', { env: cleanEnv(), captureStderr: true })).toThrow(/handed back no [A-Z_]+/);
   });
 });

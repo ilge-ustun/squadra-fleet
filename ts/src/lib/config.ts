@@ -58,7 +58,7 @@ export interface LoadOptions {
 // — PR_CMD, usually unset — hence the explicit exit 0.
 const SCRIPT = [
   'set -uo pipefail',
-  'source "$1/lib.sh" || exit 1',
+  'source "$1/bin/lib.sh" || exit 1',
   'load_repo "$2" || exit 1',
   'for k in REPO_NAME REPO_ROOT $FLEET_REPO_KEYS; do',
   '  if [[ -v $k ]]; then printf \'%s\\0%s\\0\' "$k" "${!k}"; fi',

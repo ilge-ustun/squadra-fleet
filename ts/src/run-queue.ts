@@ -127,7 +127,7 @@ export function runAll(o: RunAllOptions): number {
   if (repos.length === 0) throw new Die(`no repos registered in ${dir}`);
   for (const name of repos) {
     log(`repo: ${name}`, TAG);
-    runInherit('bash', [`${o.fleetHome}/run-queue.sh`, name, ...o.argv]);
+    runInherit('bash', [`${o.fleetHome}/fleet`, 'run-queue', name, ...o.argv]);
   }
   return 0;
 }
@@ -157,7 +157,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   // anything an orphan. Its exit status is not checked, as the bash never
   // checked it: a die here (a live orphan) does not stop the drain.
   log('reaping orphans from any interrupted run', TAG);
-  runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, '--reap']);
+  runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, '--reap']);
 
   log('refreshing from origin before scan', TAG);
   refreshFromOrigin(root);
@@ -182,7 +182,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     n += 1;
 
     log(`story ${id} (${n} of at most ${max})`, TAG);
-    const rc = runInherit('bash', [`${o.fleetHome}/launch.sh`, cfg.name, id]);
+    const rc = runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, id]);
 
     const status = storyField(root, id, 'status');
     const reviewPath = `${root}/.review/${id}.md`;
@@ -200,7 +200,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
         // Only a COMPUTED PASS merges. merge.ts checks this again and
         // refuses on its own; asking here keeps a FAIL from even reaching it.
         if (verdict === 'PASS' && autoMerge === '1') {
-          if (runInherit('bash', [`${o.fleetHome}/merge.sh`, cfg.name, id]) === 0) {
+          if (runInherit('bash', [`${o.fleetHome}/fleet`, 'merge', cfg.name, id]) === 0) {
             notify(`${cfg.name}/${id} merged → ${base} (computed PASS)\nundo: /revert ${cfg.name} ${id}`);
           } else {
             warn(`${id} passed but did not merge`, TAG);
@@ -236,7 +236,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     for (const r of ran) out(`  ${formatRanLine(r)}\n`);
   }
   out('\n');
-  runInherit('bash', [`${o.fleetHome}/status.sh`, cfg.name]);
+  runInherit('bash', [`${o.fleetHome}/fleet`, 'status', cfg.name]);
 
   return 0;
 }

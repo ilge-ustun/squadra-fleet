@@ -1,6 +1,11 @@
-// new-epic.ts — the entry point behind new-epic.sh (seam 7). Exit codes as
-// the bash had them: every die is 1 with an XX line on stderr; a created
-// epic is 0.
+// fleet new-epic <repo> <name> — origin/epic/<name>, cut from origin's
+// integration branch; src/new-epic.ts. An epic is a branch named epic/<name>
+// that stories are cut from (`base:` in their frontmatter, or write-story
+// --base) and merged into by the queue; it lands on the integration branch
+// when a human says so (fleet merge --epic, or /merge from the phone).
+// Nothing else about an epic is stored anywhere: status derives its state
+// from the branches. Every die is 1 with an XX line on stderr; a created epic
+// is 0.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

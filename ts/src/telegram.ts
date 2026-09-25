@@ -105,12 +105,12 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
 export interface BotDeps {
   io: { log: (msg: string) => void; warn: (msg: string) => void };
   api: { sendMessage: typeof apiSendMessage; getUpdates: typeof apiGetUpdates };
-  /** `bash $FLEET_HOME/<script> <args…>` with both streams captured in
-   *  order-of-arrival's nearest equivalent: stdout, then stderr. */
-  runScript: (script: string, args: readonly string[]) => { status: number; output: string };
-  /** The detached /merge job: `bash $FLEET_HOME/<script> <args…>` under the
-   *  fleet lock, its output sent back by `telegram.sh send --pre`. */
-  spawnDetached: (script: string, args: readonly string[]) => void;
+  /** `bash $FLEET_HOME/fleet <command> <args…>` with both streams captured
+   *  in order-of-arrival's nearest equivalent: stdout, then stderr. */
+  runFleet: (command: string, args: readonly string[]) => { status: number; output: string };
+  /** The detached /merge job: `fleet merge <args…>` under the fleet lock,
+   *  its output sent back by `fleet telegram send --pre`. */
+  spawnDetached: (command: string, args: readonly string[]) => void;
   /** An argv, output discarded; the exit status. */
   runCommand: (argv: readonly string[]) => number;
   /** lib.sh's load_repo, its die text captured so it can be the reply. */
@@ -140,20 +140,20 @@ const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 // the stdio it names, so there is no descriptor to close here.)
 const DETACHED_JOB = [
   'fleet="$1"; lock="$2"; shift 2',
-  'out="$(flock -w 900 "$lock" bash "$fleet/merge.sh" "$@" 2>&1 | sed "s/\\x1b\\[[0-9;]*m//g")"',
-  'bash "$fleet/telegram.sh" send --pre "${out:-(no output)}"',
+  'out="$(flock -w 900 "$lock" bash "$fleet/fleet" merge "$@" 2>&1 | sed "s/\\x1b\\[[0-9;]*m//g")"',
+  'bash "$fleet/fleet" telegram send --pre "${out:-(no output)}"',
 ].join('\n');
 
 export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile: () => string): BotDeps {
   return {
     io: { log: (m) => logLine(m, TAG), warn: (m) => warnLine(m, TAG) },
     api: { sendMessage: apiSendMessage, getUpdates: apiGetUpdates },
-    runScript: (script, args) => {
-      const r = runSync('bash', [join(fleetHome, script), ...args], { env });
+    runFleet: (command, args) => {
+      const r = runSync('bash', [join(fleetHome, 'fleet'), command, ...args], { env });
       return { status: r.status, output: r.stdout + r.stderr };
     },
-    spawnDetached: (script, args) => {
-      if (script !== 'merge.sh') throw new Error(`telegram.ts: no detached job for ${script}`);
+    spawnDetached: (command, args) => {
+      if (command !== 'merge') throw new Error(`telegram.ts: no detached job for ${command}`);
       spawn('bash', ['-c', DETACHED_JOB, '_', fleetHome, lockFile(), ...args], { detached: true, stdio: 'ignore', env }).unref();
     },
     runCommand: (argv) => {
@@ -320,7 +320,7 @@ function cmdRun(c: BotContext): string {
 }
 
 function cmdStatus(c: BotContext, cfg: RepoConfig, all: boolean): string {
-  return c.deps.runScript('status.sh', [cfg.name, '--bot', ...(all ? ['--all'] : [])]).output;
+  return c.deps.runFleet('status', [cfg.name, '--bot', ...(all ? ['--all'] : [])]).output;
 }
 
 function cmdWhy(cfg: RepoConfig, id: string): string {
@@ -357,7 +357,7 @@ function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): st
 // The script owns every refusal; this only reports what it said.
 function cmdRevert(c: BotContext, cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
-  const r = c.deps.runScript('revert.sh', [cfg.name, id]);
+  const r = c.deps.runFleet('revert', [cfg.name, id]);
   const said = stripAnsi(r.output).replace(/\n$/, '');
   const verdict = r.status === 0 ? `${id} reverted` : `${id} was not reverted — see the output above`;
   return said === '' ? verdict : `${said}\n${verdict}`;
@@ -376,7 +376,7 @@ function cmdMerge(c: BotContext, cfg: RepoConfig, what: string): string {
   } else {
     return 'usage: /merge <repo> <id>  (a story based on the integration branch)  |  /merge <repo> epic/<name>';
   }
-  c.deps.spawnDetached('merge.sh', args);
+  c.deps.spawnDetached('merge', args);
   return `merging ${what} — deps, suite, build and lint run first, so give it a few minutes. The result follows on its own.`;
 }
 
