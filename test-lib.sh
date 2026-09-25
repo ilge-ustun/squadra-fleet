@@ -3422,7 +3422,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_126_revert_through_the_loader case_127_reset_through_the_loader
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
-       case_132_write_story_end_to_end case_133_telegram_api_fake)
+       case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html)
 
 # Seam 8. The recorder the TypeScript bot is tested against, checked
 # against itself before any bot case relies on it: a sendMessage with a
@@ -3453,6 +3453,51 @@ case_133_telegram_api_fake() {
   assert_grep '^parse_mode=HTML$' "$TRACE/api-args-1" "the parse mode"
   assert_contains "$(api_calls)" "getUpdates?offset=7" "the poll's query string is in the call log"
   assert_eq "$(api_calls | grep -c '^api ')" 2 "two calls in all"
+}
+
+# Seam 8. Two states test/curl could not express: Telegram unreachable at
+# all (FAKE_CURL=fail existed, no case used it), and a poll answered with
+# something other than updates. Both are warnings and exit 0 — a bot whose
+# API is gone must say so and end normally, as fleet-bot.service runs it
+# every minute and a failed unit is noise, not information — and neither
+# moves the offset. Red when a failed request is allowed to throw.
+case_134_bot_api_unreachable() {
+  CASE="134 an unreachable API is a warning, not a failure"; fixture c134
+  local rc
+  BLOG="$FX/bot.log"
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
+      bash "$FLEET/telegram.sh" send "anyone there" ) > "$BLOG" 2>&1; rc=$?
+  assert_eq "$rc" 0 "send exits 0"
+  assert_grep 'sendMessage failed' "$BLOG" "and says so"
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
+      bash "$FLEET/telegram.sh" poll ) > "$BLOG" 2>&1; rc=$?
+  assert_eq "$rc" 0 "poll exits 0"
+  assert_grep 'getUpdates failed' "$BLOG" "and says so"
+  assert_no_file "$FLEET/.bot-offset" "nothing was acknowledged"
+
+  CASE="134 a poll answered with something other than updates"
+  printf '<html>oops</html>\n' > "$FX/updates.json"
+  bot poll
+  assert_eq "$BRC" 0 "poll exits 0"
+  assert_grep 'getUpdates returned no result' "$BLOG" "and says what it got"
+  assert_no_file "$FLEET/.bot-offset" "nothing was acknowledged"
+  assert_eq "$(sent)" 0 "nothing was sent"
+}
+
+# Seam 8's one behaviour change, found by the old-vs-new differential: the
+# bash escaped `<` as `<lt;` and `>` as `>gt;` — L-28 again, `&` in a
+# ${var//x/&lt;} replacement is the match under bash 5.2 — so any --pre
+# message with an angle bracket was invalid HTML that Telegram refused,
+# and curl -sS without --fail swallowed the refusal. Red against the bash
+# bot (main before this seam); the port escapes as HTML does.
+case_135_bot_pre_escapes_html() {
+  CASE="135 --pre escapes the characters HTML would misread"; fixture c135
+  bot send --pre "a & b <c> d"
+  assert_eq "$BRC" 0 "exit code"
+  assert_eq "$(sent)" 1 "one message"
+  assert_contains "$(sent_text)" "text=<pre>a &amp; b &lt;c&gt; d</pre>" "escaped, then wrapped"
 }
 
 for c in "${CASES[@]}"; do

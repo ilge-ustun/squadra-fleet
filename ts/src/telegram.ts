@@ -161,7 +161,10 @@ export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile:
       if (cmd === undefined) return 1;
       return runSync(cmd, args, { env }).status;
     },
-    loadRepo: (home, name) => loadRepoThroughBash(home, name, { env, captureStderr: true }),
+    // LOG_TAG=bot was a shell variable of the bash bot, seen by lib.sh's die
+    // in the same process; the child bash that runs load_repo needs it in
+    // its environment for the same `XX [bot] …` line.
+    loadRepo: (home, name) => loadRepoThroughBash(home, name, { env: { ...env, LOG_TAG: 'bot' }, captureStderr: true }),
     now: () => new Date(),
   };
 }
