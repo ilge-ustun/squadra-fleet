@@ -376,6 +376,7 @@ Fleet-level, `${X:-default}` in the scripts, set in the caller's environment:
 | `PUSH_STATUS` | 1 | 0 to work offline |
 | `FLEET_NOTIFY_CMD` | `telegram.sh send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `QUEUE_START_CMD` `FLEET_REGISTRY_DIR` | | the lock, how the bot starts a drain, where the registry is |
+| `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 
 Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `../wt-<id>-review` for the reviewer, `../ws-<id>` for the story writer,
@@ -408,9 +409,9 @@ lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_work
 launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain (wrapper over ts/src/bin/run-queue.ts)
 check-mutation.sh   the verdict's classifier on a working tree (wrapper over mutation.ts check)
 ts/                 the TypeScript side: src/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,
-                    classifier,status}.ts, src/lib/{agents,render,baseline,scope,evidence,config,verdict,
-                    machine-block,review,frontmatter,lock,git,proc,die,exit-hooks}.ts,
-                    src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status}.ts
+                    classifier,status,telegram}.ts, src/lib/{agents,render,baseline,scope,evidence,config,verdict,
+                    machine-block,review,frontmatter,lock,git,proc,die,exit-hooks,telegram-api,env-file}.ts,
+                    src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status,telegram}.ts
                     — run by node as is, no build
 .nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
 write-story.sh      intent → story (wrapper over ts/src/bin/write-story.ts)
@@ -419,7 +420,7 @@ new-epic.sh         an epic branch (wrapper over ts/src/bin/new-epic.ts)
 status.sh           what the fleet is doing (wrapper over ts/src/bin/status.ts)
 merge.sh            story → epic, --land, --epic, MERGE_MODE (wrapper over ts/src/bin/merge.ts)
 revert.sh           undo a story's merge      reset.sh       back to the queue   (wrappers over ts/src/bin/{revert,reset}.ts)
-telegram.sh         send | poll — the notifications and the phone commands, bash still (prompts render via ts/src/lib/render.ts)
+telegram.sh         send | poll — the notifications and the phone commands (wrapper over ts/src/bin/telegram.ts)
 prompts/            the agents' prompts, README = the verdict contract
 skills/             the coordinator's procedures, linked by install-skills.sh
 test-lib.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
