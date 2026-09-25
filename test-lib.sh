@@ -27,14 +27,14 @@
 #
 # Observing red. Most cases characterise behaviour the scripts already have,
 # so "see it fail first" means: run the case against a copy with the named
-# block deleted. FLEET_RENDER_OVERRIDE=<file> and FLEET_LIB_OVERRIDE=<file>
-# substitute that copy into the fixture; FLEET_TS_OVERRIDE=<dir> lays a
-# directory over ts/src/, and a case may write a stub straight into the
-# fixture's ts/src/lib/ after `fixture` (cases 106-110, 113). The real
-# scripts are never modified. Each case's comment names the block whose
-# deletion turns it red. (The launcher was bash until seam 4; its override,
-# FLEET_LAUNCH_OVERRIDE, went with it — overriding a four-line wrapper
-# proves nothing.)
+# block deleted. FLEET_LIB_OVERRIDE=<file> substitutes that copy into the
+# fixture; FLEET_TS_OVERRIDE=<dir> lays a directory over ts/src/, and a case
+# may write a stub straight into the fixture's ts/src/lib/ after `fixture`
+# (cases 106-110, 113). The real scripts are never modified. Each case's
+# comment names the block whose deletion turns it red. (The launcher was
+# bash until seam 4; its override, FLEET_LAUNCH_OVERRIDE, went with it —
+# overriding a four-line wrapper proves nothing. render.sh's own override,
+# FLEET_RENDER_OVERRIDE, went the same way when it retired at seam 7.)
 #
 # Two guards, both learned the expensive way on the first run (17 Sep): the
 # fakes were named fake-claude/fake-codex, so `claude` resolved to the REAL
@@ -60,7 +60,6 @@ fi
 # three override seams are the red-observation mechanism and must survive.
 if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}" \
-       FLEET_RENDER_OVERRIDE="${FLEET_RENDER_OVERRIDE:-}" \
        FLEET_LIB_OVERRIDE="${FLEET_LIB_OVERRIDE:-}" \
        FLEET_TS_OVERRIDE="${FLEET_TS_OVERRIDE:-}" \
        FLEET_TEST_CLEAN=1 bash "$0" "$@"
@@ -122,7 +121,6 @@ fixture() {                           # fixture <case-name> [story-status] → F
   # copy with a block deleted in place of a script (or, for TypeScript, lay a
   # directory over ts/src/) so a case can be observed red.
   copy_fleet "$FLEET_HOME" "$FLEET"
-  [[ -n "${FLEET_RENDER_OVERRIDE:-}" ]] && cp "$FLEET_RENDER_OVERRIDE" "$FLEET/render.sh"
   [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
   [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"
   mkdir -p "$FLEET/repos"
@@ -361,47 +359,6 @@ case_9_spec() {
   assert_not_grep 'REJECTED' "$TRACE/claude-prompt-2" "rerun does not render round-2"
 }
 
-# render.sh alone, no fixture. Red when the empty-placeholder check is
-# deleted (a prompt with a gap reaches the agent) or the leftover warning is.
-case_10_render_prompt() {
-  CASE="10 render_prompt guards"
-  local pd="$TMP/prompts" render="${FLEET_RENDER_OVERRIDE:-$FLEET_HOME/render.sh}" out rc
-  mkdir -p "$pd"
-  printf 'id {{STORY_ID}}\n' > "$pd/a.md"
-  printf 'x {{NOPE}}\n'      > "$pd/b.md"
-
-  out="$( ( PROMPTS_DIR="$pd"; STORY_ID=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt a.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 1 "empty placeholder dies"
-  assert_contains "$out" "a.md uses {{STORY_ID}} but STORY_ID is empty" "names the placeholder"
-
-  out="$( ( PROMPTS_DIR="$pd"; STORY_ID=900
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt b.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 0 "unknown placeholder does not die"
-  assert_contains "$out" "unsubstituted in b.md: {{NOPE}}" "unknown placeholder is named"
-
-  # The target's optional rules may be empty; the target's commands may not.
-  printf 'rules {{REPO_RULES}} end\n' > "$pd/c.md"
-  printf 'run {{VITEST_CMD}}\n'       > "$pd/d.md"
-  out="$( ( PROMPTS_DIR="$pd"; REPO_RULES_TEXT=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt c.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 0 "an empty REPO_RULES is legal"
-  assert_not_contains "$out" "unsubstituted" "and is substituted, not left as a gap"
-  assert_contains "$out" "rules  end" "to nothing"
-  out="$( ( PROMPTS_DIR="$pd"; VITEST_CMD=""
-            die(){ echo "XX $1" >&2; exit 1; }; warn(){ echo "!! $1"; }
-            source "$render"; render_prompt d.md ) 2>&1 )"; rc=$?
-  assert_eq "$rc" 1 "an empty VITEST_CMD dies"
-  assert_contains "$out" "d.md uses {{VITEST_CMD}} but VITEST_CMD is empty" "and is named"
-}
-
-# Phase 1.1. Red when the AC-extraction block before the builder is deleted:
-# a story with no `**ACn` heading then reaches the builder and spends quota
-# on something the runner can never verify. Goes to needs_human, not left
-# ready — a plain die would leave it first in the queue forever.
 case_11_no_acs() {
   CASE="11 story without ACs → needs_human before any agent"; fixture c11
   cat > "$REPO/.stories/$STORY.md" <<'EOF'
@@ -3332,10 +3289,51 @@ case_131_queue_refresh_resilience() {
   assert_eq "$(field status)" done "the story still ran"
 }
 
+# No case exercised write-story.sh's full happy path end to end before now —
+# case 94 only characterises the --base validation slice. Seen here against
+# the bash first (proving the fixture and fake wiring are right), then
+# re-run unmodified against the TS port (seam 7): nothing about
+# write-story's behaviour changes, only its implementation.
+case_132_write_story_end_to_end() {
+  CASE="132 write-story.sh: worktree, render, agent, copy-back, lint — end to end"; fixture c132
+  git -C "$REPO" push -q origin base:epic/test
+  local out rc
+
+  write() {                          # write <id> <intent> [VAR=value...] → out rc
+    local id="$1" intent="$2"; shift 2
+    out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$id" "$@" \
+            bash "$FLEET/write-story.sh" t "$id" "$intent" --base epic/test 2>&1 )"; rc=$?
+  }
+
+  write 950 "the moon toggle should show a moon" FAKE_BUILDER=story
+  assert_eq "$rc" 0 "a well-formed draft lints clean and the command succeeds"
+  assert_contains "$out" "draft ready" "and says so"
+  assert_eq "$(calls claude)" 1 "one agent call"
+  assert_grep '^--allowedTools$' "$TRACE/claude-args-1" "the writer's own tool list"
+  assert_grep '^Read,Grep,Glob,Bash,Write$' "$TRACE/claude-args-1" "not the launcher's — no Edit"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "950" "the id was rendered in"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "the moon toggle should show a moon" "so was the intent"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "epic/test" "and the base"
+  assert_not_contains "$(cat "$TRACE/claude-prompt-1")" "{{" "nothing left unsubstituted"
+  assert_eq "$(frontmatter "$REPO/.stories/950.md" status)" draft "the copied-back story is a draft"
+  [[ -d "$REPO/../ws-950" ]] && fail "worktree left behind" || ok
+
+  write 951 "x" FAKE_BUILDER=nocommit
+  assert_eq "$rc" 1 "no story written is a failure"
+  assert_contains "$out" "no story was written" "and says so"
+  [[ -e "$REPO/.stories/951.md" ]] && fail "951.md exists but should not" || ok
+  [[ -d "$REPO/../ws-951" ]] && fail "worktree left behind after failure" || ok
+
+  write 952 "x" FAKE_BUILDER=story FAKE_STORY_NOAC=1
+  assert_eq "$rc" 1 "a draft with lint errors fails the command"
+  assert_contains "$out" "the draft has errors above" "and says so"
+  assert_eq "$(frontmatter "$REPO/.stories/952.md" status)" draft "but is still copied back for a human to fix"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
-       case_10_render_prompt case_11_no_acs case_12_baseline_test_red
+       case_11_no_acs case_12_baseline_test_red
        case_13_baseline_build_red case_14_baseline_lint_red
        case_15_baseline_notests case_16_reviewer_dirty_tree
        case_17_reviewer_output_copied case_18_mutation_red
@@ -3390,7 +3388,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_124_reset_flags_and_second_run case_125_merge_through_the_loader
        case_126_revert_through_the_loader case_127_reset_through_the_loader
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
-       case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience)
+       case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
+       case_132_write_story_end_to_end)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

@@ -246,3 +246,37 @@ export function mergeNoEditQuiet(root: string, ref: string): number {
   if (r.stdout !== '') out(r.stdout);
   return r.status;
 }
+
+// ── lint-story's citation walk (lint-story.sh:127-140 — seam 7) ─────────────
+
+/** `git cat-file -e <ref>:<path> 2>/dev/null`: does the path exist as a blob
+ *  at that ref — false when the ref itself is unknown, not thrown, matching
+ *  cat-file's own exit status. */
+export function catFileExists(root: string, ref: string, path: string): boolean {
+  return runSync('git', ['-C', root, 'cat-file', '-e', `${ref}:${path}`]).status === 0;
+}
+
+/** `git show <ref>:<path> 2>/dev/null | wc -l`: the newline count, not a
+ *  split length — a file with no trailing newline is one short, as wc -l
+ *  always was; 0 when git cannot answer (missing path or unknown ref). */
+export function showLineCount(root: string, ref: string, path: string): number {
+  const r = runSync('git', ['-C', root, 'show', `${ref}:${path}`]);
+  if (r.status !== 0) return 0;
+  return (r.stdout.match(/\n/g) ?? []).length;
+}
+
+// ── new-epic's operations (new-epic.sh:36-39 — seam 7) ───────────────────────
+
+/** `git fetch -q <remote> <ref>` (new-epic.sh:38): the one fetch that names a
+ *  single ref rather than the whole remote — the newly pushed epic, fetched
+ *  back so the caller's own checkout knows it. */
+export function fetchRef(root: string, remote: string, ref: string): number {
+  return runSync('git', ['-C', root, 'fetch', '-q', remote, ref], { stderr: 'inherit' }).status;
+}
+
+/** `git rev-parse --short <ref> 2>/dev/null` (new-epic.sh:39): the
+ *  abbreviated sha for a log line; '' when git cannot answer. */
+export function revParseShort(root: string, ref: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--short', ref]);
+  return r.status === 0 ? r.stdout.trim() : '';
+}

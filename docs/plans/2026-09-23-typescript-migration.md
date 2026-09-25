@@ -1,4 +1,4 @@
-# Fleet: the migration to TypeScript — plan, and seams 1–6 as built
+# Fleet: the migration to TypeScript — plan, and seams 1–7 as built
 
 Decided by the human on 23 Sep 2026 (`FLEET-HANDOFF.md` §9): the harness
 moves from bash to TypeScript, one seam at a time behind the existing
@@ -65,9 +65,10 @@ TypeScript fleet: the migration continues, in this order.
    launcher, settled the `TEMPLATE.md` disagreement. The process boundary
    between the queue and a story's launcher stayed: it isolates memory and
    a die.
-7. **Story authoring**: `lint-story.sh`, `write-story.sh`, `new-epic.sh`.
-   `render.sh` retires with `write-story.sh`, its last user. The citation
-   checks against a story's base are the delicate part.
+7. **Story authoring**: `lint-story.sh`, `write-story.sh`, `new-epic.sh` —
+   built, below. `render.sh` retired with `write-story.sh`, its last user.
+   The citation checks against a story's base were the delicate part; they
+   ported unchanged, pinned by the cases that already characterised them.
 8. **`telegram.sh`** — the hard part is testing: the bot's `curl` is faked
    on PATH, Node's `fetch` bypasses PATH, so the suite needs a new seam (an
    API base URL pointing at a local fake server) before anything moves.
@@ -519,5 +520,93 @@ identical fixtures: byte-identical (stdout+stderr+exit) after normalising
 shas, timestamps and the fixture's own path, and after the two fixes above.
 The fixture never carries `ts/node_modules`.
 
-Next: seam 7, story authoring — `lint-story.sh`, `write-story.sh`,
-`new-epic.sh`; `render.sh` retires with `write-story.sh`, its last user.
+## Seam 7: story authoring, as built (branch `ts-landing-7`, 25 Sep 2026)
+
+```
+ts/src/lint-story.ts           lintStory (its own {errors, warnings} counters, not lib.sh's warn — the bash
+                               shadowed it deliberately) plus one function per check: extractAcs, firstAcGap,
+                               acHeadingLines, isUnboundedDomain, mentionsBaseline, isValidModel,
+                               isValidBaseName, extractCitations, splitCitation, skipCitation, citationRange
+ts/src/bin/lint-story.ts       argv → loadRepo → lintStory; Die and ConfigError as the other bins
+ts/src/new-epic.ts             newEpic: origin-only branch creation, checkout untouched
+ts/src/bin/new-epic.ts         argv → loadRepo → newEpic
+ts/src/write-story.ts          writeStory (async — the one agent call): worktree, render, claude -p, postcondition,
+                               copy-back, an in-process call to lintStory (no shell-out: both are read/analyze
+                               operations on the same repo, not a builder run the queue's process boundary was
+                               protecting against). isValidStoryId, resolveStoryBase are its pure parts
+ts/src/bin/write-story.ts      claude-on-PATH check before argv parsing, as the bash did; exit hooks for the
+                               throwaway worktree's cleanup on a signal, as launch.ts's bin has
+ts/src/lib/git.ts              += catFileExists, showLineCount (the citation walk); fetchRef, revParseShort
+                               (new-epic's single-ref fetch-back and log line)
+ts/src/lib/render.ts           unchanged — write-story.ts calls renderPrompt directly, no render.sh to source
+lint-story.sh, new-epic.sh,
+write-story.sh                 wrappers: source lib.sh, require node, exec the bin
+render.sh                      deleted — write-story.sh was its last caller
+test/claude                    += FAKE_BUILDER=story: writes .stories/$FAKE_STORY_ID.md into the worktree,
+                               dying loudly if TEMPLATE.md is not there first; FAKE_STORY_NOAC=1 omits the
+                               Acceptance criteria section, for the lint-failure path
+test-lib.sh                    case 132 (write-story's first end-to-end characterisation — worktree, render,
+                               agent, copy-back, lint, in one case; seen green against the bash first, then
+                               unmodified against the port); case 10 (render.sh alone) dropped — its four
+                               assertions already live as the "case 10:" rows in render.test.ts
+```
+
+What changed in substance:
+
+- **`render.sh` retired.** `write-story.ts` renders through `lib/render.ts`
+  in-process; nothing sources `render.sh` any more. Deleted, along with its
+  `FLEET_RENDER_OVERRIDE` red-observation seam (dead once the file it
+  overrode is gone — `FLEET_LAUNCH_OVERRIDE` had the same fate at seam 4)
+  and `case_10`. `render.test.ts`'s differential half — every assertion run
+  twice, once through this file and once by shelling to `render.sh` in a
+  child bash, to prove the two produced identical bytes — is cut to a plain
+  unit test of `renderPrompt`: there is only one implementation left to
+  agree with.
+- **`lint-story.ts` keeps its own error/warning accumulator**, not
+  `lib/log.ts`'s `warn` — the bash's `err()`/`warn()` (lint-story.sh:36-39)
+  shadow `lib.sh`'s deliberately, because these count toward the verdict
+  where `lib.sh`'s only print. The port mirrors that split rather than
+  reusing the shared logger.
+- **`write-story`'s agent call has no wall-clock timeout.** Unlike the
+  launcher's builder and reviewer calls (`timeout -k 30 $AGENT_TIMEOUT`,
+  ported at seam 4 into `lib/proc.ts`'s `run`), `write-story.sh` never
+  wrapped its `claude -p` call in `timeout` — a human runs this by hand and
+  is watching. `runBuilder`/`builderArgv` from `lib/agents.ts` weren't
+  reusable as-is (their type forbids `allowedTools`, an excess-property
+  check on an object literal, not a real constraint — widening the shared
+  interface for one caller's default felt like the wrong trade), so
+  `write-story.ts` calls `run` and `builderArgv` directly with
+  `timeoutSec: 0` (`run`'s own "0 or absent means no timeout" contract) and
+  its own `allowedTools` ("Read,Grep,Glob,Bash,Write" — no `Edit`, since an
+  authoring agent never touches code).
+- **The lint call moved in-process.** `write-story.sh` shelled to
+  `bash lint-story.sh`; `writeStory` calls `lintStory` directly. The
+  process boundary seam 6 kept deliberately (the queue shells to
+  `launch.sh`/`merge.sh`) exists to isolate a *builder or reviewer* run's
+  memory and any `Die` from the rest of a drain — neither applies to a
+  read-only lint of a file the same process just wrote.
+- **No latent bug found this time.** Unlike seam 6's `TEMPLATE.md`
+  disagreement, this was a faithful, mechanical port: the citation walk,
+  the AC checks, the epic-naming rules and the worktree lifecycle all
+  carried over unchanged, pinned by cases 39, 94, 98 and 116 (lint-story)
+  and 94 (new-epic) passing **unmodified** against the TS binaries.
+
+Verified: `bash test-lib.sh` 894/894 (case 132 new, seen green against the
+bash first, then unmodified against the port; cases 39, 94, 98, 116 pass
+unmodified against the TS binaries; case 10 removed, its coverage now in
+render.test.ts); 472 unit tests (446 before), tsc clean. Parity beyond the
+suite: 18 scenarios across all three scripts — every check class
+`lint-story.sh` makes, a bad `model:`, `new-epic.sh`'s creation and every
+refusal, and `write-story.sh`'s happy path, postcondition failure, lint
+failure and `--base` refusal — run under the pre-seam-7 bash
+(`git archive` of `main`'s tip before this branch) and under the
+TypeScript port, on identical fixtures sharing one `test/claude` fake:
+byte-identical (stdout+stderr+exit) after normalising shas and paths. The
+harness was checked against itself first — a deliberately wrong error
+message was confirmed to produce a MISMATCH before the real, clean run was
+taken as proof.
+
+Next: seam 8, `telegram.sh` — the hard part is testing (the bot's `curl` is
+faked on PATH; Node's `fetch` bypasses PATH, so the suite needs a way to
+point it at a local fake server before anything moves). `flock` becomes
+`lock.ts`.

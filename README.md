@@ -407,16 +407,19 @@ over `warn`. Prompts on stdin, never argv. One task, one commit.
 lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
 launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain (wrapper over ts/src/bin/run-queue.ts)
 check-mutation.sh   the verdict's classifier on a working tree (wrapper over mutation.ts check)
-ts/                 the TypeScript side: src/{launch,merge,revert,reset,run-queue,classifier,status}.ts, src/lib/{agents,render,baseline,scope,
-                    evidence,config,verdict,machine-block,review,frontmatter,lock,git,proc,die,exit-hooks}.ts,
-                    src/bin/{launch,merge,revert,reset,run-queue,mutation,status}.ts — run by node as is, no build
+ts/                 the TypeScript side: src/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,
+                    classifier,status}.ts, src/lib/{agents,render,baseline,scope,evidence,config,verdict,
+                    machine-block,review,frontmatter,lock,git,proc,die,exit-hooks}.ts,
+                    src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status}.ts
+                    — run by node as is, no build
 .nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
-write-story.sh      intent → story            lint-story.sh  mechanical checks against the story's base
-new-epic.sh         an epic branch            status.sh      what the fleet is doing (wrapper over ts/src/bin/status.ts)
+write-story.sh      intent → story (wrapper over ts/src/bin/write-story.ts)
+lint-story.sh       mechanical checks against the story's base (wrapper over ts/src/bin/lint-story.ts)
+new-epic.sh         an epic branch (wrapper over ts/src/bin/new-epic.ts)
+status.sh           what the fleet is doing (wrapper over ts/src/bin/status.ts)
 merge.sh            story → epic, --land, --epic, MERGE_MODE (wrapper over ts/src/bin/merge.ts)
 revert.sh           undo a story's merge      reset.sh       back to the queue   (wrappers over ts/src/bin/{revert,reset}.ts)
-telegram.sh         send | poll — the notifications and the phone commands
-render.sh           render_prompt() for write-story.sh (the launcher renders in ts/src/lib/render.ts)
+telegram.sh         send | poll — the notifications and the phone commands, bash still (prompts render via ts/src/lib/render.ts)
 prompts/            the agents' prompts, README = the verdict contract
 skills/             the coordinator's procedures, linked by install-skills.sh
 test-lib.sh         the suite                 test/          fake claude, codex, vitest, curl, npm

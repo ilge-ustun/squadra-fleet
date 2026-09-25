@@ -1,9 +1,8 @@
 # Prompts
 
-Bodies for the builder and reviewer, rendered by `ts/src/lib/render.ts`
-for the launcher and by `render_prompt()` in `render.sh` for
-`write-story.sh` — the two are held equal, byte for byte, by
-`render.test.ts`.
+Bodies for the builder and reviewer, rendered by `renderPrompt()` in
+`ts/src/lib/render.ts` — for the launcher, and for `write-story.sh` since
+seam 7 (`render.sh`, the bash original, retired with it).
 
 Values are referenced as `{{NAME}}`, never `$NAME`, so these files are inert
 text: nothing expands by accident and a prompt file cannot inject shell.
