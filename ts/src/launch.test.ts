@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, clockTime, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, clockTime, dropTrailingUnavailable, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
   runFileStart, splitCommand,
 } from './launch.ts';
 
@@ -55,6 +55,22 @@ describe('keepEarlierRounds — awk "/^## Round /{p=1} p"', () => {
     expect(keepEarlierRounds('## Round 1\nxxxx')).toBe('## Round 1\nxxxx\n');           // awk adds the missing final newline (case 32)
     expect(keepEarlierRounds('## Rounds are not it\n## Round 1\n')).toBe('## Round 1\n');
     expect(keepEarlierRounds('')).toBe('');
+  });
+});
+
+describe('dropTrailingUnavailable — a refusal retried replaces its section', () => {
+  const judged = '## Round 1 — FAIL\n\nhead: a\n\n### Reviewer\n\nno\n';
+  const refused = (n: number): string => `\n## Round ${n} — UNAVAILABLE\n\nhead: b\n\n### Reviewer\n\n(reviewer unavailable) limit\n`;
+  it('the trailing section of that round, refused: gone, with its leading blank line', () => {
+    expect(dropTrailingUnavailable(judged + refused(2), 2)).toBe(judged);
+  });
+  it('the only section: nothing left', () => {
+    expect(dropTrailingUnavailable(refused(1).slice(1), 1)).toBe('');
+  });
+  it('a judged last section, or another round\'s refusal, stays', () => {
+    expect(dropTrailingUnavailable(judged, 1)).toBe(judged);
+    expect(dropTrailingUnavailable(judged + refused(2), 3)).toBe(judged + refused(2));
+    expect(dropTrailingUnavailable('', 1)).toBe('');
   });
 });
 

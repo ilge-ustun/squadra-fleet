@@ -3437,7 +3437,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point case_137_one_launch_per_repo
        case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
-       case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round)
+       case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round
+       case_142_refused_story_resumes_at_its_review)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3742,6 +3743,65 @@ case_141_refused_reviewer_costs_no_round() {
   assert_eq "$(review_line 4)" "rounds: 1 of 3" "rounds counts what was judged, of this launch's ceiling"
   assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 2 "both rounds' commits are kept"
   assert_contains "$(cat "$TRACE/notified")" "resume this story automatically after" "no reset known from sessions: the message's own time"
+}
+
+# A story the reviewer could not judge resumes at its review. Its builder
+# finished before the refusal, so the next launch — after /wait's reset, or
+# a /fallback — runs no builder round: the first round reviews the head as
+# it stands, the refused round's section stays as history, and the builder's
+# own TDD handover (round-N/mutations) is judged as it would have been. The
+# resume still goes through computeVerdict — it can never grant a PASS. A
+# second refusal replaces the trailing UNAVAILABLE section rather than
+# adding one per retry. Red after case 141's change alone: the second launch
+# calls the builder, and its round-2 prompt is built on a refusal.
+case_142_refused_story_resumes_at_its_review() {
+  CASE="142a refused, then reviewed"; fixture c142a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the resumed launch ends normally"
+  assert_eq "$(field status)" done "…done"
+  assert_eq "$(calls claude)" 1 "no second builder round"
+  assert_eq "$(calls codex)" 2 "the reviewer, asked again"
+  assert_eq "$(field round)" 1 "one round judged"
+  assert_eq "$(review_line 3)" "verdict: PASS" "line 3"
+  assert_eq "$(grep -c '^## Round 1 — ' "$REPO/.review/$STORY.md")" 2 "the refused round's section stays, then the judged one"
+  assert_grep '^## Round 1 — PASS' "$REPO/.review/$STORY.md" "…ending in PASS"
+  assert_eq "$(field not_before)" "" "not_before is gone once the story is claimed"
+  assert_grep 'reviewing the existing head, no builder round' "$LOG" "the log says why no builder ran"
+
+  CASE="142b refused twice"; fixture c142b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  assert_eq "$RC" 69 "refused again"
+  assert_eq "$(calls claude)" 1 "still one builder round"
+  assert_eq "$(grep -c '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md")" 1 "one UNAVAILABLE section, not one per retry"
+  assert_eq "$(field round)" 0 "the round still not counted"
+
+  CASE="142c a resumed review cannot be granted a PASS the machine refuses"; fixture c142c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the reviewer said PASS; the surviving mutation vetoes it"
+  assert_eq "$(field status)" needs_human "…and the story stops"
+
+  CASE="142d the builder's own handover is judged after the resume"; fixture c142d
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=red FAKE_MUTATIONS=none FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_MUTATIONS=none FAKE_REVIEWER=PASS
+  assert_eq "$(review_line 3)" "verdict: PASS" "AC1's only instrument is the builder's, from before the pause"
+  assert_grep 'AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "…and it is in the table"
+
+  CASE="142e a refused REVIEW_ONLY run resumes without the variable"; fixture c142e
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=none
+  set_ready
+  run "$STORY" REVIEW_ONLY=1 FAKE_REVIEWER=limit
+  assert_eq "$RC" 69 "refused"
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$(calls claude)" 1 "only the first launch's builder ever ran"
+  assert_eq "$(field status)" done "reviewed and done"
 }
 
 for c in "${CASES[@]}"; do

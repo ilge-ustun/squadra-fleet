@@ -47,12 +47,12 @@ import { reviewerResetAt } from './lib/codex-limits.ts';
 import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
-import { setStoryField, storyField } from './lib/frontmatter.ts';
+import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushQuiet, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { Die } from './lib/die.ts';
 import { withFleetLock } from './lib/lock.ts';
 import { dieMessage, log, out, warn } from './lib/log.ts';
-import { REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
+import { COMPUTED_SEP, REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
 import { runBashTo } from './lib/proc.ts';
 import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.ts';
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
@@ -113,6 +113,20 @@ export function keepEarlierRounds(text: string): string {
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
   const i = lines.findIndex((l) => l.startsWith('## Round '));
   return i === -1 ? '' : `${lines.slice(i).join('\n')}\n`;
+}
+
+/** A refused round retried and refused again: its trailing section goes, so
+ *  an outage of hours leaves one UNAVAILABLE section, not one per retry. The
+ *  section's leading blank line goes with it; anything else stays. */
+export function dropTrailingUnavailable(text: string, round: number): string {
+  const lines = text.split('\n');
+  let i = -1;
+  for (let k = lines.length - 1; k >= 0; k--) {
+    if ((lines[k] ?? '').startsWith('## Round ')) { i = k; break; }
+  }
+  if (i === -1 || lines[i] !== `## Round ${round}${COMPUTED_SEP}UNAVAILABLE`) return text;
+  const cut = i > 0 && lines[i - 1] === '' ? i - 1 : i;
+  return cut === 0 ? '' : `${lines.slice(0, cut).join('\n')}\n`;
 }
 
 export function finalReviewHeader(o: { storyId: string; verdict: string; round: number; ceiling: number; baseSha: string }): string {
@@ -362,6 +376,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   const reviewerWt = `${root}/../wt-${storyId}-review`;
   const branch = `story/${storyId}`;
   const reviewFile = `${root}/.review/${storyId}.md`;
+  // A story whose last review its provider refused resumes at that review:
+  // the builder had finished, and nobody has judged its work yet (L-32).
+  const resumeAtReview = isFile(reviewFile) && readReview(readFileSync(reviewFile, 'utf8')).verdict === 'UNAVAILABLE';
   // Findings live in .review/<id>.md, not only in this process (L-05).
   let reviewText = '';
   if (isFile(reviewFile) && priorFailingReview(readFileSync(reviewFile, 'utf8'))) {
@@ -382,6 +399,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
   try {
     log(`story ${storyId}`);
+    // not_before was the wait for a refused reviewer; claimed, it is over.
+    deleteFrontmatterField(storyFile, 'not_before');
     setStatus(storyId, 'in_progress');
     writeFileSync(runFile, runFileStart(storyId, process.pid, formatIsoSeconds(new Date())));
 
@@ -445,7 +464,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     // ── review rounds ────────────────────────────────────────────────────
 
     const newFile = `${reviewFile}.new`;
-    writeFileSync(newFile, roundStart > 0 && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
+    writeFileSync(newFile, (roundStart > 0 || resumeAtReview) && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
     let verdict = '';
     let round = roundStart;
 
@@ -473,7 +492,17 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let buildErr: string;
       let builderUsed = '';
       let buildMsg: string;
-      if (knobs.reviewOnly === '1') {
+      // The first round of a resumed story reviews what its builder left
+      // before the refusal; what that builder said is in this round's
+      // evidence already, and so is its TDD handover.
+      const resumedRound = resumeAtReview && round === roundStart + 1;
+      const reviewOnlyRound = knobs.reviewOnly === '1' || resumedRound;
+      if (resumedRound) {
+        buildErr = 'skipped';
+        buildMsg = isFile(`${evidenceDir}/builder.md`) ? capture(readFileSync(`${evidenceDir}/builder.md`, 'utf8')) : '(resumed: no builder ran this launch)';
+        if (isFile(`${evidenceDir}/builder.json`)) builderUsed = builderModelUsed(readFileSync(`${evidenceDir}/builder.json`, 'utf8'));
+        log('the reviewer was unavailable last time — reviewing the existing head, no builder round');
+      } else if (knobs.reviewOnly === '1') {
         // REVIEW_ONLY re-reviews the branch head with no builder round.
         buildErr = 'skipped';
         buildMsg = '(REVIEW_ONLY: no builder ran this round; reviewing the existing head)';
@@ -529,7 +558,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       // Postcondition, not self-report: a round is productive if it produced
       // anything the harness can judge (L-23). Nothing at all is a die.
-      if (roundCommits === 0 && knobs.reviewOnly !== '1' && !builderHandedOver) {
+      if (roundCommits === 0 && !reviewOnlyRound && !builderHandedOver) {
         setStatus(storyId, 'needs_human');
         throw new Die(`round ${round} produced no commits (is_error=${buildErr}). Said: ${buildMsg}`);
       }
@@ -594,6 +623,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         const now = new Date();
         const resetAt = reviewerResetAt({ codexHome: process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex'), message: refusal, now });
         const resumeAt = resetAt ?? new Date(now.getTime() + knobs.reviewerRetryMin * 60_000);
+        writeFileSync(newFile, dropTrailingUnavailable(readFileSync(newFile, 'utf8'), round));
         appendFileSync(newFile, renderRoundSection({
           round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(now),
           baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: '0', total: String(secs() - tRound) },
