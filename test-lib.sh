@@ -3332,6 +3332,47 @@ case_131_queue_refresh_resilience() {
   assert_eq "$(field status)" done "the story still ran"
 }
 
+# No case exercised write-story.sh's full happy path end to end before now —
+# case 94 only characterises the --base validation slice. Seen here against
+# the bash first (proving the fixture and fake wiring are right), then
+# re-run unmodified against the TS port (seam 7): nothing about
+# write-story's behaviour changes, only its implementation.
+case_132_write_story_end_to_end() {
+  CASE="132 write-story.sh: worktree, render, agent, copy-back, lint — end to end"; fixture c132
+  git -C "$REPO" push -q origin base:epic/test
+  local out rc
+
+  write() {                          # write <id> <intent> [VAR=value...] → out rc
+    local id="$1" intent="$2"; shift 2
+    out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$id" "$@" \
+            bash "$FLEET/write-story.sh" t "$id" "$intent" --base epic/test 2>&1 )"; rc=$?
+  }
+
+  write 950 "the moon toggle should show a moon" FAKE_BUILDER=story
+  assert_eq "$rc" 0 "a well-formed draft lints clean and the command succeeds"
+  assert_contains "$out" "draft ready" "and says so"
+  assert_eq "$(calls claude)" 1 "one agent call"
+  assert_grep '^--allowedTools$' "$TRACE/claude-args-1" "the writer's own tool list"
+  assert_grep '^Read,Grep,Glob,Bash,Write$' "$TRACE/claude-args-1" "not the launcher's — no Edit"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "950" "the id was rendered in"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "the moon toggle should show a moon" "so was the intent"
+  assert_contains "$(cat "$TRACE/claude-prompt-1")" "epic/test" "and the base"
+  assert_not_contains "$(cat "$TRACE/claude-prompt-1")" "{{" "nothing left unsubstituted"
+  assert_eq "$(frontmatter "$REPO/.stories/950.md" status)" draft "the copied-back story is a draft"
+  [[ -d "$REPO/../ws-950" ]] && fail "worktree left behind" || ok
+
+  write 951 "x" FAKE_BUILDER=nocommit
+  assert_eq "$rc" 1 "no story written is a failure"
+  assert_contains "$out" "no story was written" "and says so"
+  [[ -e "$REPO/.stories/951.md" ]] && fail "951.md exists but should not" || ok
+  [[ -d "$REPO/../ws-951" ]] && fail "worktree left behind after failure" || ok
+
+  write 952 "x" FAKE_BUILDER=story FAKE_STORY_NOAC=1
+  assert_eq "$rc" 1 "a draft with lint errors fails the command"
+  assert_contains "$out" "the draft has errors above" "and says so"
+  assert_eq "$(frontmatter "$REPO/.stories/952.md" status)" draft "but is still copied back for a human to fix"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3390,7 +3431,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_124_reset_flags_and_second_run case_125_merge_through_the_loader
        case_126_revert_through_the_loader case_127_reset_through_the_loader
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
-       case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience)
+       case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
+       case_132_write_story_end_to_end)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

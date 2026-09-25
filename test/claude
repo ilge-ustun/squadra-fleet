@@ -13,6 +13,13 @@
 #   FAKE_BUILDER=hang       never returns — for the agent-timeout case
 #   FAKE_BUILDER=touch      appends a line to $FAKE_TOUCH and commits it
 #                           (Phase 2: a change the scope check can see)
+#   FAKE_BUILDER=story      writes .stories/$FAKE_STORY_ID.md — write-story.sh's
+#                           postcondition, not the launcher's. Dies loudly if
+#                           .stories/TEMPLATE.md is not already in the cwd (the
+#                           worktree write-story.sh seeds it into). A well-formed
+#                           story unless FAKE_STORY_NOAC=1, which omits the
+#                           Acceptance criteria section — a lint failure the
+#                           caller must still surface.
 #
 # Phase 3: FAKE_BUILDER_MUTATIONS makes the builder hand the harness its own
 # TDD evidence — "the test I wrote goes red when the behaviour is removed" —
@@ -70,6 +77,15 @@ case "$FAKE_BUILDER" in
   touch)    printf '\nfake builder touched this (call %s)\n' "$n" >> "${FAKE_TOUCH:?FAKE_TOUCH must be set}"
             git add -- "$FAKE_TOUCH"
             git commit -q -m "fake(builder): touch $FAKE_TOUCH" ;;
+  story)    [[ -f .stories/TEMPLATE.md ]] || { echo "fleet/test/claude: no TEMPLATE.md in the worktree" >&2; exit 3; }
+            mkdir -p .stories
+            if [[ "${FAKE_STORY_NOAC:-0}" == 1 ]]; then
+              printf -- '---\nstatus: draft\nround: 0\n---\n# Story: fake\n## Known weakness\nNone.\n## Out of scope\n- nothing\n' \
+                > ".stories/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md"
+            else
+              printf -- '---\nstatus: draft\nround: 0\n---\n# Story: fake\n## Acceptance criteria\n**AC1 - a bounded claim.** Goes red when removed.\n## Known weakness\nNone.\n## Out of scope\n- nothing\n' \
+                > ".stories/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md"
+            fi ;;
   *) echo "fleet/test/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
 esac
 
