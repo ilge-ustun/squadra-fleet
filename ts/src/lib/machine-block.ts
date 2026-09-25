@@ -11,7 +11,7 @@
 //
 // The renderer takes structured values. In acs and the scope hits, every
 // id and every hit is followed by one space.
-import type { Baseline, MutRow, ProbeRow, Verdict } from './types.ts';
+import type { Baseline, MutRow, ProbeRow, RoundOutcome } from './types.ts';
 
 export const MACHINE_HEADING = '### Machine';
 export const BUILDER_HEADING = '### Builder said';
@@ -58,8 +58,8 @@ export interface RoundSection {
   acIds: string[];
   scope: string;
   scopeHits: string[];
-  model: Verdict;
-  computed: Verdict;
+  model: RoundOutcome;
+  computed: RoundOutcome;
   reasons: string[];
   mutRows: MutRow[];
   probeRows: ProbeRow[];

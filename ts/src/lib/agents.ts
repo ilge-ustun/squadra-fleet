@@ -53,6 +53,10 @@ export interface ReviewerRun {
   timedOut: boolean;
   /** The JSON Lines stream. */
   stdout: string;
+  /** codex's exit status, for the record only: what a refusal exits with
+   *  is not documented, so nothing decides on it (reviewerRefusal reads the
+   *  stream). null when a signal ended it. */
+  status: number | null;
 }
 
 /** stderr goes to `stderrFile` (round-N/reviewer.stderr): codex prints
@@ -65,10 +69,52 @@ export async function runReviewer(o: AgentCall & { model: string; stderrFile: st
       cwd: o.wt, input: o.prompt, timeoutSec: o.timeoutSec, graceSec: o.graceSec ?? 30, stderr: fd,
       ...(o.env !== undefined ? { env: o.env } : {}),
     });
-    return { timedOut: r.timedOut, stdout: r.stdout };
+    return { timedOut: r.timedOut, stdout: r.stdout, status: r.status };
   } finally {
     closeSync(fd);
   }
+}
+
+/** One line, and no ` — `: the refusal becomes a reason on the Machine
+ *  block's `computed:` line, which review.ts splits on that separator. */
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim().replace(/ — /g, ' - ');
+
+/** The provider refused the call: an `error` or `turn.failed` event, and
+ *  no `turn.completed` — the turn never finished, so nobody reviewed
+ *  anything and there is no verdict to read (21 Sep, khaita 015 round 3:
+ *  "You've hit your usage limit … try again at 2:17 PM."). An error the turn
+ *  got past (a reconnect notice) is not one; neither is a turn that
+ *  completed having said nothing — that is UNPARSEABLE, the reviewer's
+ *  failure, not the provider's. The message is the first error's, else the
+ *  turn.failed one's, on one line; undefined when there was no refusal. */
+export function reviewerRefusal(jsonl: string): string | undefined {
+  let failed = false;
+  let completed = false;
+  const messages: string[] = [];
+  for (const line of jsonl.split('\n')) {
+    let v: unknown;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) continue;
+    const o = v as Record<string, unknown>;
+    if (o['type'] === 'turn.completed') completed = true;
+    else if (o['type'] === 'error') {
+      failed = true;
+      if (typeof o['message'] === 'string') messages.push(o['message']);
+    } else if (o['type'] === 'turn.failed') {
+      failed = true;
+      const e = o['error'];
+      if (e !== null && typeof e === 'object' && typeof (e as Record<string, unknown>)['message'] === 'string') {
+        messages.push((e as Record<string, unknown>)['message'] as string);
+      }
+    }
+  }
+  if (!failed || completed) return undefined;
+  const m = messages.map(oneLine).find((x) => x !== '');
+  return m ?? 'the provider refused the call and gave no reason';
 }
 
 export interface BuilderOutput {

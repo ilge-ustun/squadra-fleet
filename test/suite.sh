@@ -223,14 +223,14 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
   LOG="$FX/launch.log"
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" launch t "$id" ) > "$LOG" 2>&1
   RC=$?
 }
 queue() {                             # queue [VAR=value …] → $FX/queue.log QRC   (QUEUE_TARGET=--all for every repo)
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" run-queue "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
   QRC=$?
 }
@@ -260,7 +260,7 @@ launch_bg() {                         # launch_bg <tag> <story-id|--reap> [VAR=v
   local tag="$1" id="$2"; shift 2
   ( cd "$FX" && exec env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" launch t "$id" ) > "$FX/bg-$tag.log" 2>&1 &
   BG_PID=$!
 }
@@ -3437,7 +3437,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point case_137_one_launch_per_repo
        case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
-       case_140_queue_leaves_a_busy_repo)
+       case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3691,6 +3691,57 @@ case_140_queue_leaves_a_busy_repo() {
   assert_eq "$(grep -c 'is ready again without having finished' "$FX/queue.log")" 0 "not mistaken for a story that never finished"
   assert_eq "$(field status)" ready "the story waits"
   assert_no_file "$TRACE/notified" "nobody was told"
+}
+
+# A reviewer its provider refused costs no round and pauses the story. On
+# 21 Sep (khaita 015 round 3) codex answered "You've hit your usage limit
+# … try again at 2:17 PM"; the launcher read the empty review as
+# UNPARSEABLE, burned the round, ran the builder again on a placeholder, and
+# the phone got "015 needs_human — " with no reason. Now: the round is not
+# counted, the builder's work stays on its branch, line 3 says UNAVAILABLE,
+# `not_before` holds codex's reset, the story waits at needs_human for a
+# human's choice, and one message offers it — /wait or /fallback. Red while
+# ts/src/launch.ts reads the refusal as the reviewer's verdict.
+case_141_refused_reviewer_costs_no_round() {
+  local resets msgs
+  notifier() { printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"; }
+  for exitcode in 1 0; do
+    CASE="141 codex refuses the round-1 review (codex exits $exitcode)"; fixture "c141-$exitcode"; notifier
+    resets=$(( $(date +%s) + 3600 ))
+    run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_REVIEWER_EXIT="$exitcode" FAKE_CODEX_RESETS_AT="$resets" FLEET_NOTIFY_CMD="$FX/notify"
+    assert_eq "$RC" 69 "refused is its own exit code"
+    assert_eq "$(field status)" needs_human "the story waits for a human's choice"
+    assert_eq "$(field round)" 0 "the round is not counted"
+    assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3 names the outcome"
+    assert_eq "$(field not_before)" "$(date -d "@$resets" -Iseconds)" "not before codex's reset, from its sessions"
+    assert_grep '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md" "the round's section"
+    assert_grep "^computed: UNAVAILABLE — reviewer unavailable: You've hit your usage limit" "$REPO/.review/$STORY.md" "…with codex's own words"
+    assert_eq "$(calls claude)" 1 "the builder ran once"
+    assert_eq "$(calls codex)" 1 "the reviewer was asked once"
+    assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 1 "the builder's commit is kept on its branch"
+    assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.unavailable.jsonl" "the refusal is evidence, committed"
+    assert_grep 'turn.failed' "$REPO/.review/$STORY/round-1/reviewer.unavailable.jsonl" "…the stream as codex sent it"
+    msgs="$(cat "$TRACE/notified" 2>/dev/null)"
+    assert_eq "$(grep -c '^---$' <<< "$msgs")" 1 "one message"
+    assert_contains "$msgs" "t/$STORY — Codex refused the review" "it names the repo, the story and who refused"
+    assert_contains "$msgs" "try again at 2:17 PM" "codex's words"
+    assert_contains "$msgs" "/wait t $STORY" "the first choice"
+    assert_contains "$msgs" "/fallback t $STORY" "the second"
+    assert_not_contains "$msgs" "needs_human —" "not the generic needs_human message"
+  done
+
+  CASE="141c a refusal in round 2 keeps round 1"; fixture c141c; notifier
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(field round)" 1 "round 1 stands, round 2 is not counted"
+  assert_grep '^## Round 1 — FAIL' "$REPO/.review/$STORY.md" "round 1's section is kept"
+  assert_grep '^## Round 2 — UNAVAILABLE' "$REPO/.review/$STORY.md" "round 2 says what happened"
+  assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3"
+  assert_eq "$(review_line 4)" "rounds: 1 of 3" "rounds counts what was judged, of this launch's ceiling"
+  assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 2 "both rounds' commits are kept"
+  assert_contains "$(cat "$TRACE/notified")" "resume this story automatically after" "no reset known from sessions: the message's own time"
 }
 
 for c in "${CASES[@]}"; do

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, finalReviewHeader, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, clockTime, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
   runFileStart, splitCommand,
 } from './launch.ts';
 
@@ -95,6 +95,36 @@ describe('readKnobs — the ${X:-default} knobs', () => {
     expect(() => readKnobs({ FLEET_LOCK_WAIT: 'x' }, '/f')).toThrow(/FLEET_LOCK_WAIT/);
     expect(readKnobs({ AGENT_TIMEOUT: '0' }, '/f').agentTimeout).toBe(0);
     expect(readKnobs({ AGENT_TIMEOUT: '1.5' }, '/f').agentTimeout).toBe(1.5);
+  });
+});
+
+describe('REVIEWER_RETRY_MIN — when a refused reviewer is tried again if nobody named a time', () => {
+  it('60 minutes by default, a number when set, a die when not a number', () => {
+    expect(readKnobs({}, '/f').reviewerRetryMin).toBe(60);
+    expect(readKnobs({ REVIEWER_RETRY_MIN: '15' }, '/f').reviewerRetryMin).toBe(15);
+    expect(() => readKnobs({ REVIEWER_RETRY_MIN: '1h' }, '/f')).toThrow(/REVIEWER_RETRY_MIN/);
+  });
+});
+
+describe('clockTime — a time on the phone', () => {
+  const now = new Date(2026, 8, 21, 13, 3, 14);
+  it('today: HH:MM', () => { expect(clockTime(new Date(2026, 8, 21, 14, 17, 47), now)).toBe('14:17'); });
+  it('another day: the date too', () => { expect(clockTime(new Date(2026, 8, 22, 9, 5), now)).toBe('2026-09-22 09:05'); });
+});
+
+describe('pausedMessage — the one message a refused review sends', () => {
+  const now = new Date(2026, 8, 21, 13, 3, 14);
+  const o = { repo: 't', id: '900', who: 'Codex', refusal: "You've hit your usage limit … try again at 2:17 PM.", resumeAt: new Date(2026, 8, 21, 14, 17, 47), known: true, now };
+  it('what happened, that nothing is lost, and the two choices', () => {
+    expect(pausedMessage(o)).toBe([
+      `t/900 — Codex refused the review: "You've hit your usage limit … try again at 2:17 PM."`,
+      'Nothing is lost: the builder\'s work is on story/900 and the round is not counted. The queue is paused until you choose:',
+      '/wait t 900 — resume this story automatically after 14:17',
+      '/fallback t 900 — review it now with Claude (opus); a weaker check: the same vendor as its builder',
+    ].join('\n'));
+  });
+  it('no reset named anywhere: the time is a guess, and it says so', () => {
+    expect(pausedMessage({ ...o, known: false }).split('\n')[2]).toBe('/wait t 900 — resume this story automatically after 14:17 (no reset time was given: a retry, not a promise)');
   });
 });
 

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, builderArgv, builderModelUsed, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, runBuilder, runReviewer,
+  ALLOWED_TOOLS, builderArgv, builderModelUsed, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -105,6 +105,46 @@ describe('reviewerMessages — the codex stream', () => {
   });
 });
 
+// 21 Sep, khaita 015 round 3: codex's whole stream when OpenAI refused the
+// call, verbatim from .review/015/round-3/reviewer.raw.jsonl.
+const LIMIT_MSG = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:17 PM.";
+const REFUSED = [
+  '{"type":"thread.started","thread_id":"01a0c3a2-5a0d-7a33-a3d4-55f3ec6edc49"}',
+  '{"type":"turn.started"}',
+  JSON.stringify({ type: 'error', message: LIMIT_MSG }),
+  JSON.stringify({ type: 'turn.failed', error: { message: LIMIT_MSG } }),
+].join('\n');
+const line = (o: object): string => JSON.stringify(o);
+const said = (text: string): string => line({ type: 'item.completed', item: { id: 'i', type: 'agent_message', text } });
+
+describe('reviewerRefusal — the provider refused, so nobody reviewed', () => {
+  it('the 21 Sep stream: the error event\'s message', () => {
+    expect(reviewerRefusal(REFUSED)).toBe(LIMIT_MSG);
+  });
+  it('a turn.failed alone: its error.message', () => {
+    expect(reviewerRefusal([line({ type: 'turn.started' }), line({ type: 'turn.failed', error: { message: 'Quota exceeded.' } })].join('\n'))).toBe('Quota exceeded.');
+  });
+  it('an error the turn got past is not a refusal', () => {
+    expect(reviewerRefusal([line({ type: 'error', message: 'reconnecting 1/5' }), said('VERDICT: PASS'), line({ type: 'turn.completed' })].join('\n'))).toBeUndefined();
+  });
+  it('refused mid-turn, after something was said, is still a refusal', () => {
+    expect(reviewerRefusal([said('looking at the diff'), line({ type: 'error', message: 'usage limit' }), line({ type: 'turn.failed', error: { message: 'usage limit' } })].join('\n'))).toBe('usage limit');
+  });
+  it('a turn that completed with nothing said is not a refusal — that is UNPARSEABLE (case 112)', () => {
+    expect(reviewerRefusal([line({ type: 'thread.started' }), line({ type: 'turn.completed' })].join('\n'))).toBeUndefined();
+  });
+  it('empty, or not JSON: not a refusal', () => {
+    expect(reviewerRefusal('')).toBeUndefined();
+    expect(reviewerRefusal('Reading prompt from stdin...\nnot json')).toBeUndefined();
+  });
+  it('the message comes back on one line, with no " — " to split the Machine block\'s reasons on', () => {
+    expect(reviewerRefusal(line({ type: 'error', message: 'over\n\nthe limit — try later' }))).toBe('over the limit - try later');
+  });
+  it('a failure that says nothing still refuses', () => {
+    expect(reviewerRefusal(line({ type: 'turn.failed' }))).toBe('the provider refused the call and gave no reason');
+  });
+});
+
 // The two calls end to end, against the suite's own fakes on PATH: the
 // prompt arrives on stdin, the argv is recorded, cwd is the worktree.
 describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex', () => {
@@ -143,6 +183,24 @@ describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex',
       expect(readFileSync(stderrFile, 'utf8')).toBe('Reading prompt from stdin...\n');
       expect(readFileSync(join(trace, 'codex-prompt-1'), 'utf8')).toBe('review it');
       expect(readFileSync(join(trace, 'codex-args-1'), 'utf8')).toBe('exec\n--json\n--sandbox\ndanger-full-access\n-m\nfleet-test-reviewer\n');
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runReviewer keeps the exit status, for the record', () => {
+  it('a refused codex: the 21 Sep stream, and the status it exited with', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
+    const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
+    mkdirSync(trace); mkdirSync(wt);
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_REVIEWER: 'limit', FAKE_REVIEWER_EXIT: '3', CODEX_HOME: join(dir, 'codex') }, 'codex');
+    try {
+      const r = await runReviewer({ wt, prompt: 'review it', model: '', timeoutSec: 30, stderrFile: join(dir, 'reviewer.stderr'), env });
+      expect(r.status).toBe(3);
+      expect(r.stdout.trimEnd()).toBe(REFUSED);
+      expect(reviewerRefusal(r.stdout)).toBe(LIMIT_MSG);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
