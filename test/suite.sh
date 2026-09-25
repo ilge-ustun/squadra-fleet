@@ -3441,7 +3441,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_142_refused_story_resumes_at_its_review
        case_143_queue_pauses_on_a_refused_review
        case_144_bot_wait_and_fallback
-       case_145_builder_refused_by_claude)
+       case_145_builder_refused_by_claude
+       case_146_fallback_reviewer_is_claude)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3943,6 +3944,53 @@ case_145_builder_refused_by_claude() {
           bash "$FLEET/fleet" write-story t 950 "an intent" --base epic/test 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "a die"
   assert_contains "$out" "Claude refused the story writer: You've hit your limit" "…saying who refused, in its words"
+}
+
+# The fallback reviewer: after a human's /fallback on a refused review,
+# Claude reviews the story — every round of that launch — with the same
+# prompt, the same output contract (.review-out/, a clean tree) and the same
+# computed verdict: the machine still vetoes, never grants. The Machine
+# block says who reviewed. The launch removes `reviewer: claude` when it
+# claims the story, so the choice covers that launch alone. If Claude
+# refuses the review too, the story pauses as with codex. Red while
+# ts/src/launch.ts ignores the key: codex is asked again, and refuses again.
+case_146_fallback_reviewer_is_claude() {
+  fallback() {                        # what /fallback commits, done by hand
+    sed -i '0,/^status:.*/s//status: ready/; /^not_before:/d' "$REPO/.stories/$STORY.md"
+    sed -i '0,/^---$/!{0,/^---$/s/^---$/reviewer: claude\n---/}' "$REPO/.stories/$STORY.md"
+    git -C "$REPO" commit -qam "story($STORY): reviewed by Claude instead"
+  }
+  CASE="146a /fallback, then Claude reviews"; fixture c146a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  assert_eq "$(field reviewer)" claude "the fixture stands in for /fallback"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_CLAUDE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the launch ends normally"
+  assert_eq "$(field status)" done "reviewed and done"
+  assert_eq "$(calls codex)" 1 "codex was not asked again"
+  assert_eq "$(calls claude-review)" 1 "Claude reviewed"
+  assert_eq "$(calls claude)" 1 "no builder round: the story resumed at its review"
+  assert_grep '^reviewer: claude opus \(fallback\) → claude-opus-fake$' "$REPO/.review/$STORY.md" "the Machine block says who reviewed"
+  assert_grep '^--model$' "$TRACE/claude-review-args-1" "claude was given a model…"
+  assert_grep '^opus$' "$TRACE/claude-review-args-1" "…opus"
+  assert_eq "$(field reviewer)" "" "the choice was for that launch: the key is gone"
+
+  CASE="146b Claude's PASS is still the machine's to veto"; fixture c146b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  run "$STORY" FAKE_BUILDER=commit FAKE_CLAUDE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$(review_line 3)" "verdict: FAIL" "a mutation that survives vetoes Claude's PASS"
+
+  CASE="146c Claude refuses the fallback review too"; fixture c146c
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  run "$STORY" FAKE_BUILDER=commit FAKE_CLAUDE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(field status)" needs_human "paused again"
+  assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3"
+  assert_contains "$(cat "$TRACE/notified")" "t/$STORY — Claude refused the review" "the message names Claude"
+  assert_eq "$(grep -c '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md")" 1 "still one UNAVAILABLE section"
 }
 
 for c in "${CASES[@]}"; do

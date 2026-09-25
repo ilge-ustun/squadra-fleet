@@ -84,7 +84,7 @@ describe('the row parsers — awk $1 $2 $3 and `read -r ac cls slug` agree on th
 });
 
 describe('the models a round ran on', () => {
-  const section = (x: { builderModel: string; builderModelUsed?: string; reviewerModel: string; reviewerModelUsed?: string }): string => renderRoundSection({
+  const section = (x: { builderModel: string; builderModelUsed?: string; reviewerModel: string; reviewerModelUsed?: string; reviewerCli?: 'codex' | 'claude' }): string => renderRoundSection({
     round: '1', headSha: 'h', roundCommits: '1', reviewedAt: 't', baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN' },
     timing: { build: '0', base: '0', review: '0', mut: '0', total: '0' }, ...x,
     acIds: [], scope: 'CLEAN', scopeHits: [], model: 'PASS', computed: 'PASS', reasons: [], mutRows: [], probeRows: [],
@@ -99,6 +99,10 @@ describe('the models a round ran on', () => {
     const out = section({ builderModel: 'claude-opus-5', builderModelUsed: 'claude-opus-5', reviewerModel: 'r', reviewerModelUsed: '' });
     expect(out).toContain('\nbuilder:  claude-opus-5\n');
     expect(out).toContain('\nreviewer: codex r\n');
+  });
+  it('the fallback reviewer, a human\'s /fallback: claude, its model, and what it resolved to', () => {
+    const out = section({ builderModel: 'sonnet', reviewerCli: 'claude', reviewerModel: 'opus', reviewerModelUsed: 'claude-opus-5-5' });
+    expect(out).toContain('\nreviewer: claude opus (fallback) → claude-opus-5-5\n');
   });
 });
 

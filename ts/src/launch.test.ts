@@ -122,6 +122,13 @@ describe('REVIEWER_RETRY_MIN — when a refused reviewer is tried again if nobod
   });
 });
 
+describe('FALLBACK_REVIEWER_MODEL — the model /fallback reviews with', () => {
+  it('opus by default; the environment wins', () => {
+    expect(readKnobs({}, '/f').fallbackReviewerModel).toBe('opus');
+    expect(readKnobs({ FALLBACK_REVIEWER_MODEL: 'fable' }, '/f').fallbackReviewerModel).toBe('fable');
+  });
+});
+
 describe('clockTime — a time on the phone', () => {
   const now = new Date(2026, 8, 21, 13, 3, 14);
   it('today: HH:MM', () => { expect(clockTime(new Date(2026, 8, 21, 14, 17, 47), now)).toBe('14:17'); });

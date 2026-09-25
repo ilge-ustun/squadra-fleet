@@ -18,6 +18,13 @@
 #                           object claude -p ends in on an API error — is_error,
 #                           api_error_status 429, the limit's text — exit 1
 #   FAKE_BUILDER=commit-then-limit   one commit, then the same refusal
+#
+# Called in a reviewer worktree (cwd *-review) it is the fallback reviewer a
+# human's /fallback asks for: it records `claude-review` in calls (so
+# `calls claude` still counts builders), writes FAKE_MUTATIONS=patch's marker
+# mutation as the fake codex does, and answers per FAKE_CLAUDE_REVIEWER:
+#   PASS | FAIL (default PASS)   a review ending in that VERDICT line
+#   limit                        Claude refused the call, as above
 #   FAKE_BUILDER=story      writes .stories/$FAKE_STORY_ID.md — fleet
 #                           write-story's postcondition, not the launcher's.
 #                           Dies loudly if .stories/TEMPLATE.md is not already
@@ -68,18 +75,41 @@ while (($#)); do
 done
 if [[ -z "$prompt" && ! -t 0 ]]; then prompt="$(cat)"; fi
 
+limit_json() {
+  local default="You've hit your limit · resets 3pm (Europe/Rome)"
+  jq -cn --arg r "${FAKE_LIMIT_MSG:-$default}" \
+    '{type:"result", subtype:"success", is_error:true, api_error_status:429, result:$r}'
+}
+
+if [[ "$PWD" == *-review ]]; then
+  echo claude-review >> "$FAKE_TRACE_DIR/calls"
+  r="$(grep -c '^claude-review$' "$FAKE_TRACE_DIR/calls")"
+  printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-review-prompt-$r"
+  printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-review-args-$r"
+  v="${FAKE_CLAUDE_REVIEWER:-PASS}"
+  case "$v" in
+    limit) limit_json; exit 1 ;;
+    PASS|FAIL) : ;;
+    *) echo "fleet/test/fakes/claude: unknown FAKE_CLAUDE_REVIEWER='$v'" >&2; exit 2 ;;
+  esac
+  if [[ "${FAKE_MUTATIONS:-none}" == patch ]]; then
+    mkdir -p .review-out/mutations
+    printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
+    git diff -- src/marker.txt > .review-out/mutations/AC1-claude-marker.patch
+    git checkout -q -- src/marker.txt
+    printf 'fake.test.tsx\n' > .review-out/mutations/AC1-claude-marker.test
+  fi
+  jq -cn --arg t "fake claude review, call $r."$'\n'"VERDICT: $v" \
+    '{type:"result", subtype:"success", is_error:false, result:$t, modelUsage:{"claude-opus-fake":{costUSD:1.0}}}'
+  exit 0
+fi
+
 echo claude >> "$FAKE_TRACE_DIR/calls"
 n="$(grep -c '^claude$' "$FAKE_TRACE_DIR/calls")"
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 # The argv too, one flag per line: which model the launcher chose is visible
 # nowhere else.
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
-
-limit_json() {
-  local default="You've hit your limit · resets 3pm (Europe/Rome)"
-  jq -cn --arg r "${FAKE_LIMIT_MSG:-$default}" \
-    '{type:"result", subtype:"success", is_error:true, api_error_status:429, result:$r}'
-}
 
 case "$FAKE_BUILDER" in
   limit)    limit_json; exit 1 ;;

@@ -51,6 +51,9 @@ export interface RoundSection {
   /** What the builder actually ran on (claude's modelUsage), shown after
    *  the name asked for when it differs; '' or absent when unknown. */
   builderModelUsed?: string;
+  /** Who reviewed: codex, or — after a human's /fallback on a refused
+   *  review — claude. Absent is codex. */
+  reviewerCli?: 'codex' | 'claude';
   /** '' when codex runs on its own default. */
   reviewerModel: string;
   /** What codex actually ran on (its session file); '' or absent when unknown. */
@@ -140,7 +143,7 @@ export function renderRoundSection(s: RoundSection): Buffer {
     `${label('baseline')}test ${b.test} | build ${b.build} | lint ${b.lint}\n` +
     `${label('timing')}builder ${t.build}s | baseline ${t.base}s | reviewer ${t.review}s | mutations ${t.mut}s | total ${t.total}s\n` +
     `${label('builder')}${s.builderModel}${resolved(s.builderModel, s.builderModelUsed)}\n` +
-    `${label('reviewer')}codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}${resolved(s.reviewerModel, s.reviewerModelUsed)}\n` +
+    `${label('reviewer')}${s.reviewerCli === 'claude' ? `claude ${s.reviewerModel} (fallback)` : `codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}`}${resolved(s.reviewerModel, s.reviewerModelUsed)}\n` +
     `${label('acs')}${s.acIds.map((a) => `${a} `).join('')}\n` +
     `${label('scope')}${s.scope}${hits === '' ? '' : ` ${hits}`}\n` +
     `${label('model')}${s.model}\n` +
