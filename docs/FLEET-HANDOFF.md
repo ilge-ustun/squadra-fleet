@@ -1,8 +1,8 @@
-# Fleet handoff — state as of 23 Sep 2026
+# Fleet handoff — state as of 25 Sep 2026
 
 Autonomous coding-agent fleet. Its first and so far only target is
 `khaita-app`. Supersedes every earlier handoff. `README.md` is the map,
-this file is the state, `docs/lessons.md` (L-01 … L-27) the reasons,
+this file is the state, `docs/lessons.md` (L-01 … L-30) the reasons,
 `docs/COORDINATORS.md` the coordinator on other harnesses and models.
 
 **Orient by running things, not by trusting this file.** Numbers in prose rot
@@ -11,7 +11,7 @@ this file is the state, `docs/lessons.md` (L-01 … L-27) the reasons,
 ```bash
 cd ~/work/fleet
 bash status.sh khaita --bot --all     # every story: landing state, round, computed verdict
-bash test-lib.sh                      # the harness's own suite; the count is on its last line (681)
+bash test-lib.sh                      # the harness's own suite; the count is on its last line (916 on 25 Sep)
 git log --oneline -15
 git -C ~/work/khaita/khaita-app log --oneline develop -15
 systemctl --user is-active fleet-bot.service fleet-queue.service
@@ -69,9 +69,27 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
   between the launcher and the queue (they had disagreed on `TEMPLATE.md`;
   a real bug, not hypothetical — L-30). `docs/plans/2026-09-23-typescript-migration.md`
   is the plan for every seam and the record of each built one.
+- **24 Sep — haiku retired as a builder model** (PR #6): 0 of 2 round-1
+  passes; `model:` accepts `sonnet`, `opus`, `fable`.
+- **24–25 Sep — `epic/ui-a11y` built on the TypeScript fleet.** Stories 020,
+  021, 022 and 025 all computed PASS and are merged into the epic; the
+  epic itself waits for a human `/merge` (§6).
+- **25 Sep — seam 7, story authoring** (PR #8): `lint-story.sh`,
+  `new-epic.sh`, `write-story.sh` as wrappers; `render.sh` retired. The
+  same day all three ran live against khaita for the first time
+  (`epic/search` created, stories 024 and 026 drafted), clean (PR #9).
+- **25 Sep — seam 8, `telegram.sh`** (PR #10), the last numbered seam. The
+  suite gained a fake Bot API (`test/telegram-api.mts`) because Node's
+  `fetch` bypasses the fake-on-PATH trick; `test/curl` is gone. The
+  old-vs-new differential found a real bug in the bash bot: every `--pre`
+  message with an angle bracket was invalid HTML that Telegram refused,
+  silently (L-28's mechanism, recorded there). **The migration is
+  complete**: every command is TypeScript; `load_repo`, `test-lib.sh` and
+  the systemd units stay bash by decision.
 
-Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
-fast-forward. khaita `develop` is at `227b781`.
+Fleet `main` is at `bb8c36f` (PR #10), suite 916, 538 unit tests, both
+units inactive at the last fast-forward; the live bot polled clean on the
+new code. khaita `develop` is at `6ae4858`.
 
 ---
 
@@ -96,9 +114,9 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   ts/                    the TypeScript side: src/launch.ts (the story loop), src/merge.ts, src/revert.ts, src/reset.ts,
                          src/run-queue.ts, src/lint-story.ts, src/new-epic.ts, src/write-story.ts, src/classifier.ts,
                          src/status.ts, src/status-views.ts, src/telegram.ts, src/lib/{agents,render,baseline,scope,
-                         evidence,lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks,
-                         telegram-api,env-file}.ts, src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,
-                         write-story,mutation,status,telegram}.ts;
+                         evidence,vitest-json,result-summary,verdict,machine-block,review,frontmatter,config,env-file,
+                         lock,git,proc,procs,log,die,exit-hooks,telegram-api,types}.ts, src/bin/{launch,merge,revert,
+                         reset,run-queue,lint-story,new-epic,write-story,mutation,status,telegram}.ts;
                          run by node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
   telegram.sh            send | poll — the notifications and the phone commands — wrapper over ts/src/bin/telegram.ts
@@ -135,11 +153,12 @@ Another runner needs an adapter (§9 is where that adapter would be written).
 
 ```
 main
-└── develop  227b781        ← integration. FLEET STATE LIVES HERE ONLY. The checkout sits here.
+└── develop  6ae4858        ← integration. FLEET STATE LIVES HERE ONLY. The checkout sits here.
      ├── epic/offline-pwa   013            — in develop
      ├── epic/ui-polish     011            — in develop
      ├── epic/pwa           012, 015–019   — in develop at 0450c02
-     ├── epic/search        nothing yet
+     ├── epic/ui-a11y       020–022, 025   — all merged into the epic; 12 commits ahead of develop, not landed
+     ├── epic/search        024, 026       — both draft, and they contradict each other (§6)
      └── epic/shazam        nothing yet; a project, not a story
 ```
 
@@ -155,10 +174,11 @@ since `epic/pwa` landed** — §6 item 1.
 **VPS:** Ubuntu 24.04, 2 CPU / 3.8 GB / 60 GB + 8 GB swap, `179.237.101.204`.
 Users `ubuntu` (admin), `fleet` (agents, `~/work/khaita/khaita-app`), `hermes`.
 
-**Installed under `fleet`:** Claude Code 2.1.274, Codex 0.153.4, Node 24
-under nvm, jq, `gh` 2.101 and `glab` 1.118 in `~/.local/bin` (neither
-logged in — the human's step). No Gemini CLI, no OpenCode, no local models
-(the RAM rules them out).
+**Installed under `fleet`:** Claude Code 2.1.282 (it updates itself), Codex
+0.153.4, Node 24.20.0 under nvm (`.nvmrc`), flock (util-linux), jq (the
+suite only), `gh` 2.101 and `glab` 1.118 in `~/.local/bin`. `gh` is logged
+in to github.com (the fleet's own PRs); `glab` is not — the human's step,
+§6. No Gemini CLI, no OpenCode, no local models (the RAM rules them out).
 
 **Remotes and keys:** this repo pushes to `squadra-fleet` through a
 write-enabled deploy key bound to the host alias `github.com-squadra-fleet`.
@@ -261,34 +281,47 @@ Run `bash status.sh khaita --bot --all` rather than trusting this table.
 | 017 | the 4 s timer replaced by `fromCache`-driven states | R2, opus; the writer found the listener lacked `includeMetadataChanges` |
 | 018 | a partially-held song shows what it has, with provenance | R2, opus |
 | 019 | generated worker, build id, versioned caches | R2, opus; in develop at `0450c02` |
+| 020 | the song page ends in two footers | `epic/ui-a11y`, R1, on epic |
+| 021 | the theme switch sits under the hand that opened the side panel | `epic/ui-a11y`, R2, on epic |
+| 022 | the tab bars cannot be reached or driven from the keyboard | `epic/ui-a11y`, R1, opus, on epic |
+| 025 | the lyrics-language checkboxes forget what the user hid | `epic/ui-a11y`, R2, on epic |
+| 024 | iPhone Safari: the search field never opens the suggestions | `epic/search`, draft |
+| 026 | a misspelt song or singer name finds nothing | `epic/search`, draft; contradicts 024 |
 
-Rounds per story since the builder's rules gained the reviewer's attack:
-none run yet — the next story's round count is the first data point for A2.
+Rounds per story since the builder's rules gained the reviewer's attack
+(020–025, all run after 22 Sep): R1, R2, R1, R2 — against R2–R8 for the
+`epic/pwa` stories before it. Four stories is not yet a trend.
 
 ---
 
 ## 6. What needs a human, in order
 
-1. **Deploy khaita** — `npm run deploy` from `develop`, human only. This is
+1. **Land `epic/ui-a11y`** — `/merge khaita epic/ui-a11y` (or `merge.sh
+   khaita --epic epic/ui-a11y`). Four stories, all computed PASS; the
+   post-merge baseline decides.
+2. **Decide the order of 024 and 026** before promoting either: as drafted
+   their tests disagree over the query `Mangalom`. khaita's
+   `docs/fleet/backlog-search.md` says what to check, and 026 carries two
+   product questions only a human can answer.
+3. **Deploy khaita** — `npm run deploy` from `develop`, human only. This is
    the first deploy carrying the generated worker: expected on a phone that
    has the old build — the worker is replaced by byte comparison, the
    "new version available" banner shows, and `khaita-shell-v1` is retired on
    activation. If the banner does not show, story 019's Human verification
    section says what to look at.
-2. **Log `glab` in** (`glab auth login --hostname gitlab.com --token`, a
+4. **Log `glab` in** (`glab auth login --hostname gitlab.com --token`, a
    project token on khaita-app, `api` scope, Developer role), then
    `MERGE_MODE=pr` and the `PR_CMD` from `README.md` in khaita's
    `.fleet/config`, and one `/merge` to see the URL come back.
-3. **The first coordinator trial on Codex.** Before it: from inside a
+5. **The first coordinator trial on Codex.** Before it: from inside a
    `codex -C ~/work/khaita/khaita-app --add-dir ~/work/khaita --add-dir
    ~/work/fleet -s workspace-write -c sandbox_workspace_write.network_access=true`
    session, check once that `git push` and `bash write-story.sh` work. Then
    the protocol in `docs/COORDINATORS.md`; the row goes in
    `docs/coordinator-trials.md`. A good first intent: the asset cache in
-   khaita's worker grows across deploys (item 4).
-4. **Next khaita stories:** the unbounded asset cache (`khaita-assets` is
-   never retired; 019's known follow-up); mobile search and
-   lyrics-language defaults on `epic/search`; "shazam" needs decomposing.
+   khaita's worker grows across deploys (item 6).
+6. **Next khaita stories:** the unbounded asset cache (`khaita-assets` is
+   never retired; 019's known follow-up); "shazam" needs decomposing.
 
 ---
 
@@ -312,9 +345,10 @@ none run yet — the next story's round count is the first data point for A2.
   first). What the bash had hidden and the port found: `render.sh`'s `&`
   corruption (L-28), the builder's non-JSON output going unwarned, the
   `.result` writer living in a CLI verb, a `TEMPLATE.md` a bare launch could
-  pick (L-30). Seams 5-7 closed it for `merge.sh`, `revert.sh`, `reset.sh`,
-  `run-queue.sh`, `lint-story.sh`, `new-epic.sh` and `write-story.sh`.
-  `telegram.sh` is what's left.
+  pick (L-30). Seams 5-8 closed it for every other command: `merge.sh`,
+  `revert.sh`, `reset.sh`, `run-queue.sh`, `lint-story.sh`, `new-epic.sh`,
+  `write-story.sh` and `telegram.sh` (whose `--pre` escape was the last
+  instance of L-28). No gap remains here.
 
 ---
 
@@ -397,8 +431,8 @@ policy in PR #2, the first fixes in PR #3): the classifier, the verdict and
 the round section, `status.sh` and `check-mutation.sh` with the config
 loader, and the launcher. Seams 5–7 (`merge.sh`, `revert.sh`, `reset.sh`;
 `run-queue.sh`; story authoring) landed 24–25 Sep (PRs #5, #7, #8); seam 8
-(`telegram.sh`, the last numbered seam) is built on branch `ts-landing-8`,
-25 Sep. Step 2's
+(`telegram.sh`, the last numbered seam) landed 25 Sep (PR #10): the
+migration is complete. Step 2's
 "with the agent calls moved to the SDKs" was weighed at seam 4 and
 declined, with the human: `@anthropic-ai/claude-agent-sdk` runs a 234 MB CLI
 it bundles over a stream-json protocol, not the `claude` on PATH, and needs
@@ -410,5 +444,5 @@ SDK seam would replace; zero runtime dependencies hold. A seam 5 would
 first have to show that the fakes can stand in through the SDKs'
 executable-path options with their wire protocols, that subscription OAuth
 works through the bundled CLIs, and what `npm ci` in the live checkout
-costs. The human decides when the branch lands; the next few stories
-should still measure A2's effect on rounds.
+costs. The next few stories should still measure A2's effect on rounds
+(§5 has the first four).
