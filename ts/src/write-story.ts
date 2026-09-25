@@ -1,19 +1,18 @@
-// write-story.ts — write-story.sh in TypeScript (seam 7). Turns an intent
-// into a story the fleet can act on: one agent, read-only over the epic's
-// code, writes .stories/<id>.md at `status: draft`; the story is then linted
-// mechanically and left for a human to read and promote to `ready`. Nothing
-// is committed and no builder runs.
+// write-story.ts — `fleet write-story`. Turns an intent into a story the
+// fleet can act on: one agent, read-only over the epic's code, writes
+// .stories/<id>.md at `status: draft`; the story is then linted mechanically
+// and left for a human to read and promote to `ready`. Nothing is committed
+// and no builder runs.
 //
 // The agent runs in a throwaway worktree at the epic's tip (origin's, not
 // local — the launcher cuts every worktree from origin too), so it reads the
 // code the story will be built against rather than whatever the integration
-// branch happens to have. render.sh retires with this file: the prompt is
-// rendered in-process through lib/render.ts, its own byte-for-byte proof
-// against render.sh already made through seam 6 (render.test.ts).
+// branch happens to have. The prompt is rendered in-process through
+// lib/render.ts.
 //
-// Unlike the launcher's two agent calls, this one has no wall-clock timeout
-// (write-story.sh never wrapped it in `timeout`) — a human is watching a
-// one-off authoring session, not an unattended round.
+// Unlike the launcher's two agent calls, this one has no wall-clock
+// timeout — a human is watching a one-off authoring session, not an
+// unattended round.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { builderArgv, parseBuilderOutput } from './lib/agents.ts';
@@ -31,15 +30,15 @@ const ALLOWED_TOOLS = 'Read,Grep,Glob,Bash,Write';
 
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();
 
-/** write-story.sh:36: a plain identifier — the same character class as a
+/** A plain identifier — the same character class as a
  *  story id everywhere else in the harness. */
 export function isValidStoryId(id: string): boolean {
   return /^[0-9A-Za-z_-]+$/.test(id);
 }
 
-/** write-story.sh:38-45: the default is the integration branch; a `--base`
- *  must name an epic/* branch. Whether that branch actually exists on origin
- *  is a separate, git-backed check. */
+/** The default is the integration branch; a `--base` must name an epic/*
+ *  branch. Whether that branch actually exists on origin is a separate,
+ *  git-backed check. */
 export function resolveStoryBase(o: { defaultBase: string; repoName: string; baseFlag: string | undefined; baseVal: string | undefined }): string {
   if (o.baseFlag !== '--base') return o.defaultBase;
   if (o.baseVal === undefined || o.baseVal === '') throw new Die('--base needs a branch');
@@ -54,8 +53,8 @@ export interface WriteStoryOptions {
   /** After the repo name: `[story-id, intent, --base?, branch?]`. */
   argv: readonly string[];
   env: NodeJS.ProcessEnv;
-  /** Registers what must run when the process is killed (the bash EXIT trap
-   *  ran on SIGTERM too). The normal exit runs it through `finally`. */
+  /** Registers what must run when the process is killed (SIGTERM, SIGINT
+   *  or SIGHUP). The normal exit runs it through `finally`. */
   onExit: (fn: () => void) => void;
 }
 
@@ -91,9 +90,8 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     const rendered = renderPrompt(promptsDir, 'write-story.md', { STORY_ID: storyId, INTENT: intent, STORY_BASE: storyBase });
 
     log('writing');
-    // No timeout: write-story.sh never wrapped this call in `timeout`, unlike
-    // the launcher's builder/reviewer calls — a human is watching a one-off
-    // authoring session. stderr merged into stdout, as the bash `2>&1` did.
+    // No timeout, unlike the launcher's builder/reviewer calls — a human is
+    // watching a one-off authoring session. stderr merged into stdout.
     const r = await run('claude', builderArgv({ model: storyModel, maxTurns, allowedTools: ALLOWED_TOOLS }), {
       cwd: wt, input: rendered.text, timeoutSec: 0, stderr: 'merge',
     });

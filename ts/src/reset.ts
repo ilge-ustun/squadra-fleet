@@ -1,7 +1,6 @@
-// reset.ts — reset.sh in TypeScript (seam 5), its order and its every line
-// of output. A story back to the queue:
+// reset.ts — a story back to the queue:
 //
-//   reset.sh <repo> <id> [--force] [--draft]
+//   fleet reset <repo> <id> [--force] [--draft]
 //
 // removes its worktree and branch, resets the frontmatter (status and round
 // only: base and scope_deny belong to the story, not to the run), deletes
@@ -10,8 +9,8 @@
 // are on no other branch without --force. Nothing in the fleet calls this;
 // a human does, from the fleet-verdict skill.
 //
-// What changed from the bash, pinned: status: and round: are replaced in
-// the frontmatter only, where `sed 0,/^status:.*/` took the first anywhere.
+// Pinned: status: and round: are replaced in the frontmatter only, never in
+// the body.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
@@ -36,7 +35,7 @@ export interface ResetArgs {
   newStatus: 'ready' | 'draft';
 }
 
-/** reset.sh:33-42 — the flags after the repo name. */
+/** The flags after the repo name. */
 export function parseArgs(argv: readonly string[]): ResetArgs {
   let id = '';
   let force = false;
@@ -54,12 +53,12 @@ export function parseArgs(argv: readonly string[]): ResetArgs {
   return { id, force, newStatus };
 }
 
-/** reset.sh:55: the pids as `tr '\n' ' '` left them, a trailing space included. */
+/** The pids as `tr '\n' ' '` leaves them, a trailing space included. */
 export const pidsLine = (id: string, wt: string, pids: readonly string[]): string =>
   `${id} has processes running in ${wt} (${pids.join(' ')} ) — stop them first`;
 
-/** reset.sh:87's `rm -f .runs/$ID-*`: the names the glob takes — including
- *  `900-b-…` for 900, as the bash did. */
+/** `rm -f .runs/$ID-*`: the names the glob takes — including `900-b-…`
+ *  for 900. */
 export const runsOfStory = (names: readonly string[], id: string): string[] => names.filter((n) => n.startsWith(`${id}-`));
 
 // ── the program ──────────────────────────────────────────────────────────────

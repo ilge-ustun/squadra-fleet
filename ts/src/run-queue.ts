@@ -1,24 +1,24 @@
-// run-queue.ts — run-queue.sh in TypeScript (seam 6): drain every `ready`
-// story of a repo in turn, until the queue is empty. This is the piece that
-// makes the fleet a fleet: until it existed a human launched each story,
-// watched it, and launched the next one.
+// run-queue.ts — `fleet run-queue`: drain every `ready` story of a repo in
+// turn, until the queue is empty. This is the piece that makes the fleet a
+// fleet: until it existed a human launched each story, watched it, and
+// launched the next one.
 //
 // A stopped story does not stop the queue — that has been the design since
-// bash's phase 4b. needs_human, blocked and a harness die all end that story
+// phase 4b. needs_human, blocked and a harness die all end that story
 // and the next one starts. Two guards against looping forever: --max N (a
 // hard ceiling, default 20) and the same-story-twice check — a story that
 // comes back `ready` without reaching a terminal state means something is
 // wrong with the story or the harness, not with that round.
 //
-// The launcher decides; the queue merges. A hand-run launch.sh never changes
-// a branch (launch.ts never calls merge.sh) — that separation is what keeps
-// a debugging session from landing something. AUTO_MERGE=0 turns the merge
-// off without turning the fleet off.
+// The launcher decides; the queue merges. A hand-run `fleet launch` never
+// changes a branch (launch.ts never calls merge.ts) — that separation is
+// what keeps a debugging session from landing something. AUTO_MERGE=0 turns
+// the merge off without turning the fleet off.
 //
-// Each story runs as a child process (`bash launch.sh <repo> <id>`, then, on
-// a computed PASS, `bash merge.sh <repo> <id>`) with stdio fully inherited —
-// not called in-process. That process boundary isolates one story's crash or
-// Die from the rest of the drain, the same reason --all re-execs this script
+// Each story runs as a child process (`fleet launch <repo> <id>`, then, on a
+// computed PASS, `fleet merge <repo> <id>`) with stdio fully inherited — not
+// called in-process. That process boundary isolates one story's crash or Die
+// from the rest of the drain, the same reason --all re-execs this command
 // once per repo rather than looping over loaded configs in one process.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -37,14 +37,13 @@ export const USAGE = 'usage: fleet run-queue <repo>|--all [--max N]';
 
 const DIM = '\x1b[2m';
 const RST = '\x1b[0m';
-/** run-queue.sh:30's `LOG_TAG=queue` — lib.sh's log()/warn() prefix every
- *  line `[queue] `. Not inherited by the child processes it launches
- *  (unexported in the bash, and each is a fresh `bash launch.sh`/`merge.sh`
- *  invocation here too), so only the queue's own lines carry it. */
+/** log()/warn() prefix every line `[queue] `. Not inherited by the child
+ *  processes it launches (each is a fresh `fleet launch`/`fleet merge`
+ *  invocation), so only the queue's own lines carry it. */
 const TAG = { tag: 'queue' } as const;
 
-/** run-queue.sh:37: `--max N` only where N is argv[0] right after the repo
- *  name; anything else leaves MAX from the environment (default 20). */
+/** `--max N` only as the first thing after the repo name; anything else
+ *  leaves MAX from the environment (default 20). */
 export function readMax(argv: readonly string[], env: NodeJS.ProcessEnv): number {
   if (argv[0] === '--max') {
     const n = argv[1];
@@ -61,15 +60,14 @@ export interface RanLine {
   rc: number;
 }
 
-/** run-queue.sh:135: `"$id ${status:-?} ${verdict:-—} exit=$rc"`. */
+/** `"$id ${status:-?} ${verdict:-—} exit=$rc"`. */
 export function formatRanLine(r: RanLine): string {
   return `${r.id} ${r.status || '?'} ${r.verdict || '—'} exit=${r.rc}`;
 }
 
-/** refresh_from_origin (run-queue.sh:79-100): never fails the drain — no
- *  upstream, a merge/rebase already in progress, a failed fetch or a merge
- *  conflict are all warnings, and pre-run HEAD stays an ancestor of any new
- *  HEAD. */
+/** Never fails the drain — no upstream, a merge/rebase already in progress,
+ *  a failed fetch or a merge conflict are all warnings, and pre-run HEAD
+ *  stays an ancestor of any new HEAD. */
 export function refreshFromOrigin(root: string): void {
   const upstream = upstreamBranch(root);
   if (upstream === '') {
@@ -94,7 +92,7 @@ export function refreshFromOrigin(root: string): void {
   log(`refreshed from ${upstream}`, TAG);
 }
 
-/** `"$FLEET_REGISTRY_DIR"/*.env` (run-queue.sh:44), sorted the way a shell
+/** `"$FLEET_REGISTRY_DIR"/*.env`, sorted the way a shell
  *  glob is: the walk order --all uses. */
 export function registeredRepos(fleetHome: string, env: NodeJS.ProcessEnv): string[] {
   const dir = env['FLEET_REGISTRY_DIR'] ?? `${fleetHome}/repos`;
@@ -117,10 +115,10 @@ export interface RunAllOptions {
   env: NodeJS.ProcessEnv;
 }
 
-/** --all (run-queue.sh:42-52): a fresh `bash run-queue.sh <name> "$@"` per
- *  registered repo, so no configuration, counter or die crosses from one
- *  repo to the next, and --max stays a per-repo ceiling. Each child's own
- *  exit status is not checked, as the bash never checked it. */
+/** --all: a fresh `fleet run-queue <name> "$@"` per registered repo, so no
+ *  configuration, counter or die crosses from one repo to the next, and
+ *  --max stays a per-repo ceiling. Each child's own exit status is not
+ *  checked. */
 export function runAll(o: RunAllOptions): number {
   const dir = o.env['FLEET_REGISTRY_DIR'] ?? `${o.fleetHome}/repos`;
   const repos = registeredRepos(o.fleetHome, o.env);
@@ -154,8 +152,8 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   // for `ready` misses it, so the queue would report itself empty while a
   // stranded story sat there forever. Reap first — launch.ts owns that logic
   // and knows to check the worktree for live processes before declaring
-  // anything an orphan. Its exit status is not checked, as the bash never
-  // checked it: a die here (a live orphan) does not stop the drain.
+  // anything an orphan. Its exit status is not checked: a die here (a live
+  // orphan) does not stop the drain.
   log('reaping orphans from any interrupted run', TAG);
   runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, '--reap']);
 
@@ -186,9 +184,6 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
 
     const status = storyField(root, id, 'status');
     const reviewPath = `${root}/.review/${id}.md`;
-    // run-queue.sh also awk-scraped `computed:`'s reasons here (:138), but
-    // never read the result — dropped, not ported: it had no observable
-    // effect on any output or decision.
     const verdict = existsSync(reviewPath) ? (readReview(readFileSync(reviewPath, 'utf8')).verdict ?? '') : '';
     ran.push({ id, status, verdict, rc });
 

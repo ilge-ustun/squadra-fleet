@@ -1,26 +1,23 @@
-// merge.ts — merge.sh in TypeScript (seam 5), its order and its every line of
-// output. The wrapper merge.sh keeps the command lines the queue, the bot,
-// the skills and the docs use:
+// merge.ts — `fleet merge <repo> …` (bin/merge.ts), as the queue, the bot,
+// the skills and the docs call it:
 //
-//   merge.sh <repo> <id>          a story into its epic   — the queue calls this
-//   merge.sh <repo> <id> --land   a story whose base IS the integration branch,
-//                                 onto it — a human's word (/merge from the phone)
-//   merge.sh <repo> --epic <name> an epic into the integration branch — a human's
+//   <repo> <id>            a story into its epic — the queue calls this
+//   <repo> <id> --land     a story whose base IS the integration branch, onto
+//                          it — a human's word (/merge from the phone)
+//   <repo> --epic <name>   an epic into the integration branch — a human's
 //
-// Written, as the bash was, as a list of refusals (merge.sh:25-35) and then
-// the part that earns the autonomy: the merge happens in a throwaway
-// worktree at origin's tip and the suite, the build and the lint run against
-// the MERGED result; nothing is pushed until that is green. In pr mode the
-// branch is pushed and PR_CMD opens the request; nothing is merged here.
+// Written as a list of refusals and then the part that earns the autonomy:
+// the merge happens in a throwaway worktree at origin's tip and the suite,
+// the build and the lint run against the MERGED result; nothing is pushed
+// until that is green. In pr mode the branch is pushed and PR_CMD opens the
+// request; nothing is merged here.
 //
-// What changed from the bash, each pinned by a test: the story's state comes
-// from status.ts in-process, not `status.sh --json | jq`; .runs/ is created
-// before the merge log (the bash wrote the log first, so a checkout without
-// .runs/ reported a clean merge as a conflict); the `merged:` record touches
-// the frontmatter only; a seed file that cannot be copied is a die, as in the
-// launcher; a story with no review or no verdict line is refused in words,
-// where bash printed "computed null". No fleet lock here, as there was none:
-// the bot holds it around this script.
+// Pinned, each by a test: the story's state comes from status.ts
+// in-process; .runs/ is created before the merge log, so a checkout without
+// .runs/ merges (case 125b); the `merged:` record touches the frontmatter
+// only; a seed file that cannot be copied is a die, as in the launcher; a
+// story with no review or no verdict line is refused in words. No fleet lock
+// here: the bot holds it around this command.
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { runMergeBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -51,7 +48,7 @@ export interface MergeArgs {
   land: boolean;
 }
 
-/** merge.sh:55-71 — the flags after the repo name. */
+/** The flags after the repo name. */
 export function parseArgs(argv: readonly string[], baseBranch: string): MergeArgs {
   let mode: MergeArgs['mode'] = 'story';
   let id = '';
@@ -90,7 +87,7 @@ export interface RefusalContext {
 
 export type Refusal = { kind: 'die'; message: string } | { kind: 'already' } | { kind: 'go' };
 
-/** merge.sh:100-125: the story-mode refusals, in that order, from the row
+/** The story-mode refusals, in that order, from the row
  *  status.ts computed. `already` is the exit-0 "nothing to do". */
 export function refusal(r: StoryRow, c: RefusalContext): Refusal {
   const die = (message: string): Refusal => ({ kind: 'die', message });
@@ -118,9 +115,8 @@ export function refusal(r: StoryRow, c: RefusalContext): Refusal {
   return { kind: 'go' };
 }
 
-/** merge.sh:178-180: the untracked files a fresh worktree does not inherit,
- *  copied when the checkout has them, skipped when not. A copy that fails is
- *  a die (bash printed cp's error and went on — pinned). */
+/** The untracked files a fresh worktree does not inherit, copied when the
+ *  checkout has them, skipped when not. A copy that fails is a die — pinned. */
 export function seedMergeWorktree(root: string, mwt: string, seedFiles: readonly string[]): void {
   for (const f of seedFiles) {
     if (!isFile(`${root}/${f}`)) continue;
@@ -138,7 +134,7 @@ export interface MergeOptions {
   /** After the repo name. */
   argv: readonly string[];
   env: NodeJS.ProcessEnv;
-  /** The bin's EXIT-trap hook: the throwaway worktree is removed on a signal too. */
+  /** The bin's exit hook: the throwaway worktree is removed on a signal too. */
   onExit: (fn: () => void) => void;
   procsInWorktree?: (path: string) => string[];
 }
@@ -292,8 +288,8 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     }
 
     // The builder's worktree has done its job: its commits are in the base,
-    // and revert.sh works from the recorded sha. The branch stays. Liveness
-    // is checked again: a merge takes minutes.
+    // and `fleet revert` works from the recorded sha. The branch stays.
+    // Liveness is checked again: a merge takes minutes.
     const wt = `${root}/../wt-${id}`;
     if (isDir(wt)) {
       if (procs(wt).length > 0) warn(`something is running in ${wt} — left in place; remove it with: git worktree remove --force ${wt}`);

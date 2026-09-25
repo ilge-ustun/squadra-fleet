@@ -1,7 +1,7 @@
-// What the fleet is doing and what it decided — status.sh's walk over
-// .stories/, .review/, .blocked/, the worktrees and git, as one pure
-// function of the checkout. Read-only: safe while a launcher works, safe
-// from a phone over ssh. No fetch (status.sh:66-68).
+// What the fleet is doing and what it decided — a walk over .stories/,
+// .review/, .blocked/, the worktrees and git, as one pure function of the
+// checkout. Read-only: safe while a launcher works, safe from a phone over
+// ssh. No fetch.
 //
 // The landing state is derived on every run, never stored — the story's
 // frontmatter `status:` is authoritative and is left alone:
@@ -18,7 +18,7 @@
 // branch. story/011 merged into epic/ui-polish reaches develop only when
 // that epic does; checking against BASE_BRANCH reported it unmerged
 // forever. And origin's branch is the truth about what has landed when this
-// checkout knows it: merge.sh publishes by pushing, which moves
+// checkout knows it: `fleet merge` publishes by pushing, which moves
 // origin/<branch> at once, while a checked-out local branch lags.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
@@ -27,8 +27,8 @@ import { branchExists, isAncestor, refExists, revListCount } from './lib/git.ts'
 import { procsInWorktree as liveProcs } from './lib/procs.ts';
 import { readReview } from './lib/review.ts';
 
-/** status.sh's placeholder for an absent value — also a JSON sentinel
- *  merge.sh compares `branch` against. */
+/** The placeholder for an absent value — also the sentinel merge.ts
+ *  compares `branch` against. */
 export const DASH = '—';
 
 export interface StoryRow {
@@ -39,7 +39,7 @@ export interface StoryRow {
   /** The frontmatter's text, or DASH; the JSON view turns digits into a number. */
   round: string;
   /** Field 2 of `verdict:`; '' when the review has no such line; DASH when
-   *  there is no review file at all (status.sh:146-148). */
+   *  there is no review file at all. */
   verdict: string;
   base: string;
   /** `story/<id>`, or DASH when no such local branch exists. */
@@ -60,7 +60,7 @@ export interface EpicRow {
   merged: number;
   ahead: number;
   /** false when neither origin nor this checkout has the branch — a story
-   *  names an epic that new-epic.sh has not made yet (24 Sep). */
+   *  names an epic that `fleet new-epic` has not made yet (24 Sep). */
   exists?: boolean;
 }
 
@@ -114,13 +114,11 @@ export function storyIds(root: string): string[] {
     .filter((id) => id !== 'TEMPLATE');
 }
 
-/** Seam 6: the one choice of "next ready story", shared by a bare
- *  `launch.sh <repo>` and the queue's drain — run-queue.sh's own next_ready
- *  always skipped TEMPLATE.md; launch.ts's did not (storyFiles() kept the
- *  bash glob's original, non-skipping behaviour), so a bare launch on a repo
- *  whose TEMPLATE.md carries `status: ready` (a real state, not a
- *  hypothetical one — khaita's TEMPLATE.md does) would try to build the
- *  template itself. */
+/** The one choice of "next ready story", shared by a bare
+ *  `fleet launch <repo>` and the queue's drain. TEMPLATE.md is skipped: on
+ *  a repo whose TEMPLATE.md carries `status: ready` (a real state, not a
+ *  hypothetical one — khaita's TEMPLATE.md does) a bare launch would
+ *  otherwise try to build the template itself (case 128). */
 export function nextReady(root: string): string {
   return storyIds(root).find((id) => storyField(root, id, 'status') === 'ready') ?? '';
 }
@@ -136,7 +134,7 @@ export function listDir(dir: string): string[] | undefined {
 }
 
 /** The story's first heading, minus a "Story NNN:" prefix that would repeat
- *  the ID column (status.sh:76-78). '' when there is none. */
+ *  the ID column. '' when there is none. */
 export function titleOf(text: string): string {
   for (const line of records(text)) {
     if (!line.startsWith('# ')) continue;
@@ -157,7 +155,7 @@ export interface LandingInput {
   intoInBase: () => boolean;
 }
 
-/** status.sh:186-199. A story with no branch and no record has nothing that
+/** A story with no branch and no record has nothing that
  *  could be merged, so it is not awaiting one. */
 export function landingOf(i: LandingInput): string {
   if (i.status !== 'done') return i.status;
@@ -181,7 +179,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
   const ids = storyIds(root);
 
   // The epic block: counts from the same walk the table makes, so the two
-  // cannot disagree (status.sh:80-121). Every story, whatever `one` says.
+  // cannot disagree. Every story, whatever `one` says.
   const total = new Map<string, number>();
   const mergedCount = new Map<string, number>();
   for (const id of ids) {
@@ -214,8 +212,8 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
     const reasons = review?.reasons ?? '';
 
     const notes: string[] = [];
-    // The literal "$REPO_ROOT/../wt-$id": the kernel resolves `..` through a
-    // symlinked root as bash's -d did; path.join would not.
+    // The literal "$REPO_ROOT/../wt-$id", the path the launcher makes: the
+    // kernel resolves `..` through a symlinked root; path.join would not.
     const wt = `${root}/../wt-${id}`;
     let worktree = false;
     let live = false;
@@ -237,7 +235,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
       branch = DASH;
     }
     // A branch deleted after its merge leaves only the `merged:` sha
-    // merge.sh recorded; that sha in the base is the same fact.
+    // `fleet merge` recorded; that sha in the base is the same fact.
     const mergedSha = storyField(root, id, 'merged');
     if (!merged && mergedSha !== '' && isAncestor(root, mergedSha, into)) merged = true;
 

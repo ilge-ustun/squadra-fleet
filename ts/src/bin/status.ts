@@ -3,7 +3,7 @@
 //
 //   <repo>              the epics, then every story of the repo
 //   <repo> 007          one story, with the latest round's machine block
-//   <repo> --json       the same values as JSON, for the bot and merge
+//   <repo> --json       the same values as JSON, for machines
 //   <repo> --epics      only the epic block — what a human decides to merge
 //   <repo> --bot        the phone form: a <pre> block wraps at ~40 columns
 //                       there, so no table — per story: id and title, then
