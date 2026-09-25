@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -7,6 +8,15 @@ import {
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
+
+/** The suite's shadow_check (L-14): a fake that does not shadow the real
+ *  binary is the real binary, so nothing is spawned unless `name` resolves
+ *  to the fake on this env's PATH. */
+function shadowed(env: NodeJS.ProcessEnv, name: string): NodeJS.ProcessEnv {
+  const got = execFileSync('bash', ['-c', `command -v ${name} || true`], { env, encoding: 'utf8' }).trim();
+  if (got !== join(FAKES, name)) throw new Error(`'${name}' resolves to '${got}', not the fake — refusing to run it`);
+  return env;
+}
 
 describe('the argv the CLIs get — launch.sh:521-524, 628-630', () => {
   it('builder: claude -p, the model, the turn ceiling, the tools, JSON out', () => {
@@ -103,7 +113,7 @@ describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex',
     const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
     const { mkdirSync } = await import('node:fs');
     mkdirSync(trace); mkdirSync(wt);
-    const env = { ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_BUILDER: 'nocommit' };
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_BUILDER: 'nocommit' }, 'claude');
     try {
       // No trailing newline: a rendered prompt never has one ($(…) strips it),
       // and the fake's own `$(cat)` would drop it anyway.
@@ -124,7 +134,7 @@ describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex',
     const { mkdirSync } = await import('node:fs');
     mkdirSync(trace); mkdirSync(wt);
     writeFileSync(join(wt, 'unused'), '');
-    const env = { ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_REVIEWER: 'PASS', FAKE_MUTATIONS: 'none' };
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_REVIEWER: 'PASS', FAKE_MUTATIONS: 'none' }, 'codex');
     try {
       const stderrFile = join(dir, 'reviewer.stderr');
       const r = await runReviewer({ wt, prompt: 'review it', model: 'fleet-test-reviewer', timeoutSec: 30, stderrFile, env });
