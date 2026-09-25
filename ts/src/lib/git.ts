@@ -246,3 +246,21 @@ export function mergeNoEditQuiet(root: string, ref: string): number {
   if (r.stdout !== '') out(r.stdout);
   return r.status;
 }
+
+// ── lint-story's citation walk (lint-story.sh:127-140 — seam 7) ─────────────
+
+/** `git cat-file -e <ref>:<path> 2>/dev/null`: does the path exist as a blob
+ *  at that ref — false when the ref itself is unknown, not thrown, matching
+ *  cat-file's own exit status. */
+export function catFileExists(root: string, ref: string, path: string): boolean {
+  return runSync('git', ['-C', root, 'cat-file', '-e', `${ref}:${path}`]).status === 0;
+}
+
+/** `git show <ref>:<path> 2>/dev/null | wc -l`: the newline count, not a
+ *  split length — a file with no trailing newline is one short, as wc -l
+ *  always was; 0 when git cannot answer (missing path or unknown ref). */
+export function showLineCount(root: string, ref: string, path: string): number {
+  const r = runSync('git', ['-C', root, 'show', `${ref}:${path}`]);
+  if (r.status !== 0) return 0;
+  return (r.stdout.match(/\n/g) ?? []).length;
+}

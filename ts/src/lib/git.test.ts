@@ -9,6 +9,7 @@ import {
   addAll, branchDelete, branchForce, logOneline, lsFilesTracked, mergeAbort, mergeNoFf, pushRef, revertAbort, revertMerge,
   worktreeCheckedOutBranches, worktreePrune, currentBranch, mergeFfOnly,
   fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch,
+  catFileExists, showLineCount,
 } from './git.ts';
 import { existsSync, readFileSync } from 'node:fs';
 
@@ -73,6 +74,23 @@ describe('the queries status.sh makes', () => {
     expect(revListCount(root, 'story/1..base')).toBe(1);
     expect(revListCount(root, 'origin/base..story/1')).toBe(1);
     expect(revListCount(root, 'nope..base')).toBe(0);
+  });
+});
+
+describe("lint-story's citation walk (seam 7)", () => {
+  it('catFileExists: a blob at a ref, false for a missing path or an unknown ref', () => {
+    expect(catFileExists(root, 'base', 'a')).toBe(true);
+    expect(catFileExists(root, 'base', 'nope')).toBe(false);
+    expect(catFileExists(root, 'origin/nope', 'a')).toBe(false);
+    // story/1 only has 'a' and 'c' — 'b' was added on base after the branch.
+    expect(catFileExists(root, 'story/1', 'c')).toBe(true);
+    expect(catFileExists(root, 'story/1', 'b')).toBe(false);
+  });
+
+  it('showLineCount: the newline count, 0 for a missing path or an unknown ref', () => {
+    expect(showLineCount(root, 'base', 'a')).toBe(1); // 'one\n'
+    expect(showLineCount(root, 'base', 'nope')).toBe(0);
+    expect(showLineCount(root, 'origin/nope', 'a')).toBe(0);
   });
 });
 
