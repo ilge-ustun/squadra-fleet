@@ -264,3 +264,19 @@ export function showLineCount(root: string, ref: string, path: string): number {
   if (r.status !== 0) return 0;
   return (r.stdout.match(/\n/g) ?? []).length;
 }
+
+// ── new-epic's operations (new-epic.sh:36-39 — seam 7) ───────────────────────
+
+/** `git fetch -q <remote> <ref>` (new-epic.sh:38): the one fetch that names a
+ *  single ref rather than the whole remote — the newly pushed epic, fetched
+ *  back so the caller's own checkout knows it. */
+export function fetchRef(root: string, remote: string, ref: string): number {
+  return runSync('git', ['-C', root, 'fetch', '-q', remote, ref], { stderr: 'inherit' }).status;
+}
+
+/** `git rev-parse --short <ref> 2>/dev/null` (new-epic.sh:39): the
+ *  abbreviated sha for a log line; '' when git cannot answer. */
+export function revParseShort(root: string, ref: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--short', ref]);
+  return r.status === 0 ? r.stdout.trim() : '';
+}

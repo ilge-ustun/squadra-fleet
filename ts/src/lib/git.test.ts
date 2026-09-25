@@ -10,6 +10,7 @@ import {
   worktreeCheckedOutBranches, worktreePrune, currentBranch, mergeFfOnly,
   fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch,
   catFileExists, showLineCount,
+  fetchRef, revParseShort,
 } from './git.ts';
 import { existsSync, readFileSync } from 'node:fs';
 
@@ -355,6 +356,22 @@ describe('the queue\'s refresh_from_origin operations (seam 6)', () => {
   it('gitDir: the absolute .git dir; <root>/.git when git cannot answer', () => {
     expect(existsSync(gitDir(clone))).toBe(true);
     expect(gitDir(join(d5, 'nowhere'))).toBe(join(d5, 'nowhere', '.git'));
+  });
+
+  it('fetchRef: a single ref, not the whole remote (new-epic.sh:38)', () => {
+    g(['push', '-q', 'origin', 'base:refs/heads/epic/x']);
+    const other = join(d5, 'fetch-other');
+    runSync('git', ['clone', '-q', bare, other]);
+    expect(fetchRef(other, 'origin', 'epic/x')).toBe(0);
+    expect(g(['rev-parse', 'FETCH_HEAD'], other)).toBe(g(['rev-parse', 'base']));
+    expect(fetchRef(other, 'origin', 'nosuch')).not.toBe(0);
+  });
+
+  it("revParseShort: the abbreviated sha; '' when git cannot answer", () => {
+    const short = revParseShort(clone, 'base');
+    expect(short.length).toBeGreaterThan(0);
+    expect(g(['rev-parse', 'base'])).toMatch(new RegExp(`^${short}`));
+    expect(revParseShort(clone, 'nosuch')).toBe('');
   });
 
   it('fetchQuiet: 0 on a real remote, non-zero when it cannot be reached', () => {
