@@ -31,12 +31,10 @@ Acceptance criteria, Known weakness of the instrument, Human verification,
 Out of scope. Frontmatter: `status: draft` (always — a human promotes it to
 `ready`), `round: 0`, `base: {{STORY_BASE}}`, and `scope_deny:`.
 `model:` picks the builder, by an alias only — never a pinned id: omit it
-for the default (`sonnet`) on an ordinary bounded story; `haiku` for a
-small, fully specified one (one or two files, one or two ACs, every
-instrument and mutation spelled out — Haiku builds one round, then the
-default takes over); `opus` for design-heavy or diagnose-first work (a
-state machine, a service worker, several interacting files, a cause not yet
-known).
+for the default (`sonnet`) on an ordinary bounded story; `opus` for
+design-heavy or diagnose-first work (a state machine, a service worker,
+several interacting files, a cause not yet known). Do not use `haiku` —
+retired 24 Sep 2026 after both real trials needed round-2 escalation.
 
 ## The four things that have actually cost this fleet rounds
 

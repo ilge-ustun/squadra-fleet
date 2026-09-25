@@ -52,7 +52,7 @@ systemctl --user enable --now fleet-bot.timer
 
 ### The agent updater (a third pair)
 
-The fleet names models by alias (`sonnet`, `opus`, `haiku`, codex's own
+The fleet names models by alias (`sonnet`, `opus`, `fable`, codex's own
 default), and an alias is only as new as the CLI resolving it. Claude Code
 updates itself; codex, an npm global under nvm, does not.
 `fleet-agents-update.timer` runs `update-agents.sh` on Sundays at 04:30: it

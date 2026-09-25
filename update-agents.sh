@@ -2,7 +2,7 @@
 #
 # update-agents.sh — bring the two agent CLIs to their newest release.
 #
-# The fleet names models by alias (sonnet, opus, haiku; codex's own default),
+# The fleet names models by alias (sonnet, opus, fable; codex's own default),
 # and an alias means "the newest model this CLI knows". Claude Code updates
 # itself; codex, an npm global under nvm, never does, so its default stays
 # whatever the installed version shipped with. fleet-agents-update.timer

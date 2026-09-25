@@ -2881,13 +2881,17 @@ case_116_lint_story_model() {
     printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
     out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
   }
-  for m in haiku sonnet opus fable; do
+  for m in sonnet opus fable; do
     lint_model "ok-$m" "model: $m"; assert_eq "$rc" 0 "model: $m is accepted"
   done
   lint_model none "";                         assert_eq "$rc" 0 "no model: is accepted (the default)"
   lint_model pinned "model: claude-opus-5";   assert_eq "$rc" 1 "a pinned id is an error"
-  assert_contains "$out" "haiku, sonnet, opus or fable" "naming the aliases"
+  assert_contains "$out" "sonnet, opus or fable" "naming the aliases"
   lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
+  # 24 Sep: retired after both real trials (khaita 021, 025) needed round-2
+  # escalation on round 1 — see docs/plans/2026-09-23-typescript-migration.md.
+  lint_model haiku "model: haiku";            assert_eq "$rc" 1 "haiku is retired, no longer an alias"
+  assert_contains "$out" "sonnet, opus or fable" "the error still names the live aliases"
 }
 
 # 24 Sep. Aliases only track new releases if the CLIs themselves are new:
