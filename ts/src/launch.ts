@@ -59,7 +59,7 @@ import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
 import { computeVerdict } from './lib/verdict.ts';
-import { byCodePoint, nextReady } from './status.ts';
+import { byCodePoint, nextToRun } from './status.ts';
 
 /** lib.sh's `die`, from lib/die.ts; still exported here for launch.test.ts. */
 export { Die };
@@ -330,7 +330,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   reapOrphans();
   if (o.argv[0] === '--reap') return 0;
 
-  const storyId = o.argv[0] || nextReady(root);
+  const storyId = o.argv[0] || nextToRun(root);
   if (storyId === '') {
     log('queue empty — nothing ready');
     return 0;

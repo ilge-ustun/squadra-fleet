@@ -3438,7 +3438,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_136_fleet_entry_point case_137_one_launch_per_repo
        case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
        case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round
-       case_142_refused_story_resumes_at_its_review)
+       case_142_refused_story_resumes_at_its_review
+       case_143_queue_pauses_on_a_refused_review)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3802,6 +3803,56 @@ case_142_refused_story_resumes_at_its_review() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
   assert_eq "$(calls claude)" 1 "only the first launch's builder ever ran"
   assert_eq "$(field status)" done "reviewed and done"
+}
+
+# The queue pauses on a refused review, waits for the story, then runs it
+# first. A launch that exits 69 stops the drain — every story after it
+# would be refused too — and the queue says nothing of its own: the
+# launcher has sent the one message. While the refused story waits for a
+# human's choice nothing starts; after /wait it holds until not_before; then
+# that story runs first, ahead of lower ids, as a review-only round. Red
+# while ts/src/run-queue.ts reads 69 as an ordinary needs_human and starts
+# the next story.
+case_143_queue_pauses_on_a_refused_review() {
+  CASE="143a a refused review stops the drain"; fixture c143 draft
+  sed "s/Story $STORY/Story 901/; s/^status: draft/status: ready/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  sent_count() { grep -c '^---$' "$TRACE/notified" 2>/dev/null || echo 0; }
+  s901() { frontmatter "$REPO/.stories/901.md" "$1"; }
+
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_eq "$(s901 status)" needs_human "901 waits for a choice"
+  assert_grep "901: the reviewer's provider refused — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
+  assert_eq "$(sent_count)" 1 "one message, the launcher's"
+  assert_contains "$(cat "$TRACE/notified")" "/wait t 901" "…the one with the choices"
+
+  CASE="143b no answer yet: nothing starts"
+  sed -i 's/^status: draft/status: ready/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "900 promoted meanwhile"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_grep 'paused: 901 waits for /wait or /fallback' "$FX/queue.log" "the pause is named"
+  assert_eq "$(field status)" ready "900 does not jump the pause"
+  assert_eq "$(calls claude)" 1 "no builder ran"
+  assert_eq "$(sent_count)" 1 "nothing new was sent"
+
+  CASE="143c /wait: held until not_before"
+  sed -i '0,/^status:.*/s//status: ready/' "$REPO/.stories/901.md"
+  git -C "$REPO" commit -qam "/wait 901"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_contains "$(cat "$FX/queue.log")" "holding for 901 until $(s901 not_before)" "the hold names the story and the time"
+  assert_eq "$(field status)" ready "900 still waits"
+  assert_eq "$(calls claude)" 1 "no builder ran"
+
+  CASE="143d the reset has passed: the paused story first, then the rest"
+  sed -i "s/^not_before:.*/not_before: $(date -d '-1 minute' -Iseconds)/" "$REPO/.stories/901.md"
+  git -C "$REPO" commit -qam "the reset passed"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$(s901 status)" done "901 reviewed and done"
+  assert_eq "$(field status)" done "then 900"
+  assert_eq "$(grep -oE 'story (900|901) \(' "$FX/queue.log" | head -1)" "story 901 (" "901 went first, ahead of the lower id"
+  assert_eq "$(calls claude)" 2 "901's resumed round built nothing; 900's did"
 }
 
 for c in "${CASES[@]}"; do
