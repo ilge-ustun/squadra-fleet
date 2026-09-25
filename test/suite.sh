@@ -3435,7 +3435,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
-       case_136_fleet_entry_point case_137_one_launch_per_repo)
+       case_136_fleet_entry_point case_137_one_launch_per_repo
+       case_138_reap_sees_a_storys_trees)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3596,6 +3597,31 @@ case_137_one_launch_per_repo() {
   assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" done "…to done"
   run --reap
   assert_eq "$RC" 0 "and once nothing runs, --reap takes the lock"
+}
+
+# Reap looks in both of a story's trees. Under the launch lock no launcher
+# is alive while reap runs, so a process in wt-<id> or wt-<id>-review is an
+# agent its launcher left behind (killed with SIGKILL, say) — still working
+# on the story, so the story is not an orphan and the reap stops. Red today
+# for (a): reap looked only in wt-<id>, the tree the 21 Sep incident missed.
+# (b) characterises the check that already existed — red against a copy of
+# ts/src/launch.ts with the `pids.length > 0` throw deleted.
+case_138_reap_sees_a_storys_trees() {
+  local tree pid
+  for tree in "wt-$STORY-review" "wt-$STORY"; do
+    CASE="138 a process left in $tree stops the reap"; fixture "c138-$tree" in_progress
+    mkdir -p "$FX/$tree"
+    ( cd "$FX/$tree" && exec sleep 30 ) &
+    pid=$!
+    sleep 0.3
+    run --reap
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    assert_eq "$RC" 1 "a live orphan is a die"
+    assert_grep "$tree" "$LOG" "the message names the tree"
+    assert_grep "$pid" "$LOG" "…and the pid"
+    assert_eq "$(field status)" in_progress "the story is left alone"
+    assert_eq "$(git -C "$REPO" log --format=%s | grep -c "^story($STORY): ready")" 0 "no ready commit"
+  done
 }
 
 for c in "${CASES[@]}"; do

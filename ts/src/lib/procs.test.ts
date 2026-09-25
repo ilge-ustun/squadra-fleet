@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { procsInWorktree } from './procs.ts';
+import { procsInWorktree, storyTrees } from './procs.ts';
 
 // A child that sits in a subdirectory of the "worktree": the launcher's
 // agents are found the same way, by cwd, because the path appears nowhere in
@@ -46,5 +46,11 @@ describe('procsInWorktree — by cwd', () => {
 
   it('a path that does not exist has nothing in it', () => {
     expect(procsInWorktree(join(dir, 'nope'))).toEqual([]);
+  });
+});
+
+describe('storyTrees', () => {
+  it("is the builder's tree and the reviewer's, siblings of the target", () => {
+    expect(storyTrees('/w/repo', '900')).toEqual(['/w/repo/../wt-900', '/w/repo/../wt-900-review']);
   });
 });
