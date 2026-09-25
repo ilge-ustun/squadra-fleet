@@ -1,13 +1,13 @@
 ---
 name: fleet-story
-description: Turn a wish into a fleet story — write the intent, run write-story.sh, review the draft as the human would, hand-edit, lint with lint-story.sh, commit the draft. Use when asked to prepare, write, draft, fix or review a story for a fleet target such as khaita-app.
+description: Turn a wish into a fleet story — write the intent, run fleet write-story, review the draft as the human would, hand-edit, lint with fleet lint-story, commit the draft. Use when asked to prepare, write, draft, fix or review a story for a fleet target such as khaita-app.
 ---
 
 # From a wish to a story a human can promote
 
 A story is the only specification the builder and the reviewer get; neither
-can ask anything. `write-story.sh` has an agent draft it from the code, and
-`lint-story.sh` checks it mechanically. Your part is the intent going in and
+can ask anything. `fleet write-story` has an agent draft it from the code,
+and `fleet lint-story` checks it mechanically. Your part is the intent going in and
 the review coming out. The human's part is promoting it.
 
 ## 1. The intent
@@ -26,8 +26,8 @@ this one continues it. Do not paste code into an intent.
 
 ```bash
 cd ~/work/fleet
-bash new-epic.sh <repo> <name>                                   # only if the epic does not exist
-bash write-story.sh <repo> <id> "$(cat intent.txt)" --base epic/<name>
+./fleet new-epic <repo> <name>                                   # only if the epic does not exist
+./fleet write-story <repo> <id> "$(cat intent.txt)" --base epic/<name>
 ```
 
 Ids are three digits and ascend in the order the stories should run — the
@@ -37,7 +37,7 @@ reads `on epic`: the writer reads the epic's tip, and until then the code
 it would cite still has the previous story's defect.
 
 The writer runs in a throwaway worktree at the epic's tip and writes
-`.stories/<id>.md` at `status: draft`. The script lints it and prints the
+`.stories/<id>.md` at `status: draft`. The command lints it and prints the
 result. Its exit code is the lint's.
 
 ## 3. The review — this is the work
@@ -66,21 +66,20 @@ checkout, which is usually `develop`):
    unconditionally.
 8. **Product decisions.** If Evidence raises a question, stop and put it to
    the human; do not answer it yourself. When they answer, add the AC by
-   hand — that has been the right move before (stories 016, 018).
+   hand — that has been the right move before.
 9. **model:** in the frontmatter names the builder's model, as an alias
-   only (`lint-story.sh` refuses anything else), so a new release is
+   only (`fleet lint-story` refuses anything else), so a new release is
    picked up with no edit: omit it for the default (`sonnet`) on a bounded
    story; `opus` for design-heavy or diagnose-first stories (service-worker
    rewrites, state machines, an unknown cause). `fable` only after a trial
-   is recorded in `docs/COORDINATORS.md` (Trials). (`haiku` was retired 24 Sep
-   2026 — both real trials, khaita 021 and 025, needed round-2 escalation
-   on round 1, so the cheap tier never once saved a round.)
+   is recorded in `docs/COORDINATORS.md` (Trials). `haiku` is retired: in
+   both of its trials the cheap tier cost a round instead of saving one.
 
 Hand-edit what the review found. Keep the writer's citations unless you
 verified a replacement. After any edit:
 
 ```bash
-bash lint-story.sh <repo> <id> --strict     # 0 errors before you commit
+./fleet lint-story <repo> <id> --strict     # 0 errors before you commit
 ```
 
 ## 4. Commit and hand over
