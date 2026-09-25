@@ -24,8 +24,8 @@ re-executed under `env -i`. No network, no model.
 
 - **A case is observed red before the change.** Most cases characterise
   behaviour a script already has, so red means running the case against a
-  copy with the block deleted: `FLEET_RENDER_OVERRIDE=<file>`,
-  `FLEET_LIB_OVERRIDE` substitute that copy into the fixture;
+  copy with the block deleted: `FLEET_LIB_OVERRIDE=<file>`
+  substitutes a copy of `lib.sh` into the fixture;
   `FLEET_TS_OVERRIDE=<dir>` lays a directory over `ts/src/` (one file or
   many), or the case writes a stub into the fixture's `ts/src/lib/` after
   `fixture` (cases 106-110, 113). A new feature is red because it is absent. A case
