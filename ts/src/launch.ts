@@ -42,7 +42,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { builderModelUsed, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
+import { builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
 import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -169,6 +169,16 @@ export function pausedMessage(o: { repo: string; id: string; who: string; refusa
     `Nothing is lost: the builder's work is on story/${o.id} and the round is not counted. The queue is paused until you choose:`,
     `/wait ${o.repo} ${o.id} — resume this story automatically after ${when}`,
     `/fallback ${o.repo} ${o.id} — review it now with Claude (opus); a weaker check: the same vendor as its builder`,
+  ].join('\n');
+}
+
+/** The one message a builder refused by Claude sends. The human decided
+ *  (25 Sep) that nothing follows it: no retry, no fallback, no hold. */
+export function builderRefusedMessage(o: { repo: string; id: string; refusal: string }): string {
+  return [
+    `${o.repo}/${o.id} — Claude refused the builder: "${o.refusal}"`,
+    `Nothing else will happen: the story is stopped, the round is not counted, and anything the builder committed stays on story/${o.id} unreviewed.`,
+    `/promote ${o.repo} ${o.id} when you want it to run again.`,
   ].join('\n');
 }
 
@@ -525,6 +535,20 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         // The whole object, not just the two fields read here: what the CLI
         // reports about cost and duration is in there.
         writeFileSync(`${evidenceDir}/builder.json`, `${parsed.evidence}\n`);
+
+        // Claude refused the call (a usage limit): the human decided that a
+        // message is all that follows. The round is not counted; anything
+        // committed before the refusal stays on the branch, unreviewed — a
+        // half-built round is not a round. The review file is untouched.
+        const refused = claudeRefusal(buildOut);
+        if (refused !== undefined) {
+          warn(`round ${round}: Claude refused the builder — ${refused}`);
+          rmSync(newFile, { force: true });
+          setStoryField(root, storyId, 'round', String(round - 1));
+          setStatus(storyId, 'needs_human', builderRefusedMessage({ repo: cfg.name, id: storyId, refusal: refused }));
+          writeFileSync(runFile, runFileEnd(storyId, 'BUILDER_REFUSED', round - 1));
+          return EXIT_AGENT_REFUSED;
+        }
         if (buildErr === 'parse-failed') {
           warn('builder output was not JSON — first 20 lines of raw output:');
           out(head20(buildOut));

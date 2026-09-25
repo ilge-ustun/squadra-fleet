@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, builderArgv, builderModelUsed, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
+  ALLOWED_TOOLS, builderArgv, builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -187,6 +187,33 @@ describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex',
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// Claude's own refusal: `claude -p --output-format json` ends in one object
+// whose is_error is true and whose api_error_status is the API's HTTP
+// status. No real one has been seen on this machine (25 Sep); the shape is
+// the CLI's own schema, and the texts are the ones it carries.
+describe('claudeRefusal — Claude refused the call (a usage limit)', () => {
+  const obj = (o: object): string => JSON.stringify({ type: 'result', subtype: 'success', ...o });
+  it('HTTP 429: the result text', () => {
+    expect(claudeRefusal(obj({ is_error: true, api_error_status: 429, result: "You've hit your limit · resets 3pm (Europe/Rome)" }))).toBe("You've hit your limit · resets 3pm (Europe/Rome)");
+  });
+  it('a limit named in the text, whatever the status', () => {
+    expect(claudeRefusal(obj({ is_error: true, api_error_status: null, result: 'Claude AI usage limit reached|1790000000' }))).toBe('Claude AI usage limit reached|1790000000');
+    expect(claudeRefusal(obj({ is_error: true, result: "You've reached your Fable limit." }))).toBe("You've reached your Fable limit.");
+  });
+  it('429 with no text still refuses', () => {
+    expect(claudeRefusal(obj({ is_error: true, api_error_status: 429 }))).toBe('Claude refused the call (HTTP 429)');
+  });
+  it('other errors are not refusals: out of turns, a crash, success', () => {
+    expect(claudeRefusal(obj({ subtype: 'error_max_turns', is_error: true, result: 'stopped at max turns' }))).toBeUndefined();
+    expect(claudeRefusal(obj({ is_error: true, api_error_status: 500, result: 'Internal server error' }))).toBeUndefined();
+    expect(claudeRefusal(obj({ is_error: false, result: 'done; the usage limit reached is a feature name' }))).toBeUndefined();
+  });
+  it('not JSON, or not an object: not a refusal', () => {
+    expect(claudeRefusal('not json {')).toBeUndefined();
+    expect(claudeRefusal('[1]')).toBeUndefined();
   });
 });
 

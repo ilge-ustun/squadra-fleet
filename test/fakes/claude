@@ -14,6 +14,10 @@
 #   FAKE_BUILDER=hang       never returns — for the agent-timeout case
 #   FAKE_BUILDER=touch      appends a line to $FAKE_TOUCH and commits it
 #                           (Phase 2: a change the scope check can see)
+#   FAKE_BUILDER=limit      Claude refused the call: nothing done, and the one
+#                           object claude -p ends in on an API error — is_error,
+#                           api_error_status 429, the limit's text — exit 1
+#   FAKE_BUILDER=commit-then-limit   one commit, then the same refusal
 #   FAKE_BUILDER=story      writes .stories/$FAKE_STORY_ID.md — fleet
 #                           write-story's postcondition, not the launcher's.
 #                           Dies loudly if .stories/TEMPLATE.md is not already
@@ -71,7 +75,15 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 # nowhere else.
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
 
+limit_json() {
+  local default="You've hit your limit · resets 3pm (Europe/Rome)"
+  jq -cn --arg r "${FAKE_LIMIT_MSG:-$default}" \
+    '{type:"result", subtype:"success", is_error:true, api_error_status:429, result:$r}'
+}
+
 case "$FAKE_BUILDER" in
+  limit)    limit_json; exit 1 ;;
+  commit-then-limit) git commit -q --allow-empty -m "fake(builder): round $n, then the limit"; limit_json; exit 1 ;;
   commit)   git commit -q --allow-empty -m "fake(builder): round $n" ;;
   nocommit) : ;;
   hang)     sleep 999 ;;

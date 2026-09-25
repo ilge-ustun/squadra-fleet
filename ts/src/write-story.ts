@@ -15,7 +15,7 @@
 // unattended round.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { builderArgv, parseBuilderOutput } from './lib/agents.ts';
+import { builderArgv, claudeRefusal, parseBuilderOutput } from './lib/agents.ts';
 import { Die } from './lib/die.ts';
 import { fetch, refExists, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { log, out, warn } from './lib/log.ts';
@@ -96,6 +96,8 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
       cwd: wt, input: rendered.text, timeoutSec: 0, stderr: 'merge',
     });
     const parsed = parseBuilderOutput(r.stdout);
+    const refused = claudeRefusal(r.stdout);
+    if (refused !== undefined) throw new Die(`Claude refused the story writer: ${refused}`);
     if (parsed.isError === 'parse-failed') {
       warn('agent output was not JSON — first 20 lines:');
       out(`${r.stdout.split('\n').slice(0, 20).join('\n')}\n`);

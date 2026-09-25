@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, builderModelForRound, capture, chooseBuildPrompt, clockTime, dropTrailingUnavailable, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  Die, acIds, builderModelForRound, capture, builderRefusedMessage, chooseBuildPrompt, clockTime, dropTrailingUnavailable, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
   runFileStart, splitCommand,
 } from './launch.ts';
 
@@ -141,6 +141,16 @@ describe('pausedMessage — the one message a refused review sends', () => {
   });
   it('no reset named anywhere: the time is a guess, and it says so', () => {
     expect(pausedMessage({ ...o, known: false }).split('\n')[2]).toBe('/wait t 900 — resume this story automatically after 14:17 (no reset time was given: a retry, not a promise)');
+  });
+});
+
+describe('builderRefusedMessage — Claude refused the builder: say so, then nothing', () => {
+  it('who refused and in its words, that nothing follows, how to go on', () => {
+    expect(builderRefusedMessage({ repo: 't', id: '900', refusal: "You've hit your limit · resets 3pm (Europe/Rome)" })).toBe([
+      `t/900 — Claude refused the builder: "You've hit your limit · resets 3pm (Europe/Rome)"`,
+      'Nothing else will happen: the story is stopped, the round is not counted, and anything the builder committed stays on story/900 unreviewed.',
+      '/promote t 900 when you want it to run again.',
+    ].join('\n'));
   });
 });
 

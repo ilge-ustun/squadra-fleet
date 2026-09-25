@@ -3440,7 +3440,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round
        case_142_refused_story_resumes_at_its_review
        case_143_queue_pauses_on_a_refused_review
-       case_144_bot_wait_and_fallback)
+       case_144_bot_wait_and_fallback
+       case_145_builder_refused_by_claude)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3825,7 +3826,7 @@ case_143_queue_pauses_on_a_refused_review() {
   queue FAKE_BUILDER=commit FAKE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
   assert_eq "$QRC" 0 "the drain exits cleanly"
   assert_eq "$(s901 status)" needs_human "901 waits for a choice"
-  assert_grep "901: the reviewer's provider refused — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
+  assert_grep "901: an agent's provider refused the call — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
   assert_eq "$(sent_count)" 1 "one message, the launcher's"
   assert_contains "$(cat "$TRACE/notified")" "/wait t 901" "…the one with the choices"
 
@@ -3892,6 +3893,56 @@ case_144_bot_wait_and_fallback() {
   update 147 42 "/fallback t $STORY"
   bot poll
   assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "a second /fallback changes nothing"
+}
+
+# The builder refused by Claude (a usage limit): one message, then nothing.
+# The human decided (25 Sep): no retry, no fallback, no hold. The round is
+# not counted, whatever the builder committed before the refusal stays on
+# its branch and is not reviewed, the story stops at needs_human, and the
+# launcher exits 69 so the drain stops. Red while ts/src/launch.ts reads the
+# refusal as a round that "produced no commits" — or, with a commit, sends
+# a half-built round to the reviewer.
+case_145_builder_refused_by_claude() {
+  notifier() { printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"; }
+  local msgs
+  CASE="145a the builder refused"; fixture c145a; notifier
+  run "$STORY" FAKE_BUILDER=limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused is its own exit code"
+  assert_eq "$(field status)" needs_human "the story stops"
+  assert_eq "$(field round)" 0 "the round is not counted"
+  assert_eq "$(calls codex)" 0 "nothing was reviewed"
+  assert_no_file "$REPO/.review/$STORY.md" "no review: nothing was judged"
+  msgs="$(cat "$TRACE/notified" 2>/dev/null)"
+  assert_eq "$(grep -c '^---$' <<< "$msgs")" 1 "one message"
+  assert_contains "$msgs" "t/$STORY — Claude refused the builder" "who refused"
+  assert_contains "$msgs" "resets 3pm" "…in Claude's words"
+  assert_contains "$msgs" "Nothing else will happen" "…and that nothing follows"
+  assert_contains "$msgs" "/promote t $STORY" "…and how to go on"
+  assert_not_contains "$msgs" "/wait" "no choices offered: the human decided on none"
+
+  CASE="145b refused after a commit"; fixture c145b; notifier
+  run "$STORY" FAKE_BUILDER=commit-then-limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 1 "the commit stays on the branch"
+  assert_eq "$(calls codex)" 0 "a half-built round is not reviewed"
+
+  CASE="145c the drain stops at it"; fixture c145c; notifier
+  sed "s/Story $STORY/Story 901/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  queue FAKE_BUILDER=limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" ready "901 was not started"
+  assert_eq "$(calls claude)" 1 "one builder call"
+  assert_eq "$(grep -c '^---$' "$TRACE/notified")" 1 "one message, the launcher's"
+  assert_grep "$STORY: an agent's provider refused the call — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
+
+  CASE="145d the story writer refused: said plainly"; fixture c145d
+  git -C "$REPO" push -q origin base:epic/test
+  local out rc
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=950 FAKE_BUILDER=limit \
+          bash "$FLEET/fleet" write-story t 950 "an intent" --base epic/test 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "a die"
+  assert_contains "$out" "Claude refused the story writer: You've hit your limit" "…saying who refused, in its words"
 }
 
 for c in "${CASES[@]}"; do

@@ -219,11 +219,12 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     const verdict = existsSync(reviewPath) ? (readReview(readFileSync(reviewPath, 'utf8')).verdict ?? '') : '';
     ran.push({ id, status, verdict, rc });
 
-    // An agent's provider refused the call (a usage limit): the launcher
-    // parked the story and told the human. Every story after it would be
-    // refused as well, so the drain stops here, saying nothing more.
+    // An agent's provider refused the call (a usage limit) — the reviewer's
+    // or the builder's: the launcher parked the story and told the human.
+    // Every story after it would be refused as well, so the drain stops
+    // here, saying nothing more.
     if (rc === EXIT_AGENT_REFUSED) {
-      warn(`${id}: the reviewer's provider refused — the drain stops here; the launcher has told the human`, TAG);
+      warn(`${id}: an agent's provider refused the call — the drain stops here; the launcher has told the human`, TAG);
       break;
     }
 
