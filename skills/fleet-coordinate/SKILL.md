@@ -17,8 +17,8 @@ story worth building, reading what the machine decided, and deciding what
 happens next. Nothing you do is a substitute for the human's decisions
 listed below.
 
-Everything is in `~/work/fleet`. `README.md` is the map, `docs/FLEET-HANDOFF.md`
-the state, `docs/lessons.md` the reasons (L-01 …). Read a document before
+Everything is in `~/work/fleet`. `README.md` is the map, `docs/operations.md`
+the machine and what is open, `docs/lessons.md` the reasons (L-01 …). Read a document before
 you rely on it; numbers in prose rot, commands do not.
 
 ## Orient by running, not by remembering
@@ -59,7 +59,7 @@ human should run instead.
   promoted story is picked up by the queue timer within fifteen minutes, or
   the human sends `/run`. A launcher started as a child of an interactive
   session inherits its memory policy and sandbox and has been killed by
-  both (handoff, memory section).
+  both (`docs/operations.md`, memory).
 - Editing the launcher (`ts/src/launch.ts`) while `status.sh` shows a
   round in flight is safe — node loaded the whole program when the round
   started — but the change reaches only the next launch.

@@ -17,7 +17,7 @@ A story passes only when the baseline is green, every acceptance criterion
 has a test the reviewer proved goes red, no probe found anything, and the
 reviewer said PASS. Any one of those missing is a FAIL with the reason named.
 
-This file is the map. `docs/FLEET-HANDOFF.md` is the state, `docs/lessons.md`
+This file is the map. `docs/operations.md` is the machine and what is open, `docs/lessons.md`
 (L-01 …) the reasons, `docs/COORDINATORS.md` the coordinator on other
 harnesses and models. Orient by running commands, not by trusting prose —
 numbers in prose rot.
@@ -446,6 +446,6 @@ prompts/            the agents' prompts, README = the verdict contract
 skills/             the coordinator's procedures, linked by install-skills.sh (bash)
 update-agents.sh    the weekly CLI update (bash)
 test/suite.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
-systemd/            the two timer pairs       docs/          handoff, lessons, coordinators, trials, plans
+systemd/            the two timer pairs       docs/          operations, lessons, coordinators, trials
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```

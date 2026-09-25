@@ -70,6 +70,6 @@ the bot is a one-minute oneshot, the queue is idle unless a story is ready.
 Then run `bash test/suite.sh` once more in `~/work/fleet` — the tree the
 timers execute.
 
-Document the seam or command you added: `README.md` (the map),
-`docs/FLEET-HANDOFF.md` §0 (seams), `docs/lessons.md` (why, as L-NN) when
-the change came from a failure.
+Document the command or seam you added in `README.md` (the map), an open
+gap or a decision in `docs/operations.md`, and why in `docs/lessons.md`
+(as L-NN) when the change came from a failure.

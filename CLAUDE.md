@@ -104,7 +104,10 @@ never runs `npm`.
   or exact process name, never by a `pkill -f` pattern that can match your
   own command line.
 - Show the `ts/src/launch.ts` diff before applying it.
-- Prefer `die` over `warn` — a warning assumes a human is watching.
-- A check that cannot go red is absent, not weak.
+- Prefer `die` over `warn` — a warning assumes a human is watching. Never
+  suppress stderr on a step that can fail meaningfully (L-02).
+- A check that cannot go red is absent, not weak; a check that cries wolf
+  is worse than none.
+- Read the file, never only a diff hunk (L-09).
 - Prompts go to agents on stdin, never argv.
 - One task, one commit. Show `git status --short` with each.
