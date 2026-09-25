@@ -83,7 +83,7 @@ human should run instead.
 | `draft` with lint errors, or a draft the human has questions about | `fleet-story`: fix by hand, lint again |
 | `in_progress` | wait. `fleet status <repo> <id>` shows the round; never touch its worktree `../wt-<id>` |
 | `done` with `PASS`, `on epic` or `awaiting merge` | `fleet-land` |
-| `done` with `FAIL`, `needs_human`, `blocked`, `UNPARSEABLE`, `SPEC` | `fleet-verdict` |
+| `done` with `FAIL`, `needs_human`, `blocked`, `UNPARSEABLE`, `SPEC`, `UNAVAILABLE` | `fleet-verdict` |
 | a harness defect, a missing seam, a suite case to write | `fleet-develop` |
 
 ## The loop, once
