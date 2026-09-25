@@ -1,8 +1,9 @@
 # Fleet lessons
 
 Cross-story findings. One entry per finding, newest last. Per-story detail
-stays in `.review/<id>.md` and `docs/fleet/<id>-diagnosis.md`; this file is
-for what generalises.
+stays in the target's `.review/<id>.md`; this file is for what generalises.
+The story numbers are the first target's, kept because they are the
+evidence.
 
 Every entry states how the failure is prevented now:
 
@@ -51,10 +52,9 @@ the whole call.
 finds nothing: the worktree path exists only in **cwd**, never in argv.
 **Lesson:** identify processes by what they are doing, not by how they were
 named.
-**Prevention:** by construction — `procs_in_worktree()` scanned `/proc/*/cwd`
-with `readlink -f` normalisation; `procsInWorktree` in `ts/src/lib/procs.ts`
-does the same since the migration. Side benefit: multiplexer-agnostic, so
-swapping tmux costs nothing.
+**Prevention:** by construction — `procsInWorktree` (`ts/src/lib/procs.ts`)
+scans `/proc/*/cwd`, both sides resolved with `realpath`. Side benefit:
+multiplexer-agnostic, so swapping tmux costs nothing.
 
 **Enforced by:** `case_53_reset_refuses_while_live`
 
@@ -67,11 +67,11 @@ ends.
 `.review/<id>.md` at startup, round-1 fresh-build branch gated on it being
 empty.
 
+**Enforced by:** `case_5_restart_after_fail`
+
 ---
 
 ## Found while extracting story 005 (15 Sep)
-
-**Enforced by:** `case_5_restart_after_fail`
 
 ### L-06 — the suite mocks the module under test
 All 18 test files call `vi.mock("@/utils/firebase")`. The module body never
@@ -127,7 +127,7 @@ treats the list as one task. Prompt fix, not a code fix.
 **Prevention:** by discipline. Belongs with the scope-escalation rule.
 
 ### L-11 — numbers in repo prose are unconstrained and propagate
-`CLAUDE.md` claims 16 files / 66 tests. Three agent runs "corrected" this to
+The target's `CLAUDE.md` claimed 16 files / 66 tests. Three agent runs "corrected" this to
 18 / 102. Measured baseline: **18 files / 96 tests**. No one counted; the
 figure was repeated until it looked established, including once in this
 session by me.
@@ -135,8 +135,8 @@ session by me.
 read to orient themselves, and each agent that reads a stale doc writes a
 new doc citing it. Prefer naming the command that produces a number over
 stating the number.
-**Prevention:** by discipline. Same class as
-`docs/fleet/004-diagnosis.md` still asserting the refuted lease theory.
+**Prevention:** by discipline. Same class as a diagnosis document that went
+on asserting a theory the next story refuted.
 
 ### L-12 — a harness fix living only in a working copy
 The L-05 fix sat uncommitted in `launch.sh` for a day. One
@@ -155,8 +155,9 @@ above per-round `## Round N` sections.
 is recorded nowhere. If a prompt change moves the verdict into frontmatter
 or emits one per round, the grep silently misses, `REVIEW_TEXT` stays
 empty, and L-05 returns *looking fixed*.
-**Prevention:** by discipline. Strongest argument yet for moving prompts to
-`prompts/*.md` — the coupling becomes reviewable in one diff.
+**Prevention:** by discipline, narrowed: the prompts live in `prompts/*.md`
+and `prompts/README.md` records the three places the verdict line is parsed,
+so a change to either side is reviewable in one diff.
 
 ---
 
@@ -233,9 +234,8 @@ eventually; argv was the wrong channel for a payload that grows. The
 symptom — empty output, blank `is_error` — looked like the builder said
 nothing, when the builder was never started.
 **Prevention:** by construction — prompts go to both agents on stdin
-(`ts/src/lib/agents.ts` since seam 4; before it `printf '%s' … | claude -p`,
-`… | codex exec`), which is also codex's intended mode and removes the L-17
-notice at its root. `test/suite.sh` case 32 grows a review past the limit on
+(`ts/src/lib/agents.ts`), which is also codex's intended mode and removes the
+L-17 notice at its root. `test/suite.sh` case 32 grows a review past the limit on
 a rerun and asserts the builder still receives it.
 
 **Enforced by:** `case_32_huge_review_prompt`
@@ -251,14 +251,14 @@ by process once this was verified.
 **Lesson:** `needs_human` exists so a human can rewrite the story. If the
 rewrite does not reach the worktree, the loop is a human editing a file
 nobody reads. State that is "in git" is only in the branch it is in.
-**Prevention:** by construction — `sync_story` copies the base story into
-the builder worktree and commits it there as the launcher's own commit
-before the round's start SHA (so it is never the builder's work), which
-the reviewer's detached tree inherits. `test/suite.sh` case 33.
-
-## Found by running two stories back to back (18 Sep)
+**Prevention:** by construction — the launcher reads the story from the
+checkout (the base copy) and hands it to both agents in their prompt, never
+as a file in the worktree, so an amendment reaches the next round whatever
+the branch holds.
 
 **Enforced by:** `case_33_story_amendment_reaches_builder`
+
+## Found by running two stories back to back (18 Sep)
 
 ### L-20 — what converges a story is the domain, not the number of ACs
 Story 007: five ACs over everything one file does — eight rounds, never a
@@ -303,9 +303,9 @@ must then be able to re-judge the same head against the new story.
 postcondition, and nothing else; `test/suite.sh` case 34. Used on 008
 round 3, which is the run that passed.
 
-## Found by story 010 — the first production-code story after Phase 3
-
 **Enforced by:** `case_34_review_only`
+
+## Found by story 010 — the first production-code story after Phase 3
 
 ### L-22 — evidence must be produced against the state it will be judged in
 The builder's TDD patches were hand-authored during the TDD step, before the
@@ -356,12 +356,12 @@ escalation if its criteria cannot be met without picking between materially
 different outcomes. Naming the open question in the story — 010 quoted 006
 naming it — is not the same as making it load-bearing.
 **Prevention:** by discipline, and unproven: `.blocked/` has still never fired
-in fourteen stories. The mechanism is tested (`test/suite.sh` case 3); what is untested
-is any real agent's willingness to use it.
-
-## Found by story 014 — the fleet working on its own harness (18 Sep)
+from a real builder. The mechanism is tested (case 3); what is untested is
+any real agent's willingness to use it.
 
 **Enforced by:** `case_3_blocked`
+
+## Found by story 014 — the fleet working on its own harness (18 Sep)
 
 ### L-25 — claim only what you instrument
 Story 014's criteria were unusually precise, and precision cuts both ways. AC3
@@ -376,72 +376,44 @@ at the strength you intend to instrument, no stronger. A stronger claim is not
 a safer one — it is more surface for a mutation to land on, and every extra
 inch of it must be tested or it becomes a finding. "Byte-identical" invited a
 byte-level probe the test never meant to cover.
-**Prevention:** by discipline, with a nudge — `lint-story.sh` warns on an
+**Prevention:** by discipline, with a nudge — `fleet lint-story` warns on an
 unquantified every/all/any but cannot judge whether a claim exceeds its
 instrument. The writing prompt now says it; nothing enforces it.
 
 ### L-26 — the harness verifies the app, not itself
-The baseline is `npm test`, `npm run build`, `npm run lint`. All three exercise
-the application. **Nothing in the baseline touches ``.** So story 014 —
-which changed `run-queue.sh` and `test/suite.sh` — passed a green
-baseline that proved nothing about it, and its only real verification was the
-reviewer's mutations plus a human running `test/suite.sh` by hand afterwards.
-Worse, `test/suite.sh` itself was writable by the builder: a quietly weakened
-unrelated case would have been invisible to the pipeline. It did not happen —
-the diff was purely additive — but nothing prevented it.
+The baseline — test, build, lint — exercises the application. Story 014
+changed the harness itself, which then lived in the target repo, and passed
+a green baseline that proved nothing about it: its only real verification
+was the reviewer's mutations and a human running the harness's suite by
+hand. Worse, the suite itself was writable by the builder; a quietly
+weakened case would have been invisible to the pipeline.
 **Lesson:** a verification system's weakest coverage should not be of itself.
-`launch.sh` was protected by `scope_deny`, so the judge was never the judged;
-that part was right. The baseline was the hole.
-**Prevention:** closed by construction, 18 Sep. `run_baseline` runs
-`SELF_TEST_CMD` (default `bash test/suite.sh`) whenever the round's changed
-paths include ``, and a RED result vetoes like any other baseline
-failure. It reports SKIPPED rather than GREEN when it does not run: a check
-that did not run must not read as a check that passed. Cases 46 and 47.
-**What it still does not cover:** the suite is only as good as its cases, and
-the same builder that weakens a case could weaken the case that guards it.
-Nothing here makes the harness self-verifying — it makes a harness change
-visible to the same instrument every other change already faces.
-
-**19 Sep 2026:** the harness is its own repository now and is never a fleet
-target, so no round's diff can contain a harness file and the self-test branch
-was removed — a check that cannot fire is absent, not weak. Prevention is
-`bash test/suite.sh` by hand before every commit in the fleet repo (CLAUDE.md
-there). No case enforces this any more.
+**Prevention:** by construction since 19 Sep — the harness is its own
+repository and never a fleet target, so no round's diff can contain a
+harness file. What remains is by discipline: `bash test/suite.sh` by hand
+before every commit to the fleet (CLAUDE.md).
 
 ### L-27 — a self-test inherits the configuration of the run that calls it
-
-Story 014's round three was started with `MAX_ROUNDS=1`, because it needed
-exactly one more round. The baseline's new self-test step ran
-`bash test/suite.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
-the environment, so the suite's own fixtures inherited it. Cases 4, 5, 9 and
-27 exist to check what happens across *two* rounds; with the ceiling at one
-they failed. 230 passed, 14 failed, and the machine vetoed a story whose
-sixteen mutations were all RED and whose reviewer said PASS.
-
-Nothing was wrong with the story. The harness had configured its own examiner.
-
+Story 014's round three was started with `MAX_ROUNDS=1`. The baseline's
+self-test step (since removed, L-26) ran the harness's suite with that in
+the environment, so the suite's own fixtures inherited it; the cases that
+check what happens across *two* rounds failed, and the machine vetoed a
+story whose sixteen mutations were all RED and whose reviewer said PASS.
+Nothing was wrong with the story. The harness had configured its own
+examiner.
 **Lesson:** a check that runs the system under test inherits whatever the
-current run was configured with, and its fixtures assume defaults. The failure
-is not loud — it looks exactly like a real finding, which is worse than a
-crash.
-
-**Prevention:** `env -i` with a four-variable allowlist (`PATH`, `HOME`,
-`TMPDIR`, `LANG`), not a list of variables to drop. A drop-list has to be
-extended every time the launcher grows a seam, and the once it is forgotten
-the symptom is a false veto indistinguishable from a true one. The case proves
-the environment is clean by making the child's environment the log
-(`SELF_TEST_CMD=env`), which is the only way to assert on something a
-subprocess cannot report back.
-
-**19 Sep 2026:** the launcher no longer runs the suite (see L-26), so the
-`env -i` moved into `test/suite.sh` itself, which re-executes under a clean
-environment before any fixture is built: a developer shell with `MAX_ROUNDS=1`
-exported would otherwise reproduce this exactly.
+current run was configured with, and its fixtures assume defaults. The
+failure looks exactly like a real finding, which is worse than a crash.
+**Prevention:** by construction — `test/suite.sh` re-executes itself under
+`env -i` with an allowlist (`PATH`, `HOME`, `TMPDIR`, `LANG`, and the two
+override seams) before any fixture is built. An allowlist, not a list of variables to drop:
+a drop-list must grow with every new setting, and the once it is forgotten
+the symptom is a false veto indistinguishable from a true one.
 
 **Enforced by:** `case_88_suite_env_is_clean`
 
 
-## Found by the seam-4 plan review (23 Sep)
+## Found while porting the harness to TypeScript (23–25 Sep)
 
 ### L-28 — an unquoted replacement value is a pattern, not a value
 
@@ -450,7 +422,7 @@ bash 5.2 turns `patsub_replacement` on by default, and in an unquoted
 replacement `&` stands for the matched text: `R&D uses &&` reached the
 builder and the reviewer as `R{{STORY}}D uses {{STORY}}{{STORY}}`, `\&`
 became `&`, `\\` became `\`, and the log said `unsubstituted in build-round1.md:
-{{STORY}}` — a warning that looked like a prompt-file typo. Four khaita
+{{STORY}}` — a warning that looked like a prompt-file typo. Four real
 stories (012, 017, 018, 019) contain `&&`; every one of their rounds ran on
 a corrupted prompt. Nobody noticed: the agents read past it, the suite's
 fixture story has no `&`, and case 10 tested the guards, not a value with
@@ -463,12 +435,11 @@ another language is where such an assumption surfaces — the port's
 differential test put `&` in a value because the port had to decide what
 to do with it.
 
-**Prevention:** `render.sh` quotes every replacement value; `ts/src/lib/render.ts`
-splits and joins, never `String.replace` with a string (whose `$&` is the
-same trap). The differential test renders a value holding `& \& \\ $& $1`
-through both and requires the same bytes.
+**Prevention:** `ts/src/lib/render.ts` splits and joins, never
+`String.replace` with a string (whose `$&` is the same trap). Its test
+renders a value holding `& \& \\ $& $1` and requires it back byte for byte.
 
-**Found again at seam 8 (25 Sep 2026):** `telegram.sh:71` escaped a `--pre`
+**Found again (25 Sep 2026):** the bash bot escaped a `--pre`
 message with `${text//</&lt;}` — the same construct — so every code-block
 message went to Telegram as `<pre>…<lt;…>gt;…</pre>`, invalid HTML that the
 API refuses, and `curl -sS` without `--fail` swallowed the refusal. Any
@@ -490,7 +461,7 @@ reported a clean merge as "does not merge cleanly into <base> — a human has
 to resolve it" (a revert: "did not apply"). Nothing in the suite had a
 target without `.runs/`: the launcher makes the four directories on its
 first run, and every merge case runs after a launch. Found while porting
-the script (seam 5), by reading it in the order the port had to reproduce.
+the script to TypeScript, by reading it in the order the port had to reproduce.
 
 **Lesson:** `cmd > log || die "cmd failed"` conflates two failures — the
 command's and the log's — and the message names the wrong one. The
@@ -513,7 +484,7 @@ nothing had ever set `TEMPLATE.md`'s own `status:` to `ready`. But
 `TEMPLATE.md`'s frontmatter is not a comment — it is the real file every
 `write-story.sh` copies from, and its `status: ready` line is the
 placeholder text itself, never meant to be edited, sitting in every target
-repo including khaita's. A bare `launch.sh <repo>` (no story id — a human
+repo. A bare `fleet launch <repo>` (no story id — a human
 testing something by hand, not a path the queue or the bot ever calls)
 picks `argv[0] || nextReady()`: with nothing else ready, `nextReady()`
 found `TEMPLATE`, and the launcher ran the whole pipeline against it,
