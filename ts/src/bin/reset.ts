@@ -1,8 +1,10 @@
-// reset.ts — the entry point behind reset.sh (seam 5). The repo name is
-// required before it is loaded, as the bash did (reset.sh:29-30). Exit codes
-// as the bash had them: every die is 1 with an XX line on stderr, a finished
-// reset 0. No EXIT trap: the bash had none — nothing here is a throwaway
-// worktree.
+// fleet reset <repo> <id> [--force] [--draft] — a story back to the queue:
+// its worktree and branch removed, the frontmatter reset, the review and
+// evidence deleted, committed; src/reset.ts. It refuses while something runs
+// in the worktree, and refuses to drop unmerged commits without --force. The
+// repo name is required before anything is loaded. Every die is 1 with an XX
+// line on stderr, a finished reset 0. Nothing here is a throwaway worktree,
+// so there is nothing to clean up on a signal.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

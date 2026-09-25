@@ -23,7 +23,7 @@ import {
 import { log, out, warn } from './lib/log.ts';
 import { procsInWorktree as liveProcs } from './lib/procs.ts';
 
-export const USAGE = 'usage: reset.sh <repo> <id> [--force] [--draft]';
+export const USAGE = 'usage: fleet reset <repo> <id> [--force] [--draft]';
 
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();
 const isFile = (p: string): boolean => existsSync(p) && statSync(p).isFile();

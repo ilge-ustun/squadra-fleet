@@ -38,11 +38,7 @@
 // mutation in a clean tree, classifies, and vetoes a PASS on any surviving
 // mutation, any uncovered AC, or a red baseline (lib/verdict.ts). Evidence
 // goes to .review/<id>/round-N/ and is committed. See prompts/README.md,
-// "The verdict contract". test-lib.sh exercises every path with fake agents.
-//
-// This file keeps the bash launcher's order and its every line of output;
-// the seam-4 record in docs/plans/2026-09-23-typescript-migration.md lists
-// the few places it differs, each pinned by a test.
+// "The verdict contract". test/suite.sh exercises every path with fake agents.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -171,7 +167,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
     pushStatus: v('PUSH_STATUS', '1'),
     reviewOnly: v('REVIEW_ONLY', '0'),
     lockWait: num('FLEET_LOCK_WAIT', lockWaitRaw, /^[0-9]+(\.[0-9]+)?$/),
-    notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/telegram.sh send`),
+    notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/fleet telegram send`),
   };
 }
 
@@ -382,7 +378,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         throw new Die(`REPO_RULES ${cfg.repoRules} is not readable in ${root}`);
       }
     }
-    const checkMutation = `bash ${o.fleetHome}/check-mutation.sh ${cfg.name}`;
+    const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables render.sh saw, as the round goes on.
     const state = { rules: '', headSha: '', round: '' };

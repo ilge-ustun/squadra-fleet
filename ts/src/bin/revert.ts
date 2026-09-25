@@ -1,9 +1,10 @@
-// revert.ts — the entry point behind revert.sh (seam 5). The argument count
-// is checked before the repo is loaded, as the bash did (revert.sh:22-23).
-// Exit codes as the bash had them: every die is 1 with an XX line on stderr,
-// a finished revert 0. On SIGTERM, SIGINT or SIGHUP the throwaway revert
-// worktree is removed and the process ends with 128+signal, as the bash EXIT
-// trap did.
+// fleet revert <repo> <id> — revert the merge commit recorded in the
+// story's `merged:`: exactly what was merged, even if the epic moved on.
+// /revert from the phone is this. The refusals, the throwaway worktree and
+// the record are src/revert.ts. The argument count is checked before the
+// repo is loaded. Every die is 1 with an XX line on stderr, a finished
+// revert 0. On SIGTERM, SIGINT or SIGHUP the throwaway revert worktree is
+// removed and the process ends with 128+signal.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

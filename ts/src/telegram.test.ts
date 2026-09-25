@@ -108,8 +108,8 @@ function ctx(extraEnv: Record<string, string> = {}): BotContext {
       sendMessage: async (o) => { sent.push({ text: o.text, parseMode: o.parseMode }); return sendOk; },
       getUpdates: async () => updatesBody(),
     },
-    runScript: (script, args) => { ran.push([script, ...args]); return { status: 0, output: `ran ${script} ${args.join(' ')}\x1b[32m!\x1b[0m` }; },
-    spawnDetached: (script, args) => { detached.push([script, ...args]); },
+    runFleet: (command, args) => { ran.push([command, ...args]); return { status: 0, output: `ran ${command} ${args.join(' ')}\x1b[32m!\x1b[0m` }; },
+    spawnDetached: (command, args) => { detached.push([command, ...args]); },
     runCommand: (argv) => { commands.push([...argv]); return argv[0] === 'false' ? 1 : 0; },
     loadRepo: (_home, name) => { if (name === 't') return cfg(); throw new Error(`unknown repo '${name}'`); },
     now: () => new Date(2026, 8, 25, 10, 6, 8),
@@ -249,9 +249,9 @@ describe('dispatch', () => {
     expect(dispatch(ctx({ QUEUE_START_CMD: 'false' }), '/run')).toBe('could not start the queue');
   });
   it('/status and /status-all go through status.sh --bot, output merged', () => {
-    expect(dispatch(ctx(), '/status t')).toBe('ran status.sh t --bot\x1b[32m!\x1b[0m');
-    expect(dispatch(ctx(), '/status-all')).toBe('ran status.sh t --bot --all\x1b[32m!\x1b[0m');
-    expect(ran).toEqual([['status.sh', 't', '--bot'], ['status.sh', 't', '--bot', '--all']]);
+    expect(dispatch(ctx(), '/status t')).toBe('ran status t --bot\x1b[32m!\x1b[0m');
+    expect(dispatch(ctx(), '/status-all')).toBe('ran status t --bot --all\x1b[32m!\x1b[0m');
+    expect(ran).toEqual([['status', 't', '--bot'], ['status', 't', '--bot', '--all']]);
   });
   it('a repo the loader refuses: its message is the reply', () => {
     writeFileSync(join(fleetHome, 'repos', 'u.env'), 'REPO_PATH=/nowhere\n');
@@ -282,13 +282,13 @@ describe('dispatch', () => {
     expect(git('status', '--porcelain')).toBe('');
   });
   it('/revert reports what revert.sh said, colours stripped, then the verdict', () => {
-    expect(dispatch(ctx(), '/revert t 900')).toBe('ran revert.sh t 900!\n900 reverted');
+    expect(dispatch(ctx(), '/revert t 900')).toBe('ran revert t 900!\n900 reverted');
     expect(dispatch(ctx(), '/revert t 901')).toBe('no such story: 901');
   });
   it('/merge: a story is --land, an epic is --epic, anything else is usage; the job is detached', () => {
     expect(dispatch(ctx(), '/merge t 900')).toMatch(/^merging 900 — deps, suite, build and lint run first/);
     expect(dispatch(ctx(), '/merge t epic/x')).toMatch(/^merging epic\/x — /);
-    expect(detached).toEqual([['merge.sh', 't', '900', '--land'], ['merge.sh', 't', '--epic', 'epic/x']]);
+    expect(detached).toEqual([['merge', 't', '900', '--land'], ['merge', 't', '--epic', 'epic/x']]);
     expect(dispatch(ctx(), '/merge t nope')).toMatch(/^usage: \/merge <repo> <id>/);
     expect(dispatch(ctx(), '/merge t')).toMatch(/^usage: \/merge/);
     expect(dispatch(ctx(), '/merge t 901')).toBe('no such story: 901');
@@ -347,7 +347,7 @@ describe('poll (telegram.sh:285-322)', () => {
   });
   it('/status and /status-all replies go as a code block, others plain; an empty reply is (no output)', async () => {
     const c = ctx();
-    c.deps.runScript = () => ({ status: 0, output: '' });
+    c.deps.runFleet = () => ({ status: 0, output: '' });
     updatesBody = () => ({ ok: true, updates: [upd(1, 42, '/status t'), upd(2, 42, '/status-all t'), upd(3, 42, '/repo')] });
     await poll(c);
     expect(sent).toEqual([
@@ -358,7 +358,7 @@ describe('poll (telegram.sh:285-322)', () => {
   });
   it('a die inside a command is that command\'s reply; the poll goes on', async () => {
     const c = ctx();
-    c.deps.runScript = () => { throw new Error('boom'); };
+    c.deps.runFleet = () => { throw new Error('boom'); };
     updatesBody = () => ({ ok: true, updates: [upd(1, 42, '/status t'), upd(2, 42, '/repo')] });
     await poll(c);
     expect(sent[0]!.text).toContain('boom');

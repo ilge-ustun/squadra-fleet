@@ -5,10 +5,11 @@ description: Read and act on a fleet verdict — the Machine block in .review/<i
 
 # Reading a verdict and deciding what follows
 
-The verdict is computed by `launch.sh`, not by the reviewer. The reviewer's
-`VERDICT:` line is one input. `machine_pass` is: baseline green (test,
-build, lint at the builder's head), every `**ACn` has at least one mutation,
-every mutation goes RED, no probe goes RED. The result is PASS only when
+The verdict is computed by the launcher, not by the reviewer. The
+reviewer's `VERDICT:` line is one input. `machine_pass` is: baseline green
+(test, build, lint at the builder's head), scope clean (no path the story's
+`scope_deny` names changed), every `**ACn` has at least one mutation, every
+mutation goes RED, no probe goes RED. The result is PASS only when
 `machine_pass` and the reviewer said PASS. Everything else is FAIL with the
 reasons on the `computed:` line. The machine vetoes; it never grants.
 
@@ -16,7 +17,7 @@ reasons on the `computed:` line. The machine vetoes; it never grants.
 
 ```bash
 cd ~/work/fleet
-bash status.sh <repo> <id>                       # the latest round's Machine block
+./fleet status <repo> <id>                       # the latest round's Machine block
 sed -n 1,40p <target>/.review/<id>.md            # header, verdict (line 3), the block
 ls <target>/.review/<id>/round-N/                # baseline/ mutations/ probes/ reviewer.md builder.md
 ```
@@ -37,7 +38,7 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
 | on `computed:` | meaning | who fixes it |
 |---|---|---|
 | `baseline test/build/lint RED` | red at the builder's head | the builder, next round |
-| `scope HIT <path>` | a `scope_deny` path changed | the builder — or the story, if the deny was wrong |
+| `scope VIOLATION: <paths>` | a `scope_deny` path changed | the builder — or the story, if the deny was wrong |
 | `ACn <slug> GREEN` | the mutation survived: no instrument asserts that behaviour | the builder: a real test |
 | `ACn <slug> PRE_RED` | the selector fails before the mutation | the builder's test is broken, or the base is |
 | `ACn <slug> SELECTOR_INVALID` | the selector names no test (wrong path, wrong `-t`, a shell command in a `.test`) | whoever wrote it; a `.cmd` if it is not vitest |
@@ -47,7 +48,7 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
 | `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
 
 `prompts/README.md` is the contract; `ts/src/classifier.ts` is the classifier
-(`check-mutation.sh` runs it by hand).
+(`fleet check-mutation` runs it by hand).
 
 ## The decision tree
 
@@ -55,11 +56,11 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   with the review text in the builder's prompt. Wait.
 - **FAIL at the ceiling → `needs_human`.** Read the reasons. Then:
   - the reasons are the builder's (GREEN, probe RED, baseline) and the
-    story is sound → say so, and let the human decide between `reset.sh
+    story is sound → say so, and let the human decide between `fleet reset
     <repo> <id>` (back to the queue, fresh worktree) and a story edit.
   - the reasons come from the story (an AC no instrument can satisfy, a
     domain that turned out unbounded, a wrong `scope_deny`) → edit the
-    story by hand, `lint-story.sh --strict`, commit, and tell the human it
+    story by hand, `fleet lint-story --strict`, commit, and tell the human it
     needs `/promote` again. Fold a probe's finding into the AC it belongs
     under; never add an AC for it — that becomes another branch nobody
     stated (see `prompts/review.md`).

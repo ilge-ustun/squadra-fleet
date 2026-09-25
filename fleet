@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#
+# fleet <command> [args…] — the fleet's one entry point; `fleet help` lists
+# the commands. Every command that touches a target names the repo first:
+# `fleet status <repo>`, `fleet merge <repo> --epic epic/<name>`.
+#
+# A command is a TypeScript program, ts/src/bin/<command>.ts, run by node as
+# is — no build, no runtime dependencies — or one of the two bash chores in
+# bin/. node loads a whole program before it starts, so editing ts/src/ while
+# a launcher runs is safe: the change reaches the next launch.
+#
+# The tree is found through this file's real path, so a symlink to it (in
+# ~/.local/bin, say) works from any directory.
+#
+set -uo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/bin/lib.sh" \
+  || { echo "fleet: cannot source bin/lib.sh" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+usage: fleet <command> [args…]
+
+  status <repo> [--json|--epics|--bot] [--all] [id]        what the fleet is doing and what it decided
+  write-story <repo> <id> "<intent>" [--base epic/<name>]  an intent → a draft story, linted
+  lint-story <repo> <id|path> [--strict]                   mechanical checks against the story's base
+  new-epic <repo> <name>                                   origin/epic/<name>, cut from the integration branch
+  launch <repo> [id|--reap]                                one story through the loop — detached, never inside a session
+  run-queue <repo>|--all [--max N]                         every ready story, lowest id first
+  check-mutation <repo> <patch…> [--wt <dir>]              the verdict's classifier on a working tree
+  merge <repo> <id> [--land] | <repo> --epic epic/<name>   a story into its epic, or onto the integration branch
+  revert <repo> <id>                                       undo a story's merge
+  reset <repo> <id> [--force] [--draft]                    a story back to the queue
+  telegram send [--pre] <text> | poll                      the notifications and the phone commands
+  install-skills                                           link skills/ into ~/.claude/skills
+  update-agents                                            the claude and codex CLIs to their newest release
+EOF
+}
+
+cmd="${1:-}"
+(( $# )) && shift
+case "$cmd" in
+  status|write-story|lint-story|new-epic|launch|run-queue|merge|revert|reset|telegram)
+    program=("$FLEET_HOME/ts/src/bin/$cmd.ts") ;;
+  check-mutation)
+    program=("$FLEET_HOME/ts/src/bin/mutation.ts" check) ;;
+  install-skills|update-agents)
+    exec bash "$FLEET_HOME/bin/$cmd.sh" "$@" ;;
+  help|-h|--help)
+    usage; exit 0 ;;
+  '')
+    usage >&2; exit 2 ;;
+  *)
+    printf '%sXX unknown command '\''%s'\''%s\n' "$RED" "$cmd" "$RST" >&2
+    usage >&2; exit 2 ;;
+esac
+
+command -v node >/dev/null || die "node not on PATH — the fleet runs on Node $(cat "$FLEET_HOME/.nvmrc" 2>/dev/null)"
+exec node "${program[@]}" "$@"

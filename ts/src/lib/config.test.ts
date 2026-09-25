@@ -10,7 +10,7 @@ const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 // L-27: the loader hands the whole environment on, so a BASE_BRANCH exported
 // in the shell running vitest would win over the file. The tests pass an
-// allowlist, as test-lib.sh:57-63 does, plus the override under test.
+// allowlist, as test/suite.sh:57-63 does, plus the override under test.
 function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { FLEET_REGISTRY_DIR: registry, ...extra };
   for (const k of ['PATH', 'HOME', 'LANG']) if (process.env[k] !== undefined) e[k] = process.env[k];
@@ -148,8 +148,8 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
   it('a lib.sh that hands back no value for a required key is an error, not an undefined field', () => {
     // A broken lib.sh (the FLEET_LIB_OVERRIDE seam) must not produce a half config.
     const home = join(dir, 'home');
-    mkdirSync(home);
-    writeFileSync(join(home, 'lib.sh'), 'FLEET_REPO_KEYS=""\nload_repo() { REPO_NAME=$1; REPO_ROOT=/x; }\n');
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    writeFileSync(join(home, 'bin/lib.sh'), 'FLEET_REPO_KEYS=""\nload_repo() { REPO_NAME=$1; REPO_ROOT=/x; }\n');
     expect(() => loadRepo(home, 't', { env: cleanEnv(), captureStderr: true })).toThrow(/handed back no [A-Z_]+/);
   });
 });

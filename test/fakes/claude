@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# fleet/test/claude — stand-in for the real `claude -p …` under fleet/test-lib.sh.
+# fleet/test/fakes/claude — stand-in for the real `claude -p …` under fleet/test/suite.sh.
 #
 # The launcher invokes `claude` by bare name with cwd = the builder worktree
 # (launch.sh: `printf '%s' "$BUILD_PROMPT" | claude -p --model … --output-format json`,
@@ -77,7 +77,7 @@ case "$FAKE_BUILDER" in
   touch)    printf '\nfake builder touched this (call %s)\n' "$n" >> "${FAKE_TOUCH:?FAKE_TOUCH must be set}"
             git add -- "$FAKE_TOUCH"
             git commit -q -m "fake(builder): touch $FAKE_TOUCH" ;;
-  story)    [[ -f .stories/TEMPLATE.md ]] || { echo "fleet/test/claude: no TEMPLATE.md in the worktree" >&2; exit 3; }
+  story)    [[ -f .stories/TEMPLATE.md ]] || { echo "fleet/test/fakes/claude: no TEMPLATE.md in the worktree" >&2; exit 3; }
             mkdir -p .stories
             if [[ "${FAKE_STORY_NOAC:-0}" == 1 ]]; then
               printf -- '---\nstatus: draft\nround: 0\n---\n# Story: fake\n## Known weakness\nNone.\n## Out of scope\n- nothing\n' \
@@ -86,7 +86,7 @@ case "$FAKE_BUILDER" in
               printf -- '---\nstatus: draft\nround: 0\n---\n# Story: fake\n## Acceptance criteria\n**AC1 - a bounded claim.** Goes red when removed.\n## Known weakness\nNone.\n## Out of scope\n- nothing\n' \
                 > ".stories/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md"
             fi ;;
-  *) echo "fleet/test/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
 esac
 
 # TDD evidence, written after the commit so the tree is clean apart from
@@ -103,7 +103,7 @@ case "${FAKE_BUILDER_MUTATIONS:-none}" in
          git diff -- src/marker.txt > .review-out/mutations/AC1-tdd-observed-red.patch
          git checkout -q -- src/marker.txt
          printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
-  *) echo "fleet/test/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
 esac
 
 case "${FAKE_BUILDER_OUTPUT:-json}" in
@@ -114,5 +114,5 @@ case "${FAKE_BUILDER_OUTPUT:-json}" in
            fi ;;
   garbage) printf 'not json {\n' ;;
   shape)   printf '{"unexpected":"shape"}\n' ;;
-  *) echo "fleet/test/claude: unknown FAKE_BUILDER_OUTPUT='$FAKE_BUILDER_OUTPUT'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER_OUTPUT='$FAKE_BUILDER_OUTPUT'" >&2; exit 2 ;;
 esac

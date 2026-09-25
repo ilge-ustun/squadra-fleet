@@ -34,7 +34,7 @@ Out of scope. Frontmatter: `status: draft` (always — a human promotes it to
 for the default (`sonnet`) on an ordinary bounded story; `opus` for
 design-heavy or diagnose-first work (a state machine, a service worker,
 several interacting files, a cause not yet known). Do not use `haiku` —
-retired 24 Sep 2026 after both real trials needed round-2 escalation.
+it is retired, and the lint refuses it.
 
 ## The four things that have actually cost this fleet rounds
 

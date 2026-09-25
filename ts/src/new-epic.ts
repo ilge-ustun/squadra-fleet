@@ -8,7 +8,7 @@ import { branchExists, fetch, fetchRef, pushRef, refExists, revParseShort } from
 import { log, warn } from './lib/log.ts';
 import type { RepoConfig } from './lib/config.ts';
 
-export const USAGE = 'usage: new-epic.sh <repo> <name>   (a plain name: letters, digits, _ and -; epic/ is added)';
+export const USAGE = 'usage: fleet new-epic <repo> <name>   (a plain name: letters, digits, _ and -; epic/ is added)';
 
 export interface NewEpicOptions {
   /** After the repo name: exactly `[name]`. */
@@ -29,6 +29,6 @@ export function newEpic(cfg: RepoConfig, o: NewEpicOptions): number {
   if (pushRef(cfg.root, `origin/${cfg.baseBranch}`, epic) !== 0) throw new Die(`could not push ${epic}`);
   if (fetchRef(cfg.root, 'origin', epic) !== 0) warn(`pushed, but could not fetch ${epic} back`);
   log(`${epic} created on origin from origin/${cfg.baseBranch} (${revParseShort(cfg.root, `origin/${epic}`)})`);
-  log(`next: write-story.sh ${cfg.name} <id> "<intent>" --base ${epic}`);
+  log(`next: fleet write-story ${cfg.name} <id> "<intent>" --base ${epic}`);
   return 0;
 }

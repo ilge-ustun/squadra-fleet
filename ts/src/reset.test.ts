@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Die } from './lib/die.ts';
 import { USAGE, parseArgs, pidsLine, runsOfStory } from './reset.ts';
 
-// The pure parts of reset.sh; the flow is proven by test-lib.sh (cases 52,
+// The pure parts of reset.sh; the flow is proven by test/suite.sh (cases 52,
 // 53, 54, 124, 127).
 
 describe('parseArgs — reset.sh:33-42', () => {

@@ -1,12 +1,22 @@
-// lint-story.ts — lint-story.sh in TypeScript (seam 7). Mechanical checks on
-// a story, before any agent spends quota on it. No model, no network, no git
-// writes. Errors exit 1; warnings print and exit 0 unless --strict.
+// lint-story.ts — mechanical checks on a story, before any agent spends
+// quota on it. No model, no network, no git writes. Errors exit 1; warnings
+// print and exit 0 unless --strict. Every check exists because something
+// cost rounds:
 //
-// Every check here exists because something cost rounds — lint-story.sh's own
-// header names each one (citations, AC headings, unbounded ACs, baseline
-// ACs); this file mirrors its checks top to bottom so the two stay legible
-// against each other. `body()` (lint-story.sh:41-43) is dead code — defined,
-// never called — and is not ported.
+//   citations      a story cited a diagnosis file and a symptom that no
+//                  longer existed. A story is read as fact by two agents; a
+//                  stale file:line is a false premise (L-09). Resolved
+//                  against the story's base, not the checkout.
+//   AC headings    the launcher extracts AC ids from `**ACn` at column 0. A
+//                  story whose ACs are a table is invisible to it and dies at
+//                  "declares no acceptance criteria".
+//   unbounded ACs  L-20. "every stub in the worker global" cost a story two
+//                  rounds. An unquantified every/all/any in an AC heading is
+//                  a scope declaration that outranks Out of scope.
+//   baseline ACs   the harness runs test/build/lint unconditionally, so an AC
+//                  asserting them is noise that cannot fail independently.
+//   base, model    a base is the integration branch or epic/*; a model is
+//                  one of the live aliases, never a pinned id.
 import { existsSync, readFileSync, writeSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Die } from './lib/die.ts';
@@ -14,7 +24,7 @@ import { frontmatterField } from './lib/frontmatter.ts';
 import { catFileExists, refExists, showLineCount } from './lib/git.ts';
 import type { RepoConfig } from './lib/config.ts';
 
-export const USAGE = 'usage: lint-story.sh <repo> <story-id|path> [--strict]';
+export const USAGE = 'usage: fleet lint-story <repo> <story-id|path> [--strict]';
 
 const RED = '\x1b[31m';
 const YLW = '\x1b[33m';
@@ -185,7 +195,7 @@ export function lintStory(cfg: RepoConfig, o: LintStoryOptions): number {
   const base = field('base');
   if (base !== '') {
     if (!isValidBaseName(base, cfg.baseBranch)) {
-      err(`base: ${base} — a base is ${cfg.baseBranch} or epic/<name> (new-epic.sh), nothing else`);
+      err(`base: ${base} — a base is ${cfg.baseBranch} or epic/<name> (fleet new-epic), nothing else`);
     }
     if (!refExists(cfg.root, `origin/${base}`) && !refExists(cfg.root, base)) {
       err(`base: ${base} — no such branch locally or on origin`);

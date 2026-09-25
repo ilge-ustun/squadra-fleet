@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { USAGE, checkStory } from './revert.ts';
 
-// The pure part of revert.sh; the flow is proven by test-lib.sh (cases 66,
+// The pure part of revert.sh; the flow is proven by test/suite.sh (cases 66,
 // 67, 68, 123, 126).
 
 describe('checkStory — revert.sh:31-36, in that order', () => {
@@ -19,6 +19,6 @@ describe('checkStory — revert.sh:31-36, in that order', () => {
   });
 
   it('the usage names the script the human types', () => {
-    expect(USAGE).toBe('usage: revert.sh <repo> <id>');
+    expect(USAGE).toBe('usage: fleet revert <repo> <id>');
   });
 });

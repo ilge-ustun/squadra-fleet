@@ -1,9 +1,8 @@
-// lint-story.ts — the entry point behind lint-story.sh (seam 7). Exit codes
-// as the bash had them: a `die` before load_repo (no args at all) is 1 with
-// an XX line on stderr; a story file that does not exist is 1 with a plain,
-// uncoloured line (lint-story.sh:34 — not lib.sh's die, deliberately, since
-// it runs before err()/warn() exist); a clean or warnings-only lint is 0,
-// any error or a --strict warning is 1.
+// fleet lint-story <repo> <story-id|path> [--strict] — src/lint-story.ts's
+// mechanical checks on one story. With no arguments at all it dies (1, an
+// XX line on stderr) before any repo is loaded; a story file that does not
+// exist is 1 with a plain, uncoloured line; a clean or warnings-only lint is
+// 0, any error or a --strict warning 1.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

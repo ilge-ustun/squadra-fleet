@@ -24,7 +24,7 @@ Rules that override anything you infer:
 - The harness runs three commands as the baseline, on your final commit: {{VITEST_CMD}}, then {{BUILD_CMD}}, then {{LINT_CMD}}.
   Run all three yourself before you finish. A build or lint that goes RED
   fails the round however green the tests are: a type error the test runner
-  never type-checks is the usual way (story 025, round 1).
+  never type-checks is the usual way.
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
 - Before you hand over, attack your own work the way the reviewer will. It

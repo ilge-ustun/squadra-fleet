@@ -1,9 +1,16 @@
-// run-queue.ts — the entry point behind run-queue.sh (seam 6). Exit codes
-// as the bash had them: every die is 1 with an XX line on stderr; a normal
-// drain, an empty queue and --all's own walk are 0. lib.sh's die line for a
-// bad repo or config reaches stderr from the child bash itself. No exit
-// hooks: run-queue.sh never trapped a signal — each story it launches is its
-// own process with its own cleanup.
+// fleet run-queue <repo>|--all [--max N] — every `ready` story in turn until
+// the queue is empty (src/run-queue.ts):
+//
+//   fleet run-queue <repo>            drain the queue of one repo
+//   fleet run-queue <repo> --max 3    at most three stories
+//   fleet run-queue --all             every registered repo, one after another
+//
+// Every die is 1 with an XX line on stderr; a normal drain, an empty queue
+// and --all's own walk are 0. lib.sh's die line for a bad repo or config
+// reaches stderr from the child bash itself. No exit hooks: each story it
+// launches is its own process with its own cleanup. fleet-queue.timer runs
+// `--all --max 5` every fifteen minutes; by hand, run it detached:
+//   setsid nohup bash -c 'fleet run-queue <repo>' > queue.log 2>&1 < /dev/null &
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

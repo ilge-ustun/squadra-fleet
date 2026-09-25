@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# fleet/test/vitest — stand-in for `npx vitest run …` under fleet/test-lib.sh.
+# fleet/test/fakes/vitest — stand-in for `npx vitest run …` under fleet/test/suite.sh.
 #
 # The launcher runs `$VITEST_CMD <selector…> --reporter json --outputFile <f>`
 # for the baseline and (Phase 1.4) each mutation, then reads <f>. This writes
@@ -58,7 +58,7 @@ case "$mode" in
     rc=1; json='{"numTotalTestSuites":1,"numPassedTestSuites":0,"numFailedTestSuites":1,"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"numPendingTests":0,"success":false,"testResults":[{"name":"fake.test.tsx","status":"failed","message":"","assertionResults":[{"fullName":"fake suite a","status":"failed","failureMessages":["AssertionError: expected 1 to be 2"]},{"fullName":"fake suite b","status":"passed","failureMessages":[]}]}]}' ;;
   notests)
     rc=1; json='{"numTotalTestSuites":1,"numPassedTestSuites":0,"numFailedTestSuites":1,"numTotalTests":0,"numPassedTests":0,"numFailedTests":0,"numPendingTests":0,"success":false,"testResults":[{"name":"fake.test.tsx","status":"failed","message":"Transform failed with 1 error","assertionResults":[]}]}' ;;
-  *) echo "fleet/test/vitest: unknown FAKE_VITEST='$FAKE_VITEST'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/vitest: unknown FAKE_VITEST='$FAKE_VITEST'" >&2; exit 2 ;;
 esac
 
 [[ -n "$out" ]] && printf '%s\n' "$json" > "$out"

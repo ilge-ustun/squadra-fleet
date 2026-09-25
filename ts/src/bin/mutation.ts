@@ -1,17 +1,30 @@
-// mutation.ts — the classifier's command line: `check`, what check-mutation.sh
-// is. The verdict's own use of the classifier is in-process since seam 4
-// (ts/src/lib/evidence.ts); the `run-selector` and `classify` verbs that
-// served the bash launcher are gone with it.
+// fleet check-mutation <repo> <patch…> [--wt <dir>] — the verdict's own
+// mutation classifier (src/classifier.ts, the code the launcher runs
+// in-process) on a tree someone is still working in: the builder's worktree,
+// or a human's checkout. For each patch, with its .test or .cmd beside it:
+// pre-run the selector, apply the patch, run it again, undo the patch with
+// `git apply -R`, and print `CLASS name`, the class the verdict would print:
 //
-//   check <repo> <patch…> [--wt <dir>]
-//       → one line per patch, `CLASS name`; exit 0 only when every patch is RED
-//         (check-mutation.sh's header says the rest: the tree must be clean
-//         and must be the named repo's checkout or one of its worktrees;
-//         raw runner output lands in <tree>/.review-out/checks/)
+//   RED               the mutation was caught — this is the only good answer
+//   GREEN             it survived: the instrument does not assert this
+//   NO_TESTS          the mutation broke compilation; nothing was collected
+//   PRE_RED           the selector already fails on the unmutated tree
+//   SELECTOR_INVALID  the selector names no test (wrong path, wrong -t)
+//   PATCH_INVALID     the patch does not apply to this head
+//   NO_SELECTOR       no .test or .cmd beside the patch
+//
+// Exit 0 only when every patch is RED, so a builder can loop and stop.
+//
+// The tree must be clean apart from .review-out/ — everything committed — or
+// nothing runs. The safe point is a commit: a restore over uncommitted work
+// is how real fixes were lost before this existed, and a patch made before
+// the final commit will not apply to the head the verdict sees. The tree is
+// the cwd unless --wt names it; it must be the named repo's checkout or one
+// of its worktrees. Raw runner output lands in <tree>/.review-out/checks/.
 //
 // VITEST_CMD comes from the target's config through lib/config.ts, never
 // from the environment: lib.sh keeps the target's config out of the
-// environment on purpose (lib.sh:14-18).
+// environment on purpose.
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { DirtyTreeError, classifyMutation, findSelector } from '../classifier.ts';
@@ -21,14 +34,14 @@ import { dieMessage, out, warn } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
 
 const USAGE = 'usage: mutation.ts check <repo> <patch…> [--wt <dir>]';
-const CHECK_USAGE = 'usage: check-mutation.sh <repo> <patch…> [--wt <dir>]';
+const CHECK_USAGE = 'usage: fleet check-mutation <repo> <patch…> [--wt <dir>]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 class UsageError extends Error {}
 /** lib.sh's die: the message on stderr, exit 1. */
 class DieError extends Error {}
 
-/** check-mutation.sh, line for line (its header is the contract). */
+/** The check verb; the header above is its contract. */
 function check(argv: readonly string[]): number {
   const [repo, ...rest] = argv;
   if (repo === undefined) throw new DieError(CHECK_USAGE);
@@ -83,7 +96,7 @@ function check(argv: readonly string[]): number {
           rawPrefix: `${wt}/.review-out/checks/${name}`, restore: 'reverse', vitestCmd: cfg.vitestCmd,
         }).cls;
       } catch (e) {
-        // mutation.sh:45-46 printed the classifier's message, then its own.
+        // The classifier's own message first, then which patch it was.
         if (!(e instanceof DirtyTreeError)) throw e;
         dieMessage(e.message);
         throw new DieError(`mutation runner: ${name} — the classifier failed (node ${process.version}); its message is above`);

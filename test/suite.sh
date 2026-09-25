@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# test-lib.sh — tests for launch.sh and the other scripts, with fake agents.
+# test/suite.sh — tests for the fleet's commands, with fake agents.
 #
-#   bash test-lib.sh              run every case
-#   bash test-lib.sh blocked      run cases whose name contains "blocked"
+#   bash test/suite.sh              run every case
+#   bash test/suite.sh blocked      run cases whose name contains "blocked"
 #
 # No network, no npm, no models. Each case gets a fresh fixture:
 #
@@ -47,7 +47,7 @@
 set -uo pipefail
 
 if [[ -n "${FAKE_TRACE_DIR:-}" ]]; then
-  echo "test-lib: FAKE_TRACE_DIR is set — refusing to run inside a fixture (nested invocation)" >&2
+  echo "suite: FAKE_TRACE_DIR is set — refusing to run inside a fixture (nested invocation)" >&2
   exit 3
 fi
 
@@ -66,7 +66,7 @@ if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FLEET_HOME="$HERE"                    # the fleet under test is this working tree
+FLEET_HOME="$(dirname "$HERE")"       # the fleet under test is this working tree
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fleet-test.XXXXXX")"
 trap 'api_stop; rm -rf "$TMP"' EXIT
 
@@ -92,9 +92,9 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
   for name in claude codex npm; do
-    got="$(PATH="$fleet/test:$PATH" command -v "$name")"
-    if [[ "$got" != "$fleet/test/$name" ]]; then
-      echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
+    got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
+    if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
+      echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
       exit 3
     fi
   done
@@ -122,7 +122,7 @@ copy_fleet() {                        # copy_fleet <src> <dst>
 # case may rewrite it between polls.
 api_start() {                         # api_start → API_BASE
   if [[ ! -s "$TRACE/api-port" ]]; then
-    ( cd "$FX" && exec node "$FLEET/test/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
+    ( cd "$FX" && exec node "$FLEET/test/fakes/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
     echo $! > "$FX/api.pid"
     local i=0
     until [[ -s "$TRACE/api-port" ]]; do
@@ -153,7 +153,7 @@ fixture() {                           # fixture <case-name> [story-status] → F
   # copy with a block deleted in place of a script (or, for TypeScript, lay a
   # directory over ts/src/) so a case can be observed red.
   copy_fleet "$FLEET_HOME" "$FLEET"
-  [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/lib.sh"
+  [[ -n "${FLEET_LIB_OVERRIDE:-}" ]]    && cp "$FLEET_LIB_OVERRIDE"    "$FLEET/bin/lib.sh"
   [[ -n "${FLEET_TS_OVERRIDE:-}" ]]     && cp -r "$FLEET_TS_OVERRIDE/." "$FLEET/ts/src/"
   mkdir -p "$FLEET/repos"
   printf 'REPO_PATH=%s\n' "$REPO" > "$FLEET/repos/t.env"
@@ -174,7 +174,7 @@ fixture() {                           # fixture <case-name> [story-status] → F
   cat > "$REPO/.fleet/config" <<EOF
 BASE_BRANCH=base
 INSTALL_CMD=true
-VITEST_CMD=$FLEET/test/vitest
+VITEST_CMD=$FLEET/test/fakes/vitest
 BUILD_CMD=true
 LINT_CMD=true
 SEED_FILES=.env.local
@@ -220,25 +220,25 @@ EOF
 # that needs one changed puts it in "$@", and env takes the last assignment,
 # so the case's VAR=value wins over the defaults here — and, inside the
 # script, over the config file.
-FAKES() { printf '%s' "$FLEET/test:$PATH"; }
+FAKES() { printf '%s' "$FLEET/test/fakes:$PATH"; }
 run() {                               # run <story-id> [VAR=value …] → LOG RC
   local id="$1"; shift
   LOG="$FX/launch.log"
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
-      bash "$FLEET/launch.sh" t "$id" ) > "$LOG" 2>&1
+      bash "$FLEET/fleet" launch t "$id" ) > "$LOG" 2>&1
   RC=$?
 }
 queue() {                             # queue [VAR=value …] → $FX/queue.log QRC   (QUEUE_TARGET=--all for every repo)
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
-      bash "$FLEET/run-queue.sh" "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
+      bash "$FLEET/fleet" run-queue "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
   QRC=$?
 }
 status_run() {                        # status_run [args…] → stdout
-  ( cd "$FX" && bash "$FLEET/status.sh" t "$@" )
+  ( cd "$FX" && bash "$FLEET/fleet" status t "$@" )
 }
 tracked() { git -C "$REPO" ls-tree -r HEAD --name-only; }
 
@@ -711,7 +711,7 @@ case_39_lint_story() {
   local out rc
 
   write_story() { printf '%s' "$2" > "$d/$1.md"; }
-  lint() { out="$(cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
+  lint() { out="$(cd "$FX" && bash "$FLEET/fleet" lint-story t "$d/$1.md" ${2:-} 2>&1)"; rc=$?; }
 
   write_story good '---
 status: ready
@@ -969,7 +969,7 @@ case_50_status_commit_failure() {
 # refuses to do.
 reset_run() {                         # reset_run <args…> → RLOG RRC
   RLOG="$FX/reset.log"
-  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/reset.sh" t "$@" ) > "$RLOG" 2>&1
+  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/fleet" reset t "$@" ) > "$RLOG" 2>&1
   RRC=$?
 }
 
@@ -1075,13 +1075,13 @@ merge_run() {                         # merge_run [VAR=value…] [-- <merge.sh f
   done
   MLOG="$FX/merge.log"
   ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      "${vars[@]}" bash "$FLEET/merge.sh" t "$STORY" "${flags[@]}" ) > "$MLOG" 2>&1
+      "${vars[@]}" bash "$FLEET/fleet" merge t "$STORY" "${flags[@]}" ) > "$MLOG" 2>&1
   MRC=$?
 }
 merge_epic() {                        # merge_epic <log> [VAR=value…] → exit code
   local log="$1"; shift
   ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 FAKE_VITEST=pass FAKE_TRACE_DIR="$TRACE" \
-      "$@" bash "$FLEET/merge.sh" t --epic epic/test ) > "$log" 2>&1
+      "$@" bash "$FLEET/fleet" merge t --epic epic/test ) > "$log" 2>&1
 }
 
 epic_head() { git -C "$REPO" rev-parse "origin/epic/test"; }
@@ -1160,7 +1160,7 @@ bot() {                               # bot <verb> [args…] → BLOG BRC
       FAKE_TELEGRAM_UPDATES="${FAKE_TELEGRAM_UPDATES:-}" \
       TELEGRAM_API_BASE="$API_BASE" \
       QUEUE_START_CMD=true \
-      bash "$FLEET/telegram.sh" "$@" ) > "$BLOG" 2>&1
+      bash "$FLEET/fleet" telegram "$@" ) > "$BLOG" 2>&1
   BRC=$?
 }
 
@@ -1206,7 +1206,7 @@ case_61_bot_unconfigured_is_not_fatal() {
   CASE="61 an unconfigured bot does not stop anything"; fixture c61
   BLOG="$FX/bot.log"
   ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
-      bash "$FLEET/telegram.sh" send "anyone there" ) > "$BLOG" 2>&1
+      bash "$FLEET/fleet" telegram send "anyone there" ) > "$BLOG" 2>&1
   assert_eq "$?" 0 "exit code is still 0"
   assert_grep 'not configured' "$BLOG" "and it says why"
   assert_eq "$(sent)" 0 "nothing was sent"
@@ -1269,7 +1269,7 @@ case_65_bot_offset_advances() {
 
 revert_run() {                        # revert_run → RVLOG RVRC
   RVLOG="$FX/revert.log"
-  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/revert.sh" t "$STORY" ) > "$RVLOG" 2>&1
+  ( cd "$FX" && env PUSH_STATUS=1 bash "$FLEET/fleet" revert t "$STORY" ) > "$RVLOG" 2>&1
   RVRC=$?
 }
 
@@ -1383,7 +1383,7 @@ case_71_auto_merge_can_be_turned_off() {
 # is not in CASES and therefore never runs. Both observed, 18 Sep.
 case_72_lessons_name_real_cases() {
   CASE="72 every lesson that claims an instrument still has it"
-  local lessons="$FLEET_HOME/docs/lessons.md" lib="$FLEET_HOME/test-lib.sh"
+  local lessons="$FLEET_HOME/docs/lessons.md" lib="$FLEET_HOME/test/suite.sh"
   assert_file "$lessons" "the lessons file is where it is expected"
   local names cases_block missing="" unrun="" n
   cases_block="$(sed -n '/^CASES=(/,/)$/p' "$lib")"
@@ -1394,7 +1394,7 @@ case_72_lessons_name_real_cases() {
     grep -qE "^$n\(\)" "$lib" || { missing+="$n "; continue; }
     [[ "$n" == case_* ]] && ! grep -q "$n" <<< "$cases_block" && unrun+="$n "
   done <<< "$names"
-  assert_eq "$missing" "" "lessons naming something that is not in test-lib"
+  assert_eq "$missing" "" "lessons naming something that is not in the suite"
   assert_eq "$unrun"   "" "lessons naming a case that is not in CASES, so never runs"
 }
 
@@ -1434,7 +1434,7 @@ case_74_merge_epic_into_integration() {
 case_75_merge_epic_refuses_non_epic() {
   CASE="75 --epic refuses a branch that is not an epic"; epic_story c75
   local before; before="$(git -C "$REPO" rev-parse origin/base)"
-  local out; out="$( cd "$FX" && bash "$FLEET/merge.sh" t --epic base 2>&1 )"
+  local out; out="$( cd "$FX" && bash "$FLEET/fleet" merge t --epic base 2>&1 )"
   assert_contains "$out" "epic/" "the message says what it will take"
   assert_eq "$(git -C "$REPO" rev-parse origin/base)" "$before" "and nothing moved"
 }
@@ -1570,7 +1570,7 @@ case_80_status_epics() {
   sed -i '2a base: epic/ghost' "$REPO/.stories/$STORY.md"
   out="$( status_run --epics )"
   assert_contains "$out" "no branch yet" "not 'in base'"
-  assert_contains "$out" "new-epic.sh t ghost" "with the command that makes it"
+  assert_contains "$out" "fleet new-epic t ghost" "with the command that makes it"
 }
 
 # AC1. Red when the refresh call is deleted from run-queue.sh: the
@@ -1719,7 +1719,7 @@ case_81_existing_merge_preserved() {
 # rule is deleted.
 case_82_load_repo() {
   CASE="82 load_repo: registry, config, env over file"
-  local d="$TMP/c82" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/lib.sh}" out rc
+  local d="$TMP/c82" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/bin/lib.sh}" out rc
   # Each target in its own parent directory: siblings would share ../wt-<id>
   # and load_repo refuses them (case 89).
   mkdir -p "$d/repos" "$d/a/target/.fleet" "$d/b/target2"
@@ -1843,7 +1843,7 @@ case_86_probe_dir() {
 case_84_prompts_carry_the_targets_facts() {
   CASE="84 the reviewer is told the target's commands, not npm's"; fixture c84
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "Run: $FLEET/test/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
+  assert_grep "Run: $FLEET/test/fakes/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
   assert_not_grep 'npm test' "$TRACE/codex-prompt-1" "and not khaita's"
 
   CASE="84b REPO_RULES reaches the builder through the rules"; fixture c84b
@@ -1863,7 +1863,7 @@ case_84_prompts_carry_the_targets_facts() {
   # the build or the lint exist. Red while the rules name only the tests.
   CASE="84d the builder is told to run the baseline's three commands"; fixture c84d
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "baseline, on your final commit: $FLEET/test/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
+  assert_grep "baseline, on your final commit: $FLEET/test/fakes/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
 }
 
 # One fleet, many repos. `--all` walks the registry and drains each repo in
@@ -1905,7 +1905,7 @@ case_89_shared_parent_dir_refused() {
   CASE="89 two registered repos in one parent directory are refused"; fixture c89
   git clone -q "$FX/origin.git" "$FX/repo-v"          # a sibling of repo/, same parent
   printf 'REPO_PATH=%s\n' "$FX/repo-v" > "$FLEET/repos/v.env"
-  local out; out="$( cd "$FX" && bash "$FLEET/status.sh" t 2>&1 )"
+  local out; out="$( cd "$FX" && bash "$FLEET/fleet" status t 2>&1 )"
   assert_eq "$?" 1 "load_repo dies"
   assert_contains "$out" "same parent directory" "and says why"
   assert_contains "$out" "v" "naming the other entry"
@@ -1918,7 +1918,7 @@ case_89_shared_parent_dir_refused() {
 # before any fixture is built. This case is the suite looking at its own
 # environment — the only vantage point from which the leak is visible.
 #
-# Red when the re-exec at the top is deleted: MAX_ROUNDS=1 bash test-lib.sh 88
+# Red when the re-exec at the top is deleted: MAX_ROUNDS=1 bash test/suite.sh 88
 case_88_suite_env_is_clean() {
   CASE="88 the suite runs under a clean environment"
   local leaked="" v
@@ -1977,7 +1977,7 @@ case_90_status_titles_and_landing() {
   out="$( status_run )"
   assert_contains "$out" "on epic" "merged into an epic that is not in the integration branch"
   assert_contains "$out" "1 merged" "the epic block leads the default output"
-  assert_contains "$out" "merge.sh t --epic epic/test" "with the command a human runs to land it"
+  assert_contains "$out" "fleet merge t --epic epic/test" "with the command a human runs to land it"
   local bot; bot="$( status_run --bot )"
   assert_contains "$bot" "/merge t epic/test" "--bot spells the hint as the phone command"
   assert_contains "$bot" $'\n→ epic/test | on epic | R1 | PASS\n' "and has the same state"
@@ -2189,11 +2189,11 @@ case_94_epic_naming() {
   local out rc
   ws() {                              # ws <id> <base> → out rc
     out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_BUILDER=nocommit \
-            bash "$FLEET/write-story.sh" t "$1" "x" --base "$2" 2>&1 )"; rc=$?
+            bash "$FLEET/fleet" write-story t "$1" "x" --base "$2" 2>&1 )"; rc=$?
   }
   ws 901 feat/x
   assert_eq "$rc" 1 "write-story.sh refuses a base that is not epic/*"
-  assert_contains "$out" "new-epic.sh" "and says how an epic is made"
+  assert_contains "$out" "fleet new-epic" "and says how an epic is made"
   assert_eq "$(calls claude)" 0 "before any agent runs"
   ws 902 epic/test
   assert_eq "$(calls claude)" 1 "an epic/* base gets past the check to the agent"
@@ -2204,7 +2204,7 @@ case_94_epic_naming() {
   local d="$FX/lint"; mkdir -p "$d"
   lint_base() {                       # lint_base <name> <base-line> → out rc
     printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
-    out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
+    out="$( cd "$FX" && bash "$FLEET/fleet" lint-story t "$d/$1.md" 2>&1 )"; rc=$?
   }
   lint_base feat "base: feat/x";     assert_eq "$rc" 1 "lint: base: feat/x is an error, although the branch exists"
   assert_contains "$out" "epic/" "naming the rule"
@@ -2213,7 +2213,7 @@ case_94_epic_naming() {
   lint_base none "";                 assert_eq "$rc" 0 "lint: no base is accepted"
 
   new_epic() {                        # new_epic <name> → out rc
-    out="$( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/new-epic.sh" t "$1" 2>&1 )"; rc=$?
+    out="$( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/fleet" new-epic t "$1" 2>&1 )"; rc=$?
   }
   new_epic search
   assert_eq "$rc" 0 "new-epic.sh creates an epic"
@@ -2259,7 +2259,7 @@ case_98_lint_cites_resolve_against_base() {
     printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n%s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' \
       "$2" "$1" "$3" > "$d/$1.md"
   }
-  lint() { out="$(cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1)"; rc=$?; }
+  lint() { out="$(cd "$FX" && bash "$FLEET/fleet" lint-story t "$d/$1.md" 2>&1)"; rc=$?; }
 
   story onepic "base: epic/test" 'It cites `src/added.ts:5` and `src/marker.txt:35-40`.'
   lint onepic
@@ -2288,7 +2288,7 @@ case_98_lint_cites_resolve_against_base() {
   # local. The checkout is the last resort, which is where it began.
   printf 'only here\n' > "$REPO/src/untracked.ts"
   story loose "" 'It cites `src/untracked.ts:1`.'
-  out="$(cd "$FX" && BASE_BRANCH=nosuch bash "$FLEET/lint-story.sh" t "$d/loose.md" 2>&1)"; rc=$?
+  out="$(cd "$FX" && BASE_BRANCH=nosuch bash "$FLEET/fleet" lint-story t "$d/loose.md" 2>&1)"; rc=$?
   assert_eq "$rc" 0 "with no resolvable base ref it falls back to the checkout"
   rm -f "$REPO/src/untracked.ts"
 }
@@ -2446,7 +2446,7 @@ case_100_check_mutation() {
   check() {                           # check <class> <rc> <label> [VAR=value …] — from $FX, the tree named by --wt
     local cls="$1" erc="$2" label="$3" patch="${PATCH:-AC1-tdd-marker}"; shift 3
     out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker "$@" \
-            bash "$FLEET/check-mutation.sh" t "$m/$patch.patch" --wt "$REPO" 2>&1 )"; rc=$?
+            bash "$FLEET/fleet" check-mutation t "$m/$patch.patch" --wt "$REPO" 2>&1 )"; rc=$?
     assert_eq "$(printf '%s\n' "$out" | grep -E '^[A-Z_]+ +AC1' | tail -n1)" "$cls $patch" "$label: class line"
     assert_eq "$rc" "$erc" "$label: exit code"
     assert_eq "$(git -C "$REPO" hash-object src/marker.txt)" "$before" "$label: the real file is restored byte for byte"
@@ -2465,14 +2465,14 @@ case_100_check_mutation() {
 
   # Two patches at once: one line each, exit 1 because one is not RED.
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" "$m/AC1-bad.patch" --wt "$REPO" 2>&1 )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" "$m/AC1-bad.patch" --wt "$REPO" 2>&1 )"; rc=$?
   assert_contains "$out" "RED AC1-tdd-marker" "two patches: first classified"
   assert_contains "$out" "NO_SELECTOR AC1-bad" "two patches: second classified"
   assert_eq "$rc" 1 "two patches: exit 1 when any is not RED"
 
   # The default tree is the cwd, as a builder runs it.
   out="$( cd "$REPO" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t .review-out/mutations/AC1-tdd-marker.patch 2>&1 )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t .review-out/mutations/AC1-tdd-marker.patch 2>&1 )"; rc=$?
   assert_contains "$out" "RED AC1-tdd-marker" "cwd is the tree when --wt is absent"
   assert_eq "$rc" 0 "and it exits 0"
 
@@ -2481,7 +2481,7 @@ case_100_check_mutation() {
   local calls; calls="$(grep -c '^vitest' "$TRACE/calls")"
   printf 'uncommitted\n' >> "$REPO/README.md"
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "dirty tree: exit 1"
   assert_contains "$out" "README.md" "dirty tree: names the path"
   assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$calls" "dirty tree: nothing ran"
@@ -2494,7 +2494,7 @@ case_100_check_mutation() {
 case_101_builder_told_to_check_evidence() {
   CASE="101 the builder's rules name check-mutation.sh for this repo"; fixture c101
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "bash $FLEET/check-mutation.sh t " "$TRACE/claude-prompt-1" "the helper, with this fleet's path and this repo's name"
+  assert_grep "bash $FLEET/fleet check-mutation t " "$TRACE/claude-prompt-1" "the helper, with this fleet's path and this repo's name"
   assert_grep 'tdd-\*\.patch' "$TRACE/claude-prompt-1" "applied to the builder's own tdd- patches"
   assert_not_grep '{{CHECK_MUTATION}}' "$TRACE/claude-prompt-1" "no leftover placeholder"
   assert_not_grep 'unsubstituted' "$LOG" "and no warning about one"
@@ -2549,7 +2549,7 @@ case_104_install_skills() {
   CASE="104 install-skills.sh: Claude Code gets every skill; Codex only inside the fleet repo"; fixture c104
   local H="$FX/home" out rc n
   mkdir -p "$H"
-  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/fleet" install-skills 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "exit 0"
   n="$(ls -d "$FLEET"/skills/*/ | wc -l)"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "one link per skill for Claude Code"
@@ -2558,7 +2558,7 @@ case_104_install_skills() {
   assert_eq "$(readlink -f "$FLEET/.agents/skills")" "$(readlink -f "$FLEET/skills")" "the fleet repo's .agents/skills is skills/"
   assert_grep '^name: fleet-story$' "$FLEET/.agents/skills/fleet-story/SKILL.md" "readable there, with the frontmatter Codex reads"
 
-  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/fleet" install-skills 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "second run: exit 0"
   assert_eq "$(find "$H/.claude/skills" -maxdepth 1 -type l | wc -l)" "$n" "second run: still one link per skill"
 
@@ -2568,7 +2568,7 @@ case_104_install_skills() {
   ln -s "$FLEET/skills/fleet-story" "$H/.codex/skills/fleet-story"
   mkdir -p "$H/.codex/skills/fleet-land"; printf 'theirs\n' > "$H/.codex/skills/fleet-land/SKILL.md"
   mkdir -p "$H/.codex/skills/security-review"; printf 'a reviewer skill\n' > "$H/.codex/skills/security-review/SKILL.md"
-  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/fleet" install-skills 2>&1 )"; rc=$?
   assert_eq "$rc" 0 "exit 0"
   assert_eq "$(test -e "$H/.codex/skills/fleet-story" && echo present || echo gone)" gone "our old Codex link is removed"
   assert_grep '^theirs$' "$H/.codex/skills/fleet-land/SKILL.md" "a directory that is not ours stays"
@@ -2576,7 +2576,7 @@ case_104_install_skills() {
 
   # A directory in Claude's home that is not our symlink: refused, named.
   rm "$H/.claude/skills/fleet-land"; mkdir -p "$H/.claude/skills/fleet-land"; printf 'theirs\n' > "$H/.claude/skills/fleet-land/SKILL.md"
-  out="$( cd "$FX" && HOME="$H" bash "$FLEET/install-skills.sh" 2>&1 )"; rc=$?
+  out="$( cd "$FX" && HOME="$H" bash "$FLEET/fleet" install-skills 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "a foreign directory: exit 1"
   assert_contains "$out" "fleet-land" "names it"
   assert_grep '^theirs$' "$H/.claude/skills/fleet-land/SKILL.md" "and leaves it alone"
@@ -2592,12 +2592,12 @@ case_105_fixture_excludes_node_modules() {
   mkdir -p "$src/ts/node_modules/typescript" "$src/ts/src/lib" "$src/.git" "$src/repos"
   printf 'x\n' > "$src/ts/node_modules/typescript/package.json"
   printf 'export {}\n' > "$src/ts/src/lib/a.ts"
-  printf '# lib\n' > "$src/lib.sh"; printf 'token\n' > "$src/.env.fleet"
+  printf '# fleet\n' > "$src/fleet"; printf 'token\n' > "$src/.env.fleet"
   copy_fleet "$src" "$dst"
   assert_no_file "$dst/ts/node_modules/typescript/package.json" "node_modules left behind"
   [[ -d "$dst/ts/node_modules" ]] && fail "ts/node_modules directory copied" || ok
   assert_file "$dst/ts/src/lib/a.ts" "ts/src copied"
-  assert_file "$dst/lib.sh" "scripts copied"
+  assert_file "$dst/fleet" "the entry point copied"
   assert_no_file "$dst/.env.fleet" "machine-local token not copied"
   [[ -d "$dst/.git" || -d "$dst/repos" ]] && fail ".git or repos copied" || ok
 }
@@ -2622,7 +2622,7 @@ STUB
   git -C "$REPO" checkout -q -- src/marker.txt
   printf 'fake.test.tsx\n' > "$m/AC1-tdd-marker.test"
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
   assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation.sh gives the stub's answer"
   assert_eq "$rc" 1 "and exits 1"
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
@@ -2688,18 +2688,18 @@ case_109_status_through_the_loader() {
   CASE="109 status.sh reaches the target through ts/src/lib/config.ts"; fixture c109
   config_stub
   local out rc err
-  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json 2>&1 )"; rc=$?
+  out="$( cd "$FX" && bash "$FLEET/fleet" status t --json 2>&1 )"; rc=$?
   assert_contains "$out" "fleet-test: config stub reached" "status.sh --json went through the loader"
   assert_eq "$rc" 1 "and failed with it"
   fixture c109b
   err="$FX/status.err"
-  out="$( cd "$FX" && bash "$FLEET/status.sh" t --json "$STORY" 2>"$err" )"; rc=$?
+  out="$( cd "$FX" && bash "$FLEET/fleet" status t --json "$STORY" 2>"$err" )"; rc=$?
   assert_eq "$rc" 0 "the real loader: --json exits 0"
   assert_eq "$(jq -r '.[0].id' <<< "$out")" "$STORY" "and names the story"
   assert_eq "$(cat "$err")" "" "nothing on stderr on success"
-  ( cd "$FX" && bash "$FLEET/status.sh" t -x >/dev/null 2>&1 ); assert_eq "$?" 2 "an unknown flag exits 2"
-  ( cd "$FX" && bash "$FLEET/status.sh" nope -x >/dev/null 2>&1 ); assert_eq "$?" 1 "an unknown repo exits 1 before the flags are read"
-  out="$( cd "$FX" && bash "$FLEET/status.sh" nope 2>&1 )"
+  ( cd "$FX" && bash "$FLEET/fleet" status t -x >/dev/null 2>&1 ); assert_eq "$?" 2 "an unknown flag exits 2"
+  ( cd "$FX" && bash "$FLEET/fleet" status nope -x >/dev/null 2>&1 ); assert_eq "$?" 1 "an unknown repo exits 1 before the flags are read"
+  out="$( cd "$FX" && bash "$FLEET/fleet" status nope 2>&1 )"
   assert_contains "$out" "unknown repo 'nope'" "lib.sh's own die text reaches the caller"
 }
 
@@ -2721,22 +2721,22 @@ case_110_check_through_the_loader() {
   }
   mutation_patch; config_stub
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
   assert_contains "$out" "fleet-test: config stub reached" "check-mutation.sh went through the loader"
   assert_eq "$rc" 1 "and failed with it"
   fixture c110b; m="$REPO/.review-out/mutations"; mutation_patch
   err="$FX/check.err"
   out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=marker \
-          bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>"$err" )"; rc=$?
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>"$err" )"; rc=$?
   assert_eq "$out" "RED AC1-tdd-marker" "the real loader: the class line and nothing else on stdout"
   assert_eq "$rc" 0 "exit 0 on all RED"
   assert_eq "$(cat "$err")" "" "nothing on stderr on success"
-  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t "$m/AC1-tdd-marker.patch" -x 2>&1 )"; rc=$?
+  out="$( cd "$FX" && bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" -x 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "an unknown flag is a die"
-  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
-  out="$( cd "$FX" && bash "$FLEET/check-mutation.sh" t 2>&1 )"; rc=$?
+  assert_contains "$out" "usage: fleet check-mutation" "with the usage"
+  out="$( cd "$FX" && bash "$FLEET/fleet" check-mutation t 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "no patch is a die"
-  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+  assert_contains "$out" "usage: fleet check-mutation" "with the usage"
 }
 
 # Two paths of the builder block no case exercised, characterised before the
@@ -2870,7 +2870,7 @@ case_116_lint_story_model() {
   mkdir -p "$d"
   lint_model() {                      # lint_model <name> <model-line> → out rc
     printf -- '---\nstatus: ready\nround: 0\n%s\nscope_deny: src/x/*\n---\n# Story: %s\n## Acceptance criteria\n**AC1 — one bounded claim.** Goes red when removed.\n' "$2" "$1" > "$d/$1.md"
-    out="$( cd "$FX" && bash "$FLEET/lint-story.sh" t "$d/$1.md" 2>&1 )"; rc=$?
+    out="$( cd "$FX" && bash "$FLEET/fleet" lint-story t "$d/$1.md" 2>&1 )"; rc=$?
   }
   for m in sonnet opus fable; do
     lint_model "ok-$m" "model: $m"; assert_eq "$rc" 0 "model: $m is accepted"
@@ -2879,8 +2879,7 @@ case_116_lint_story_model() {
   lint_model pinned "model: claude-opus-5";   assert_eq "$rc" 1 "a pinned id is an error"
   assert_contains "$out" "sonnet, opus or fable" "naming the aliases"
   lint_model typo "model: sonet";             assert_eq "$rc" 1 "a typo is an error"
-  # 24 Sep: retired after both real trials (khaita 021, 025) needed round-2
-  # escalation on round 1 — see docs/plans/2026-09-23-typescript-migration.md.
+  # Retired: both of its real trials needed a second round.
   lint_model haiku "model: haiku";            assert_eq "$rc" 1 "haiku is retired, no longer an alias"
   assert_contains "$out" "sonnet, opus or fable" "the error still names the live aliases"
 }
@@ -2899,7 +2898,7 @@ case_117_update_agents() {
   printf '#!/usr/bin/env bash\necho "codex $*" >> "%s/calls"\necho codex-cli 9.9.9\n' "$TRACE" > "$B/codex"
   printf '#!/usr/bin/env bash\necho "npm $*" >> "%s/calls"\n' "$TRACE" > "$B/npm"
   chmod +x "$B/claude" "$B/codex" "$B/npm"
-  upd() { out="$( env PATH="$B:$PATH" FLEET_QUEUE_ACTIVE_CMD="$1" bash "$FLEET/update-agents.sh" 2>&1 )"; rc=$?; }
+  upd() { out="$( env PATH="$B:$PATH" FLEET_QUEUE_ACTIVE_CMD="$1" bash "$FLEET/fleet" update-agents 2>&1 )"; rc=$?; }
 
   upd true
   assert_eq "$rc" 0 "a running queue is not a failure"
@@ -2943,13 +2942,13 @@ case_118_merge_nothing_to_do_and_usage() {
   merge_run -- --bogus
   assert_eq "$MRC" 1 "an unknown flag is a die"
   assert_grep 'unknown option --bogus' "$MLOG" "naming it"
-  ( cd "$FX" && bash "$FLEET/merge.sh" t ) > "$FX/usage.log" 2>&1
+  ( cd "$FX" && bash "$FLEET/fleet" merge t ) > "$FX/usage.log" 2>&1
   assert_eq "$?" 1 "no id is a die"
-  assert_grep 'usage: merge.sh' "$FX/usage.log" "with the usage"
-  ( cd "$FX" && bash "$FLEET/merge.sh" t "$STORY" 901 ) > "$FX/two.log" 2>&1
+  assert_grep 'usage: fleet merge' "$FX/usage.log" "with the usage"
+  ( cd "$FX" && bash "$FLEET/fleet" merge t "$STORY" 901 ) > "$FX/two.log" 2>&1
   assert_eq "$?" 1 "two ids are a die"
-  assert_grep 'usage: merge.sh' "$FX/two.log" "with the usage"
-  ( cd "$FX" && bash "$FLEET/merge.sh" t --epic epic/test --land ) > "$FX/epic-land.log" 2>&1
+  assert_grep 'usage: fleet merge' "$FX/two.log" "with the usage"
+  ( cd "$FX" && bash "$FLEET/fleet" merge t --epic epic/test --land ) > "$FX/epic-land.log" 2>&1
   assert_eq "$?" 1 "--epic with --land is a die"
   assert_grep '[-]-land is for a story' "$FX/epic-land.log" "saying which flag is for what"
 }
@@ -3150,7 +3149,7 @@ case_124_reset_flags_and_second_run() {
   assert_grep 'unknown option: --nope' "$RLOG" "naming it"
   reset_run
   assert_eq "$RRC" 1 "no id"
-  assert_grep 'usage: reset.sh' "$RLOG" "the usage"
+  assert_grep 'usage: fleet reset' "$RLOG" "the usage"
 
   CASE="124c a second reset finds nothing to do and says so"
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
@@ -3256,7 +3255,7 @@ case_128_bare_launch_never_picks_template() {
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
       FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
-      bash "$FLEET/launch.sh" t ) > "$FX/bare.log" 2>&1
+      bash "$FLEET/fleet" launch t ) > "$FX/bare.log" 2>&1
   local rc=$?
   assert_eq "$rc" 0 "nothing ready is not an error"
   assert_grep 'queue empty' "$FX/bare.log" "it says the queue is empty"
@@ -3294,15 +3293,15 @@ case_130_queue_same_story_twice_stops() {
   # normally; here the fixture story is put back to `ready` by hand after the
   # launcher returns, standing in for a launcher bug that never reaches a
   # terminal state — next_ready would pick it right back up.
-  cp "$FLEET/launch.sh" "$FLEET/launch.sh.real"
-  cat > "$FLEET/launch.sh" <<EOF
+  mv "$FLEET/fleet" "$FLEET/fleet.real"
+  cat > "$FLEET/fleet" <<EOF
 #!/usr/bin/env bash
-bash "$FLEET/launch.sh.real" "\$@"
+bash "$FLEET/fleet.real" "\$@"
 rc=\$?
-sed -i 's/^status:.*/status: ready/' "$REPO/.stories/$STORY.md"
+[[ "\$1" == launch ]] && sed -i 's/^status:.*/status: ready/' "$REPO/.stories/$STORY.md"
 exit \$rc
 EOF
-  chmod +x "$FLEET/launch.sh"
+  chmod +x "$FLEET/fleet"
   queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_eq "$QRC" 0 "the runner exits cleanly, not hung"
   assert_grep "$STORY is ready again without having finished" "$FX/queue.log" "the loop names the story"
@@ -3336,7 +3335,7 @@ case_132_write_story_end_to_end() {
   write() {                          # write <id> <intent> [VAR=value...] → out rc
     local id="$1" intent="$2"; shift 2
     out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$id" "$@" \
-            bash "$FLEET/write-story.sh" t "$id" "$intent" --base epic/test 2>&1 )"; rc=$?
+            bash "$FLEET/fleet" write-story t "$id" "$intent" --base epic/test 2>&1 )"; rc=$?
   }
 
   write 950 "the moon toggle should show a moon" FAKE_BUILDER=story
@@ -3423,7 +3422,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_126_revert_through_the_loader case_127_reset_through_the_loader
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
-       case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html)
+       case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
+       case_136_fleet_entry_point)
 
 # Seam 8. The recorder the TypeScript bot is tested against, checked
 # against itself before any bot case relies on it: a sendMessage with a
@@ -3468,12 +3468,12 @@ case_134_bot_api_unreachable() {
   BLOG="$FX/bot.log"
   ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
       TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
-      bash "$FLEET/telegram.sh" send "anyone there" ) > "$BLOG" 2>&1; rc=$?
+      bash "$FLEET/fleet" telegram send "anyone there" ) > "$BLOG" 2>&1; rc=$?
   assert_eq "$rc" 0 "send exits 0"
   assert_grep 'sendMessage failed' "$BLOG" "and says so"
   ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
       TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
-      bash "$FLEET/telegram.sh" poll ) > "$BLOG" 2>&1; rc=$?
+      bash "$FLEET/fleet" telegram poll ) > "$BLOG" 2>&1; rc=$?
   assert_eq "$rc" 0 "poll exits 0"
   assert_grep 'getUpdates failed' "$BLOG" "and says so"
   assert_no_file "$FLEET/.bot-offset" "nothing was acknowledged"
@@ -3499,6 +3499,35 @@ case_135_bot_pre_escapes_html() {
   assert_eq "$BRC" 0 "exit code"
   assert_eq "$(sent)" 1 "one message"
   assert_contains "$(sent_text)" "text=<pre>a &amp; b &lt;c&gt; d</pre>" "escaped, then wrapped"
+}
+
+# The one entry point. Every command is `fleet <command> …`; with no
+# command, or one it does not know, it prints the usage on stderr and exits
+# 2 before anything is loaded; `help` prints it on stdout. Reached through a
+# symlink (~/.local/bin/fleet, say) it still finds its own tree. Red while
+# the file is absent; red again with the readlink -f deleted (the link
+# case), or with the unknown-command branch falling through to node.
+case_136_fleet_entry_point() {
+  CASE="136 fleet: usage, unknown commands, help, a symlink"; fixture c136
+  local out rc c
+  out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
+  assert_eq "$rc" 2 "no command is a usage error"
+  assert_contains "$out" "usage: fleet <command>" "with the usage"
+  for c in status write-story lint-story new-epic launch run-queue check-mutation merge revert reset telegram install-skills update-agents; do
+    assert_contains "$out" "
+  $c " "the usage lists $c"
+  done
+  out="$(cd "$FX" && bash "$FLEET/fleet" bogus t 2>&1)"; rc=$?
+  assert_eq "$rc" 2 "an unknown command is a usage error"
+  assert_contains "$out" "unknown command 'bogus'" "and names it"
+  assert_contains "$out" "usage: fleet <command>" "with the usage"
+  out="$(cd "$FX" && bash "$FLEET/fleet" help 2>/dev/null)"; rc=$?
+  assert_eq "$rc" 0 "help is not an error"
+  assert_contains "$out" "usage: fleet <command>" "help prints the usage on stdout"
+  mkdir -p "$FX/bin"; ln -s "$FLEET/fleet" "$FX/bin/fleet"
+  out="$(cd "$FX" && "$FX/bin/fleet" status t 2>&1)"; rc=$?
+  assert_eq "$rc" 0 "a symlinked fleet runs, executable as it is"
+  assert_contains "$out" "fixture story" "and reaches the registry and ts/ of its own tree"
 }
 
 for c in "${CASES[@]}"; do

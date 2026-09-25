@@ -1,11 +1,18 @@
-// merge.ts — the entry point behind merge.sh (seam 5). The argument count is
-// checked before the repo is loaded, as the bash did (merge.sh:51-52), so
-// `merge.sh t` is the usage without touching any target. Exit codes as the
-// bash had them: every die is 1 with an XX line on stderr; "already merged",
-// a pr-mode request and a finished merge are 0. lib.sh's die line for a bad
+// fleet merge <repo> <id>             a story into its epic — the queue does this
+// fleet merge <repo> <id> --land      a story whose base IS the integration
+//                                     branch, onto it — a human's word (/merge
+//                                     from the phone); the queue never passes --land
+// fleet merge <repo> --epic <name>    an epic into the integration branch — a
+//                                     human's call, never the fleet's
+//
+// The refusals, the throwaway worktree, the post-merge baseline, MERGE_MODE
+// and the record are src/merge.ts. The argument count is checked before the
+// repo is loaded, so `fleet merge t` is the usage without touching any
+// target. Every die is 1 with an XX line on stderr; "already merged", a
+// pr-mode request and a finished merge are 0. lib.sh's die line for a bad
 // repo or config reaches stderr from the child bash itself. On SIGTERM,
 // SIGINT or SIGHUP the throwaway merge worktree is removed and the process
-// ends with 128+signal, as the bash EXIT trap did.
+// ends with 128+signal.
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';

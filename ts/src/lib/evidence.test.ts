@@ -8,7 +8,7 @@ import { RunnerError, runMutations, runProbes, writeResultFile } from './evidenc
 // launch.sh:161-183 (run_mutations) and :239-267 (run_probes): the
 // reviewer's files under round-N/mutations and round-N/probes, run by the
 // harness in the reviewer's worktree, a .result beside each.
-const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/vitest');
+const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/fakes/vitest');
 
 let dir: string; let wt: string; let ev: string; let runs: string;
 const saved: Record<string, string | undefined> = {};

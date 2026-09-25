@@ -11,7 +11,7 @@ OnBootSec=2min
 OnUnitActiveSec=15min
 
 # A firing missed while the machine was off runs shortly after boot. That is
-# also the crash-recovery path: the first thing run-queue.sh does is reap
+# also the crash-recovery path: the first thing `fleet run-queue` does is reap
 # orphans, so a story stranded at in_progress by a power cut is picked up
 # without anyone asking.
 Persistent=true

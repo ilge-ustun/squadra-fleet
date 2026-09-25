@@ -35,7 +35,7 @@ import { runBashTo, runSync } from './lib/proc.ts';
 import { procsInWorktree as liveProcs } from './lib/procs.ts';
 import { DASH, statusOf, type StoryRow } from './status.ts';
 
-export const USAGE = 'usage: merge.sh <repo> <id> [--land] | <repo> --epic <epic/name>';
+export const USAGE = 'usage: fleet merge <repo> <id> [--land] | <repo> --epic <epic/name>';
 
 const isFile = (p: string): boolean => existsSync(p) && statSync(p).isFile();
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();
@@ -106,14 +106,14 @@ export function refusal(r: StoryRow, c: RefusalContext): Refusal {
   // works, merged into its epic already or not — before "already merged"
   // could answer instead.
   const onIntegration = r.base === 'main' || r.base === 'master' || r.base === c.baseBranch;
-  if (c.land && !onIntegration) return die(`${c.id} lives on ${r.base}, not on ${c.baseBranch} — land its epic: merge.sh ${c.repoName} --epic ${r.base}`);
+  if (c.land && !onIntegration) return die(`${c.id} lives on ${r.base}, not on ${c.baseBranch} — land its epic: fleet merge ${c.repoName} --epic ${r.base}`);
   if (r.merged) return { kind: 'already' };
   // The queue calls this on every computed PASS. It must never land anything
   // on the integration branch: that is a human's decision, and --land is how
   // a human says it. main and master stay refused whatever the flag.
   if (r.base === 'main' || r.base === 'master') return die(`${c.id} is based on ${r.base} — main is never merged here, --land or not`);
   if (r.base === c.baseBranch && !c.land) {
-    return die(`${c.id} is based on ${r.base} — the integration branch is merged by a human: merge.sh ${c.repoName} ${c.id} --land, or /merge ${c.repoName} ${c.id}`);
+    return die(`${c.id} is based on ${r.base} — the integration branch is merged by a human: fleet merge ${c.repoName} ${c.id} --land, or /merge ${c.repoName} ${c.id}`);
   }
   return { kind: 'go' };
 }
@@ -182,7 +182,7 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       // status.ts is the single reader of story state; duplicating its
       // frontmatter parsing here is how the two would drift.
       const st = statusOf(cfg, { one: id }, { procsInWorktree: procs });
-      if (st.stories.length !== 1) throw new Die(`status.sh did not report exactly one story for ${id}`);
+      if (st.stories.length !== 1) throw new Die(`status did not report exactly one story for ${id}`);
       const row = st.stories[0]!;
       const r = refusal(row, { id, land: a.land, baseBranch: cfg.baseBranch, repoName: cfg.name });
       if (r.kind === 'die') throw new Die(r.message);
@@ -301,7 +301,7 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       else warn(`could not remove ${wt} — git worktree remove --force ${wt}`);
     }
 
-    log(`${id} merged into ${base} — revert with: revert.sh ${cfg.name} ${id}`);
+    log(`${id} merged into ${base} — revert with: fleet revert ${cfg.name} ${id}`);
     return 0;
   }
 }

@@ -6,7 +6,7 @@ import { Die } from './lib/die.ts';
 import { USAGE, logIdOf, parseArgs, refusal, seedMergeWorktree } from './merge.ts';
 import { DASH, type StoryRow } from './status.ts';
 
-// The pure parts of merge.sh; the flow itself is proven by test-lib.sh
+// The pure parts of merge.sh; the flow itself is proven by test/suite.sh
 // (cases 56-59, 74, 75, 91, 92, 118-122, 125), as the launcher's is.
 
 describe('parseArgs — merge.sh:55-71', () => {
@@ -55,12 +55,12 @@ describe('refusal — merge.sh:100-125, in that order', () => {
     ['live', row({ live: true }), ctx, die('900 has something running in its worktree')],
     ['no branch', row({ branch: DASH }), ctx, die('900 has no branch')],
     ['--land on an epic story, before "already merged" can answer', row({ merged: true }), { ...ctx, land: true },
-      die('900 lives on epic/x, not on develop — land its epic: merge.sh khaita --epic epic/x')],
+      die('900 lives on epic/x, not on develop — land its epic: fleet merge khaita --epic epic/x')],
     ['already merged', row({ merged: true }), ctx, { kind: 'already' }],
     ['based on main', row({ base: 'main' }), ctx, die('900 is based on main — main is never merged here, --land or not')],
     ['based on master, --land or not', row({ base: 'master' }), { ...ctx, land: true }, die('900 is based on master — main is never merged here, --land or not')],
     ['the integration branch without --land', row({ base: 'develop' }), ctx,
-      die('900 is based on develop — the integration branch is merged by a human: merge.sh khaita 900 --land, or /merge khaita 900')],
+      die('900 is based on develop — the integration branch is merged by a human: fleet merge khaita 900 --land, or /merge khaita 900')],
     ['the integration branch with --land', row({ base: 'develop' }), { ...ctx, land: true }, { kind: 'go' }],
     ['an epic story: go', row({}), ctx, { kind: 'go' }],
     ['order: status before verdict before live', row({ status: 'ready', verdict: 'FAIL', live: true }), ctx, die('900 is ready, not done — nothing to merge')],

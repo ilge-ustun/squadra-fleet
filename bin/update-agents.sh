@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# update-agents.sh — bring the two agent CLIs to their newest release.
+# bin/update-agents.sh — bring the two agent CLIs to their newest release.
 #
 # The fleet names models by alias (sonnet, opus, fable; codex's own default),
 # and an alias means "the newest model this CLI knows". Claude Code updates
@@ -10,7 +10,7 @@
 #
 # Only while the queue is idle: a codex replaced under a running reviewer is
 # a dead round. A running queue is not a failure — the next firing tries
-# again. FLEET_QUEUE_ACTIVE_CMD is the seam test-lib.sh uses.
+# again. FLEET_QUEUE_ACTIVE_CMD is the seam test/suite.sh uses.
 #
 set -uo pipefail
 

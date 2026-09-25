@@ -1,40 +1,34 @@
-# lib.sh — sourced first by every script:  source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# bin/lib.sh — sourced by `fleet` and by the two bash chores beside it.
 #
 # Nothing here runs on source beyond assignments and function definitions.
+# What lives here is what has to be bash: FLEET_HOME, log/warn/die, and
+# load_repo — a target's .fleet/config is sourced bash, so the TypeScript
+# side (ts/src/lib/config.ts) runs load_repo in a child bash and reads the
+# keys back.
 #
-# What is left is what bash still has to do: FLEET_HOME, log/warn/die for the
-# wrappers, and load_repo — a target's .fleet/config is sourced bash, so
-# ts/src/lib/config.ts runs load_repo in a child bash. The frontmatter reader
-# and writer and procs_in_worktree lived here until seam 8 took their last
-# caller; they are ts/src/lib/frontmatter.ts and procs.ts.
-#
-# Where things are. FLEET_HOME is this directory: the scripts, prompts/, the
-# fakes in test/, the registry in repos/. The target repo is never assumed to
-# be the cwd — it is named, looked up in the registry, and checked.
+# FLEET_HOME is the repository root, the parent of bin/. A target is never
+# assumed to be the cwd — it is named, looked up in the registry, and checked.
 #
 #   repos/<name>.env          REPO_PATH=/abs/path   — and nothing else
 #   <target>/.fleet/config    the target's own settings, sourced by load_repo:
 #                             BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD
-#                             LINT_CMD SEED_FILES PROBE_DIR, optional REPO_RULES
+#                             LINT_CMD SEED_FILES PROBE_DIR, optional
+#                             REPO_RULES MERGE_MODE PR_CMD
 #
 # A variable already in the caller's environment wins over the file, so a
 # test can point VITEST_CMD at a fake and a hand run can override one value
-# without editing the target. The file is NOT exported: under run-queue.sh
-# --all one repo's BASE_BRANCH would otherwise reach the next repo's process
-# and look, to it, like a caller's override.
+# without editing the target. The file is NOT exported: under `fleet
+# run-queue --all` one repo's BASE_BRANCH would otherwise reach the next
+# repo's process and look, to it, like a caller's override.
 
-FLEET_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLEET_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_REGISTRY_DIR="${FLEET_REGISTRY_DIR:-$FLEET_HOME/repos}"
-PROMPTS_DIR="$FLEET_HOME/prompts"
-# How the fleet reaches a human. One seam, so a test can substitute a recorder
-# and nothing here ever reaches the network.
-FLEET_NOTIFY_CMD="${FLEET_NOTIFY_CMD:-bash $FLEET_HOME/telegram.sh send}"
 
 FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD"
 FLEET_REPO_REQUIRED="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD PROBE_DIR"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
-# LOG_TAG, when a script sets it, prefixes every line: [queue], [bot].
+# LOG_TAG, when set (the bot sets bot), prefixes every line: [bot] …
 log()  { printf '%s==> %s%s%s\n' "$GRN" "${LOG_TAG:+[$LOG_TAG] }" "$1" "$RST"; }
 warn() { printf '%s!! %s%s%s\n'  "$YLW" "${LOG_TAG:+[$LOG_TAG] }" "$1" "$RST"; }
 die()  { printf '%sXX %s%s%s\n'  "$RED" "${LOG_TAG:+[$LOG_TAG] }" "$1" "$RST" >&2; exit 1; }
@@ -78,7 +72,7 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
   read -ra SEED_FILES_ARR <<< "${SEED_FILES:-}"
   # How a merge reaches origin: `direct` pushes after the post-merge baseline;
   # `pr` pushes the branch and runs PR_CMD, and the host merges. Absent means
-  # direct — the only mode there was until 20 Sep.
+  # direct.
   MERGE_MODE="${MERGE_MODE:-direct}"
   case "$MERGE_MODE" in
     direct) ;;

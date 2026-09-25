@@ -16,7 +16,7 @@ WorkingDirectory=/home/fleet/work/fleet
 Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/fleet
 
-ExecStart=/bin/bash /home/fleet/work/fleet/telegram.sh poll
+ExecStart=/bin/bash /home/fleet/work/fleet/fleet telegram poll
 
 # A poll is one HTTPS request and a handful of git commands. If it has not
 # finished in two minutes something is wrong, and the next firing will retry.
