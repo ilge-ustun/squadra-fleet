@@ -3439,7 +3439,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
        case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round
        case_142_refused_story_resumes_at_its_review
-       case_143_queue_pauses_on_a_refused_review)
+       case_143_queue_pauses_on_a_refused_review
+       case_144_bot_wait_and_fallback)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3853,6 +3854,44 @@ case_143_queue_pauses_on_a_refused_review() {
   assert_eq "$(field status)" done "then 900"
   assert_eq "$(grep -oE 'story (900|901) \(' "$FX/queue.log" | head -1)" "story 901 (" "901 went first, ahead of the lower id"
   assert_eq "$(calls claude)" 2 "901's resumed round built nothing; 900's did"
+}
+
+# /wait and /fallback: the human's two answers to a refused review, from the
+# phone. Both only for a story paused on one (needs_human, line 3
+# UNAVAILABLE). /wait makes it ready and keeps not_before, which the queue
+# holds for; /fallback makes it ready with `reviewer: claude` and no
+# not_before, for the next drain. Red while ts/src/telegram.ts does not know
+# the verbs: the bot answers with its help.
+case_144_bot_wait_and_fallback() {
+  CASE="144a /wait on a story that is not paused"; fixture c144a
+  update 144 42 "/wait t $STORY"
+  bot poll
+  assert_contains "$(sent_text)" "$STORY is not waiting for a reviewer choice" "refused, and said why"
+  assert_eq "$(field status)" ready "untouched"
+
+  CASE="144b /wait on a paused story"; fixture c144b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  local nb head; nb="$(field not_before)"
+  update 145 42 "/wait t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "ready again"
+  assert_eq "$(field not_before)" "$nb" "the reset it waits for is kept"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "wait for the reviewer" "committed, which is what the queue reads"
+  assert_contains "$(sent_text)" "then is reviewed first" "the human is told what happens next"
+
+  CASE="144c /fallback on a paused story"; fixture c144c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 146 42 "/fallback t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "ready again"
+  assert_eq "$(field reviewer)" claude "Claude reviews it"
+  assert_eq "$(field not_before)" "" "nothing to wait for"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "reviewed by Claude instead" "committed"
+  assert_contains "$(sent_text)" "weaker check" "the reply says what the choice costs"
+  head="$(git -C "$REPO" rev-parse HEAD)"
+  update 147 42 "/fallback t $STORY"
+  bot poll
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "a second /fallback changes nothing"
 }
 
 for c in "${CASES[@]}"; do

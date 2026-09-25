@@ -293,6 +293,41 @@ describe('dispatch', () => {
     expect(readFileSync(join(root, '.blocked', '900.md'), 'utf8')).toBe('# Question\n\nwhich?\n');
     expect(git('log', '-1', '--format=%s')).toBe('in progress');
   });
+  it('/wait and /fallback: only for a story paused on a refused review', () => {
+    expect(dispatch(ctx(), '/wait t 900')).toBe('900 is not waiting for a reviewer choice');
+    expect(dispatch(ctx(), '/fallback t 900')).toBe('900 is not waiting for a reviewer choice');
+    expect(dispatch(ctx(), '/wait t 901')).toBe('no such story: 901');
+    writeFileSync(join(root, '.stories', '900.md'), '---\nnot_before: 2026-09-21T14:17:47+02:00\nstatus: needs_human\nround: 0\n---\n\n# Story 900: fixture\n');
+    writeFileSync(join(root, '.review', '900.md'), '# Review: 900\n\nverdict: FAIL\nrounds: 1 of 2\n');
+    expect(dispatch(ctx(), '/wait t 900')).toBe('900 is not waiting for a reviewer choice');
+  });
+  it('/wait: ready again, not_before kept — the queue holds for it, then reviews it first', () => {
+    writeFileSync(join(root, '.stories', '900.md'), '---\nnot_before: 2026-09-21T14:17:47+02:00\nstatus: needs_human\nround: 0\n---\n\n# Story 900: fixture\n');
+    writeFileSync(join(root, '.review', '900.md'), '# Review: 900\n\nverdict: UNAVAILABLE\nrounds: 0 of 2\n');
+    git('add', '.'); git('commit', '-q', '-m', 'paused');
+    expect(dispatch(ctx(), '/wait t 900')).toBe('900 waits until 2026-09-21T14:17:47+02:00, then is reviewed first; the queue holds until then');
+    const story = readFileSync(join(root, '.stories', '900.md'), 'utf8');
+    expect(story).toContain('\nstatus: ready\n');
+    expect(story).toContain('\nnot_before: 2026-09-21T14:17:47+02:00\n');
+    expect(git('log', '-1', '--format=%s')).toBe('story(900): wait for the reviewer, then review (telegram)');
+  });
+  it('/fallback: ready, reviewer: claude, no not_before — the next drain has Claude review it', () => {
+    writeFileSync(join(root, '.stories', '900.md'), '---\nnot_before: 2026-09-21T14:17:47+02:00\nstatus: needs_human\nround: 0\n---\n\n# Story 900: fixture\n');
+    writeFileSync(join(root, '.review', '900.md'), '# Review: 900\n\nverdict: UNAVAILABLE\nrounds: 0 of 2\n');
+    git('add', '.'); git('commit', '-q', '-m', 'paused');
+    expect(dispatch(ctx(), '/fallback t 900')).toBe('900 will be reviewed by Claude (opus) at the next drain — /run to start one now. A weaker check: the same vendor as its builder.');
+    const story = readFileSync(join(root, '.stories', '900.md'), 'utf8');
+    expect(story).toContain('\nstatus: ready\n');
+    expect(story).toContain('\nreviewer: claude\n');
+    expect(story).not.toContain('not_before');
+    expect(git('log', '-1', '--format=%s')).toBe('story(900): reviewed by Claude instead (telegram)');
+    expect(git('status', '--porcelain')).toBe('');
+  });
+  it('/help names both', () => {
+    const h = dispatch(ctx(), '/help');
+    expect(h).toContain('/wait <repo> <id>');
+    expect(h).toContain('/fallback <repo> <id>');
+  });
   it('/revert reports what fleet revert said, colours stripped, then the verdict', () => {
     expect(dispatch(ctx(), '/revert t 900')).toBe('ran revert t 900!\n900 reverted');
     expect(dispatch(ctx(), '/revert t 901')).toBe('no such story: 901');
