@@ -11,10 +11,10 @@ import {
 
 // ── pure parts ───────────────────────────────────────────────────────────────
 
-describe('splitText (telegram.sh:51-64)', () => {
+describe('splitText', () => {
   it('an empty text is nothing to send', () => { expect(splitText('', 10)).toEqual([]); });
   it('one short text is one message', () => { expect(splitText('a\nb', 10)).toEqual(['a\nb']); });
-  it('a herestring adds a newline: a trailing newline is an empty last line, kept', () => {
+  it('a trailing newline is an empty last line, kept', () => {
     expect(splitText('a\n', 10)).toEqual(['a\n']);
   });
   it('splits on line boundaries when the next line would not fit', () => {
@@ -34,13 +34,13 @@ describe('splitText (telegram.sh:51-64)', () => {
   });
 });
 
-describe('htmlPre (telegram.sh:68-73)', () => {
+describe('htmlPre', () => {
   it('escapes the three characters HTML would misread and wraps in <pre>', () => {
     expect(htmlPre('a & b <c> d')).toBe('<pre>a &amp; b &lt;c&gt; d</pre>');
   });
 });
 
-describe("parseCommand (bash `read -r verb repo arg rest`)", () => {
+describe('parseCommand (`read -r verb repo arg rest`)', () => {
   it('four fields, the rest keeping its inner spaces', () => {
     expect(parseCommand('/answer t 007 yes,  do it')).toEqual({ verb: '/answer', repo: 't', arg: '007', rest: 'yes,  do it' });
   });
@@ -68,7 +68,7 @@ describe('isoSeconds (date -Iseconds)', () => {
   });
 });
 
-describe('machineBlockBody (the /why awk, telegram.sh:160-161)', () => {
+describe('machineBlockBody (/why)', () => {
   it('is the last Machine block without its heading', () => {
     const review = ['---', 'verdict: FAIL', '---', '', '### Round 1', 'x', '### Machine (round 1)', 'computed: FAIL — a', 'builder: sonnet', '', '### Notes', 'n'].join('\n');
     expect(machineBlockBody(review)).toBe('computed: FAIL — a\nbuilder: sonnet');
@@ -137,7 +137,7 @@ afterEach(() => { rmSync(tmp, { recursive: true, force: true }); });
 
 // ── configuration ────────────────────────────────────────────────────────────
 
-describe('configuredFrom (telegram.sh:37-41)', () => {
+describe('configuredFrom', () => {
   it('the environment wins: with the token set, .env.fleet is not read', () => {
     writeFileSync(join(fleetHome, '.env.fleet'), 'TELEGRAM_BOT_TOKEN=file\nTELEGRAM_CHAT_ID=1\n');
     expect(configuredFrom({ TELEGRAM_BOT_TOKEN: 'env', TELEGRAM_CHAT_ID: '2' }, fleetHome, warned)).toEqual({ token: 'env', chatId: '2' });
@@ -196,7 +196,7 @@ describe('send', () => {
 
 // ── the phone's side ─────────────────────────────────────────────────────────
 
-describe('resolveRepo (telegram.sh:257-269)', () => {
+describe('resolveRepo', () => {
   it('a registered name is used as given', () => {
     expect(resolveRepo(ctx(), { verb: '/why', repo: 't', arg: '007', rest: '' })).toEqual({ repo: 't', arg: '007', rest: '' });
   });
@@ -248,7 +248,7 @@ describe('dispatch', () => {
     expect(commands).toEqual([['systemctl', '--user', 'start', 'x']]);
     expect(dispatch(ctx({ QUEUE_START_CMD: 'false' }), '/run')).toBe('could not start the queue');
   });
-  it('/status and /status-all go through status.sh --bot, output merged', () => {
+  it('/status and /status-all go through fleet status --bot, output merged', () => {
     expect(dispatch(ctx(), '/status t')).toBe('ran status t --bot\x1b[32m!\x1b[0m');
     expect(dispatch(ctx(), '/status-all')).toBe('ran status t --bot --all\x1b[32m!\x1b[0m');
     expect(ran).toEqual([['status', 't', '--bot'], ['status', 't', '--bot', '--all']]);
@@ -281,7 +281,7 @@ describe('dispatch', () => {
     expect(git('log', '-1', '--format=%s')).toBe('story(900): answered, back to ready (telegram)');
     expect(git('status', '--porcelain')).toBe('');
   });
-  it('/revert reports what revert.sh said, colours stripped, then the verdict', () => {
+  it('/revert reports what fleet revert said, colours stripped, then the verdict', () => {
     expect(dispatch(ctx(), '/revert t 900')).toBe('ran revert t 900!\n900 reverted');
     expect(dispatch(ctx(), '/revert t 901')).toBe('no such story: 901');
   });
@@ -294,7 +294,7 @@ describe('dispatch', () => {
     expect(dispatch(ctx(), '/merge t 901')).toBe('no such story: 901');
     expect(detached).toHaveLength(2);
   });
-  it('a reply never ends in newlines ($(…) stripped them)', () => {
+  it('a reply never ends in newlines, as $(…) leaves it', () => {
     expect(dispatch(ctx(), '/help')).not.toMatch(/\n$/);
   });
 });
@@ -303,7 +303,7 @@ describe('dispatch', () => {
 
 const upd = (id: number, from: number, text: string) => ({ update_id: id, message: { from: { id: from }, text } });
 
-describe('poll (telegram.sh:285-322)', () => {
+describe('poll', () => {
   it('not configured: a warning, no request', async () => {
     const c = ctx(); delete c.env['TELEGRAM_BOT_TOKEN'];
     await poll(c);

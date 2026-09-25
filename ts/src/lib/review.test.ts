@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { runSync } from './proc.ts';
 import { readReview } from './review.ts';
 
-// status.sh:148, :151 and :234 — the three awk programs this module replaces.
+// The three reads as awk programs, the oracle for this module.
 const VERDICT_AWK = '/^verdict:/ {print $2; exit}';
 const REASONS_AWK = '/^computed:/ {r=$2} END{print r}';
 const BLOCK_AWK = '/^### Machine/ {blk=""; inblk=1; next} /^### / {inblk=0} inblk {blk=blk $0 "\\n"} END {printf "### Machine\\n%s", blk}';
@@ -31,7 +31,7 @@ const ROUND = (n: number, v: string, reasons: string, body = 'baseline:  test GR
 const ONE = `# Review: 900\n\nverdict: FAIL\nrounds: 1 of 3\nbase: abc\n\n${ROUND(1, 'FAIL', ' — AC1 GREEN: marker; scope VIOLATION: src/x ; ')}`;
 const TWO = `# Review: 900\n\nverdict: PASS\nrounds: 2 of 3\nbase: abc\n\n${ROUND(1, 'FAIL', ' — AC1 GREEN: marker; ')}${ROUND(2, 'PASS', '', 'acs:       AC1 \n')}`;
 
-describe('readReview — status.sh:146-152, 232-234', () => {
+describe('readReview — row by row against the awk', () => {
   it.each([
     ['one round, vetoed', ONE],
     ['two rounds: first verdict line, last computed and block', TWO],
@@ -53,7 +53,7 @@ describe('readReview — status.sh:146-152, 232-234', () => {
     expect(got.machineBlock ?? '### Machine').toBe(want.machineBlock);
   });
 
-  it('the shape status.sh needs, spelled out', () => {
+  it('the shape fleet status needs, spelled out', () => {
     expect(readReview(ONE)).toEqual({
       verdict: 'FAIL',
       reasons: 'AC1 GREEN: marker; scope VIOLATION: src/x',

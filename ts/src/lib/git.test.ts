@@ -50,14 +50,14 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('the queries status.sh makes', () => {
-  it('refExists: rev-parse --verify --quiet (status.sh:70)', () => {
+describe('the queries fleet status makes', () => {
+  it('refExists: rev-parse --verify --quiet', () => {
     expect(refExists(root, 'origin/base')).toBe(true);
     expect(refExists(root, 'base')).toBe(true);
     expect(refExists(root, 'origin/nope')).toBe(false);
   });
 
-  it('branchExists: only refs/heads (status.sh:92,169)', () => {
+  it('branchExists: only refs/heads', () => {
     expect(branchExists(root, 'story/1')).toBe(true);
     expect(branchExists(root, 'origin/base')).toBe(false);
     expect(branchExists(root, 'story/2')).toBe(false);
@@ -70,7 +70,7 @@ describe('the queries status.sh makes', () => {
     expect(isAncestor(root, 'nope', 'base')).toBe(false);
   });
 
-  it('revListCount: the count, 0 when git cannot answer (status.sh:103-104,173)', () => {
+  it('revListCount: the count, 0 when git cannot answer', () => {
     expect(revListCount(root, 'base..story/1')).toBe(1);
     expect(revListCount(root, 'story/1..base')).toBe(1);
     expect(revListCount(root, 'origin/base..story/1')).toBe(1);
@@ -78,7 +78,7 @@ describe('the queries status.sh makes', () => {
   });
 });
 
-describe("lint-story's citation walk (seam 7)", () => {
+describe("lint-story's citation walk", () => {
   it('catFileExists: a blob at a ref, false for a missing path or an unknown ref', () => {
     expect(catFileExists(root, 'base', 'a')).toBe(true);
     expect(catFileExists(root, 'base', 'nope')).toBe(false);
@@ -95,8 +95,8 @@ describe("lint-story's citation walk (seam 7)", () => {
   });
 });
 
-// The operations launch.sh makes (launch.sh:95-112, 428-449, 573-606), on a
-// second repo with a real bare origin so fetch and push can be exercised.
+// The operations the launcher makes, on a second repo with a real bare
+// origin so fetch and push can be exercised.
 describe('the operations the launcher makes', () => {
   let d2: string;
   let repo: string;
@@ -162,10 +162,10 @@ describe('the operations the launcher makes', () => {
   });
 });
 
-// The operations merge.sh, revert.sh and reset.sh make (seam 5), on a third
-// repo with a bare origin: a --no-ff merge into a detached worktree of
-// origin/<base> and its log file, a conflict and its abort, the revert of a
-// merge and one that no longer applies, the local branch moved or refused.
+// The operations merge, revert and reset make, on a third repo with a bare
+// origin: a --no-ff merge into a detached worktree of origin/<base> and its
+// log file, a conflict and its abort, the revert of a merge and one that no
+// longer applies, the local branch moved or refused.
 describe('the operations landing makes', () => {
   let d3: string;
   let repo: string;
@@ -267,7 +267,7 @@ describe('the operations landing makes', () => {
     expect(branchDelete(repo, 'feat')).not.toBe(0);            // gone already
   });
 
-  it('lsFilesTracked and addAll on a deleted path (reset.sh:92-94)', () => {
+  it('lsFilesTracked and addAll on a deleted path', () => {
     expect(lsFilesTracked(repo, 'a')).toBe(true);
     expect(lsFilesTracked(repo, 'never')).toBe(false);
     rmSync(join(repo, 'a'));
@@ -278,8 +278,8 @@ describe('the operations landing makes', () => {
   });
 });
 
-// After seam 5: the checkout that is on the base branch is fast-forwarded to
-// the merge before the record is committed on it (merge.ts, case 120c).
+// The checkout that is on the base branch is fast-forwarded to the merge
+// before the record is committed on it (merge.ts, case 120c).
 describe('currentBranch and mergeFfOnly', () => {
   let d4: string;
   let repo: string;
@@ -324,7 +324,7 @@ describe('currentBranch and mergeFfOnly', () => {
   });
 });
 
-describe('the queue\'s refresh_from_origin operations (seam 6)', () => {
+describe('the queue\'s refreshFromOrigin operations', () => {
   let d5: string;
   let bare: string;
   let clone: string;
@@ -358,7 +358,7 @@ describe('the queue\'s refresh_from_origin operations (seam 6)', () => {
     expect(gitDir(join(d5, 'nowhere'))).toBe(join(d5, 'nowhere', '.git'));
   });
 
-  it('fetchRef: a single ref, not the whole remote (new-epic.sh:38)', () => {
+  it('fetchRef: a single ref, not the whole remote (fleet new-epic)', () => {
     g(['push', '-q', 'origin', 'base:refs/heads/epic/x']);
     const other = join(d5, 'fetch-other');
     runSync('git', ['clone', '-q', bare, other]);

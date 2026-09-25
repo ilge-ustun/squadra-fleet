@@ -85,7 +85,7 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(c.prCmd).toBeUndefined();
   });
 
-  it('a variable in the environment wins over the file (lib.sh:14-15)', () => {
+  it('a variable in the environment wins over the file', () => {
     const c = load('t', { VITEST_CMD: 'from env', BASE_BRANCH: 'fromenv' });
     expect(c.vitestCmd).toBe('from env');
     expect(c.baseBranch).toBe('fromenv');
@@ -129,7 +129,7 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(failure().message).toContain('PR_CMD');
   });
 
-  it('a config that reads an unset variable dies under set -u, as it does for every bash caller', () => {
+  it('a config that reads an unset variable dies under set -u', () => {
     writeConfig(`${CONFIG}LINT_CMD="$FLEET_NO_SUCH_VARIABLE"\n`);
     expect(failure().message).toContain('unbound variable');
   });

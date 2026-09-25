@@ -72,10 +72,10 @@ describe('runSync options for the config loader', () => {
   });
 });
 
-// run — the agent calls (launch.sh:521-524, 629-630): the prompt on stdin,
-// `2>&1` or `2> file`, and `timeout -k 30 N` reproduced: SIGTERM to the whole
-// process group at N seconds, SIGKILL 30 s later, the whole group so a fake's
-// `sleep 999` cannot outlive the call and sit in the worktree.
+// run — the agent calls: the prompt on stdin, `2>&1` or `2> file`, and
+// `timeout -k 30 N`: SIGTERM to the whole process group at N seconds, SIGKILL
+// 30 s later, the whole group so a fake's `sleep 999` cannot outlive the call
+// and sit in the worktree.
 describe('run', () => {
   let dir: string;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-run-')); });
@@ -142,7 +142,7 @@ describe('run', () => {
     expect(procsInWorktree(dir)).toEqual([]);
   });
 
-  it('timeoutSec 0 means no timeout, as `timeout 0` did', async () => {
+  it('timeoutSec 0 means no timeout, as `timeout 0` does', async () => {
     const r = await run('bash', ['-c', 'sleep 0.2; echo done'], { cwd: dir, timeoutSec: 0, stderr: 'merge' });
     expect(r.timedOut).toBe(false);
     expect(r.stdout).toBe('done\n');
@@ -168,7 +168,7 @@ describe('runInherit', () => {
 });
 
 describe('runToFile', () => {
-  it('an argv form of runBashTo: both streams to the log, the status back (merge.sh:167)', () => {
+  it('an argv form of runBashTo: both streams to the log, the status back', () => {
     const d = mkdtempSync(join(tmpdir(), 'fleet-proc-'));
     const log = join(d, 'x.log');
     writeFileSync(log, 'stale\n');

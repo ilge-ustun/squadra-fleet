@@ -5,14 +5,14 @@ import { join, resolve } from 'node:path';
 import { baselineColour, runBaseline, runMergeBaseline } from './baseline.ts';
 import { readdirSync, realpathSync } from 'node:fs';
 
-// launch.sh:129-152 — the harness runs the suite, the build and the lint in
-// the clean reviewer tree, before the reviewer is asked anything.
+// The harness runs the suite, the build and the lint in the clean reviewer
+// tree, before the reviewer is asked anything.
 const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/fakes/vitest');
 
-// The rule at launch.sh:135: `jq -e '.numTotalTests > 0 and .numFailedTests == 0'`
-// — anything jq cannot read or that lacks a count is RED. Not the classifier's
-// rule (vitest-json.ts falls through to GREEN); the two are different on purpose.
-describe('baselineColour — launch.sh:135', () => {
+// The rule: `jq -e '.numTotalTests > 0 and .numFailedTests == 0'` — anything
+// jq cannot read or that lacks a count is RED. Not the classifier's rule
+// (vitest-json.ts falls through to GREEN); the two are different on purpose.
+describe('baselineColour', () => {
   it.each([
     [undefined, 'RED', 'no file'],
     ['', 'RED', 'empty file'],
@@ -50,7 +50,7 @@ describe('runBaseline', () => {
   const run = (o: { vitestCmd?: string; buildCmd?: string; lintCmd?: string } = {}) =>
     runBaseline({ wt, evidenceDir: ev, rawJson: raw, vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true' });
 
-  it('all green: the three colours, the summary as jq shaped it, the logs', () => {
+  it('all green: the three colours, the summary in jq\'s shape, the logs', () => {
     process.env['FAKE_VITEST'] = 'pass';
     expect(run()).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
     expect(readFileSync(join(ev, 'baseline/test.summary.json'), 'utf8')).toBe(
@@ -80,7 +80,7 @@ describe('runBaseline', () => {
     expect(readFileSync(join(ev, 'baseline/test.summary.json'), 'utf8')).toBe('{"error":"vitest wrote no JSON — see test.log"}\n');
   });
 
-  it('a raw file jq could not summarise: RED, and an error object where bash left an empty file (pinned)', () => {
+  it('a raw file that cannot be summarised: an error object in the summary, whatever the colour', () => {
     const fake = join(dir, 'fake-vitest');
     writeFileSync(fake, '#!/usr/bin/env bash\nwhile (($#)); do case "$1" in --outputFile) printf "%s" "$OUT" > "$2"; shift 2;; *) shift;; esac; done\nexit 1\n');
     chmodSync(fake, 0o755);
@@ -104,7 +104,7 @@ describe('runBaseline', () => {
     expect(lint.length).toBe(201);
   });
 
-  it('a config command is a bash line here (the bash word-split it — pinned): a missing program is RED', () => {
+  it('a config command is a bash line: a missing program is RED', () => {
     process.env['FAKE_VITEST'] = 'pass';
     const r = run({ buildCmd: 'echo a | grep -q b', lintCmd: 'fleet-no-such-program-xyz' });
     expect(r.build).toBe('RED');
@@ -120,10 +120,10 @@ describe('runBaseline', () => {
   });
 });
 
-// merge.sh:186-193 — the post-merge baseline: the same three commands in the
-// merge worktree, but whole logs under .runs/<logid>-merge-*.log (no tail),
-// no summary file, and the install step outside (merge.ts runs it first,
-// with its own log and die, as launch.ts does).
+// The post-merge baseline: the same three commands in the merge worktree,
+// but whole logs under .runs/<logid>-merge-*.log (no tail), no summary file,
+// and the install step outside (merge.ts runs it first, with its own log and
+// die, as launch.ts does).
 describe('runMergeBaseline', () => {
   let dir: string; let wt: string; let runs: string;
   const saved: Record<string, string | undefined> = {};

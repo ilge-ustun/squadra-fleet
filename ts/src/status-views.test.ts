@@ -86,7 +86,7 @@ describe('the edges the goldens cannot hold', () => {
     expect(renderStatus({ epics: [], stories: rows }, view('bot'))).toBe('nothing in flight — /status-all t shows what has landed\n');
   });
 
-  it("bash's quirk, reproduced: widths in characters, padding in bytes — a lone — cell is two spaces short", () => {
+  it('a quirk the goldens hold: widths in characters, padding in bytes — a lone — cell is two spaces short', () => {
     const out = renderStatus({ epics: [], stories: [row({ id: 'abc', title: '—' })] }, view('default'));
     // TITLE is 5 wide (the header); '—' is 3 bytes, so 2 spaces of padding, then the 2-space gap.
     expect(out.split('\n')[2]).toMatch(/^abc  —    \x1b\[0mdone  /);
@@ -101,7 +101,7 @@ describe('the edges the goldens cannot hold', () => {
     expect(table.split('\n')[1]).toBe(`\x1b[2m${'─'.repeat(2 + 5 + 6 + 1 + 7 + 4 + 12)}\x1b[0m`);
   });
 
-  it('every landing colour (status.sh:51-59)', () => {
+  it('every landing colour', () => {
     const rows = ['landed', 'on epic', 'awaiting merge', 'needs_human', 'blocked', 'in_progress', 'draft'].map((l) => row({ landing: l }));
     const out = renderStatus({ epics: [], stories: rows }, view('default'));
     expect(out).toContain('\x1b[32mlanded        \x1b[0m');
@@ -113,7 +113,7 @@ describe('the edges the goldens cannot hold', () => {
     expect(out).toContain('\x1b[0mdraft         \x1b[0m');
   });
 
-  it('non-parity, pinned: the epic state is not run through %b — a backslash stays a backslash', () => {
+  it('the epic state is not run through %b — a backslash stays a backslash', () => {
     const out = renderEpics([{ name: 'epic/a\\tb', total: 1, merged: 0, ahead: 1 }], view('default'), {
       red: '', grn: '', ylw: '', dim: '', rst: '',
     });
@@ -128,7 +128,7 @@ describe('the edges the goldens cannot hold', () => {
     expect(renderEpics([{ ...e, exists: true }], view('default'), plain)).toBe('epic/search            1 story, 0 merged  in base\n');
   });
 
-  it('non-parity, pinned: a verdict holding a quote keeps its JSON row (jq dropped it); DEL is raw', () => {
+  it('a verdict holding a quote keeps its JSON row; DEL is raw', () => {
     const out = renderJson([row({ id: '1', verdict: 'PA"SS' }), row({ id: '2', title: 'a\x7fb' })]);
     const arr = JSON.parse(out) as Array<{ id: string; verdict: string | null; title: string }>;
     expect(arr.map((o) => o.id)).toEqual(['1', '2']);

@@ -25,7 +25,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('procsInWorktree — the bash procs_in_worktree', () => {
+describe('procsInWorktree — by cwd', () => {
   it('finds a process whose cwd is under the worktree, by pid', () => {
     const pids = procsInWorktree(join(dir, 'wt'));
     expect(pids).toContain(String(child.pid));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeExitHooks } from './exit-hooks.ts';
 
-describe('makeExitHooks — the bash EXIT trap', () => {
+describe('makeExitHooks — `trap cleanup EXIT` for a bin', () => {
   it('runs every hook once, in registration order, and forgets them', () => {
     const { register, run } = makeExitHooks();
     const seen: string[] = [];
@@ -12,7 +12,7 @@ describe('makeExitHooks — the bash EXIT trap', () => {
     expect(seen).toEqual(['a', 'b']);
   });
 
-  it('a hook that throws does not stop the others: cleanup is best effort, as the trap was', () => {
+  it('a hook that throws does not stop the others: cleanup is best effort', () => {
     const { register, run } = makeExitHooks();
     const seen: string[] = [];
     register(() => {

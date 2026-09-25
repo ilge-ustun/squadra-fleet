@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { USAGE, checkStory } from './revert.ts';
 
-// The pure part of revert.sh; the flow is proven by test/suite.sh (cases 66,
-// 67, 68, 123, 126).
+// The pure part of `fleet revert`; the flow is proven by test/suite.sh
+// (cases 66, 67, 68, 123, 126).
 
-describe('checkStory — revert.sh:31-36, in that order', () => {
+describe('checkStory — the checks, in the order they are made', () => {
   const c = { id: '900', baseBranch: 'develop' };
   it.each([
     ['no recorded merge', { merged: '', base: 'epic/x' }, '900 has no recorded merge — nothing to revert'],

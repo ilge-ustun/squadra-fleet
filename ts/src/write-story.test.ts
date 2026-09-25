@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Die } from './lib/die.ts';
 import { isValidStoryId, resolveStoryBase } from './write-story.ts';
 
-describe('isValidStoryId (write-story.sh:36)', () => {
+describe('isValidStoryId', () => {
   it('a plain identifier only', () => {
     expect(isValidStoryId('011')).toBe(true);
     expect(isValidStoryId('story_1-a')).toBe(true);
@@ -12,7 +12,7 @@ describe('isValidStoryId (write-story.sh:36)', () => {
   });
 });
 
-describe('resolveStoryBase (write-story.sh:38-45)', () => {
+describe('resolveStoryBase', () => {
   it('defaults to the integration branch with no --base', () => {
     expect(resolveStoryBase({ defaultBase: 'base', repoName: 't', baseFlag: undefined, baseVal: undefined })).toBe('base');
   });

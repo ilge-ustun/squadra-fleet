@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readEnvFile } from './env-file.ts';
 
-// telegram.sh:37-39 — `set -a; . "$FLEET_HOME/.env.fleet"; set +a`: the file
-// is sourced bash, so a value may be quoted or expand; only bash can read it.
+// `set -a; . "$FLEET_HOME/.env.fleet"; set +a`: the file is sourced bash, so
+// a value may be quoted or expand; only bash can read it.
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-env-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });

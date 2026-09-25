@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Die } from './lib/die.ts';
 import { USAGE, parseArgs, pidsLine, runsOfStory } from './reset.ts';
 
-// The pure parts of reset.sh; the flow is proven by test/suite.sh (cases 52,
-// 53, 54, 124, 127).
+// The pure parts of `fleet reset`; the flow is proven by test/suite.sh
+// (cases 52, 53, 54, 124, 127).
 
-describe('parseArgs — reset.sh:33-42', () => {
+describe('parseArgs', () => {
   it.each([
     [['900'], { id: '900', force: false, newStatus: 'ready' }],
     [['900', '--force'], { id: '900', force: true, newStatus: 'ready' }],
@@ -27,11 +27,11 @@ describe('parseArgs — reset.sh:33-42', () => {
 });
 
 describe('the small shapes', () => {
-  it("pidsLine — reset.sh:55: the pids joined by tr '\\n' ' ', trailing space included", () => {
+  it("pidsLine — the pids joined by tr '\\n' ' ', trailing space included", () => {
     expect(pidsLine('900', '/r/../wt-900', ['123', '456'])).toBe('900 has processes running in /r/../wt-900 (123 456 ) — stop them first');
   });
 
-  it('runsOfStory — reset.sh:87: `rm -f .runs/<id>-*`, a glob that also takes 900-b-* for 900 (as the bash did)', () => {
+  it('runsOfStory — `rm -f .runs/<id>-*`, a glob that also takes 900-b-* for 900', () => {
     const names = ['900.json', '900-merge.log', '900-round1-baseline.json', '900-b-x.log', '9000-x.log', 'epic-test-merge.log', '901-x.log'];
     expect(runsOfStory(names, '900')).toEqual(['900-merge.log', '900-round1-baseline.json', '900-b-x.log']);
   });
