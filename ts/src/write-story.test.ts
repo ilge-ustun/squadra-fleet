@@ -25,7 +25,7 @@ describe('resolveStoryBase (write-story.sh:38-45)', () => {
     expect(() => resolveStoryBase({ defaultBase: 'base', repoName: 't', baseFlag: '--base', baseVal: undefined })).toThrow(Die);
   });
 
-  it('--base naming a non-epic branch dies, pointing at new-epic.sh', () => {
-    expect(() => resolveStoryBase({ defaultBase: 'base', repoName: 't', baseFlag: '--base', baseVal: 'feat/x' })).toThrow(/new-epic\.sh t/);
+  it('--base naming a non-epic branch dies, pointing at fleet new-epic', () => {
+    expect(() => resolveStoryBase({ defaultBase: 'base', repoName: 't', baseFlag: '--base', baseVal: 'feat/x' })).toThrow(/fleet new-epic t/);
   });
 });

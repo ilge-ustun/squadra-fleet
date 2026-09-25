@@ -22,7 +22,7 @@ async function main(argv: readonly string[]): Promise<number> {
     let pre = false;
     let words = rest;
     if (words[0] === '--pre') { pre = true; words = words.slice(1); }
-    if (words.length < 1) { writeSync(2, 'usage: telegram.sh send [--pre] <text>\n'); return 2; }
+    if (words.length < 1) { writeSync(2, 'usage: fleet telegram send [--pre] <text>\n'); return 2; }
     await send(c, words.join(' '), pre);   // "$*"
     return 0;
   }
@@ -30,7 +30,7 @@ async function main(argv: readonly string[]): Promise<number> {
     await poll(c);
     return 0;
   }
-  writeSync(2, 'usage: telegram.sh {send <text>|poll}\n');
+  writeSync(2, 'usage: fleet telegram {send <text>|poll}\n');
   return 2;
 }
 

@@ -4,13 +4,12 @@
 #
 # Builds <dir>/repo (a git checkout with .fleet/config, stories, reviews),
 # <dir>/wt-<id> for two stories (the sibling rule, status.sh's ../wt-<id>),
-# and <dir>/repos/t.env, a private registry for FLEET_REGISTRY_DIR. gen.sh
-# runs the bash status.sh on it; status-views.test.ts runs the TypeScript
-# on a fresh copy and compares bytes. Nothing status prints depends on a
-# sha or a clock, so two builds render the same.
+# and <dir>/repos/t.env, a private registry for FLEET_REGISTRY_DIR.
+# status-views.test.ts renders it and compares bytes with the goldens beside
+# this file. Nothing status prints depends on a sha or a clock, so two builds
+# render the same.
 #
-# Every state the header of status.sh names, and the edges that bit while
-# planning: story order by filename (900-b.md < 900.md < 9000.md), a review
+# Every landing state, and the edges that bit while planning: story order by filename (900-b.md < 900.md < 9000.md), a review
 # without a verdict line (an empty cell, not a dash), a story with no
 # frontmatter and no heading, the "Story NNN:" prefixes in three spellings,
 # an epic ahead of the base and one already in it, origin/<base> known and

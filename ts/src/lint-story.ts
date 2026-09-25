@@ -24,7 +24,7 @@ import { frontmatterField } from './lib/frontmatter.ts';
 import { catFileExists, refExists, showLineCount } from './lib/git.ts';
 import type { RepoConfig } from './lib/config.ts';
 
-export const USAGE = 'usage: lint-story.sh <repo> <story-id|path> [--strict]';
+export const USAGE = 'usage: fleet lint-story <repo> <story-id|path> [--strict]';
 
 const RED = '\x1b[31m';
 const YLW = '\x1b[33m';
@@ -195,7 +195,7 @@ export function lintStory(cfg: RepoConfig, o: LintStoryOptions): number {
   const base = field('base');
   if (base !== '') {
     if (!isValidBaseName(base, cfg.baseBranch)) {
-      err(`base: ${base} — a base is ${cfg.baseBranch} or epic/<name> (new-epic.sh), nothing else`);
+      err(`base: ${base} — a base is ${cfg.baseBranch} or epic/<name> (fleet new-epic), nothing else`);
     }
     if (!refExists(cfg.root, `origin/${base}`) && !refExists(cfg.root, base)) {
       err(`base: ${base} — no such branch locally or on origin`);

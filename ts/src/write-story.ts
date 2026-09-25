@@ -25,7 +25,7 @@ import { run } from './lib/proc.ts';
 import { renderPrompt } from './lib/render.ts';
 import type { RepoConfig } from './lib/config.ts';
 
-export const USAGE = 'usage: write-story.sh <repo> <story-id> "<what you want>" [--base epic/<name>]';
+export const USAGE = 'usage: fleet write-story <repo> <story-id> "<what you want>" [--base epic/<name>]';
 
 const ALLOWED_TOOLS = 'Read,Grep,Glob,Bash,Write';
 
@@ -44,7 +44,7 @@ export function resolveStoryBase(o: { defaultBase: string; repoName: string; bas
   if (o.baseFlag !== '--base') return o.defaultBase;
   if (o.baseVal === undefined || o.baseVal === '') throw new Die('--base needs a branch');
   if (!o.baseVal.startsWith('epic/')) {
-    throw new Die(`--base takes an epic/… branch, not '${o.baseVal}' — make one with: new-epic.sh ${o.repoName} <name>`);
+    throw new Die(`--base takes an epic/… branch, not '${o.baseVal}' — make one with: fleet new-epic ${o.repoName} <name>`);
   }
   return o.baseVal;
 }
@@ -117,7 +117,7 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     log('linting');
     if (lintStory(cfg, { argv: [storyId] }) === 0) {
       out('\n');
-      log(`draft ready — read it, then set status: ready and run launch.sh ${cfg.name} ${storyId}`);
+      log(`draft ready — read it, then set status: ready and run fleet launch ${cfg.name} ${storyId}`);
       return 0;
     }
     out('\n');

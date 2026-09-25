@@ -21,7 +21,7 @@ import { dieMessage } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
 import { launch } from '../launch.ts';
 
-const USAGE = 'usage: launch.sh <repo> [story-id|--reap]';
+const USAGE = 'usage: fleet launch <repo> [story-id|--reap]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 const onExit = installExitHooks();

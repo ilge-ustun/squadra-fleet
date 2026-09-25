@@ -19,6 +19,6 @@ describe('checkStory — revert.sh:31-36, in that order', () => {
   });
 
   it('the usage names the script the human types', () => {
-    expect(USAGE).toBe('usage: revert.sh <repo> <id>');
+    expect(USAGE).toBe('usage: fleet revert <repo> <id>');
   });
 });

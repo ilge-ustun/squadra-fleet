@@ -7,10 +7,11 @@ import { runSync } from './lib/proc.ts';
 import { DASH, statusOf, type StoryRow } from './status.ts';
 import { renderEpics, renderJson, renderStatus, type ViewOptions } from './status-views.ts';
 
-// The goldens are what the LAST BASH status.sh printed for make-target.sh's
-// target (ts/fixtures/status/gen.sh, status.sh@14f675e, C.UTF-8). The same
-// target is built here and rendered through the TypeScript; the bytes must
-// be the same. No process runs in the worktrees in either run.
+// The goldens (ts/fixtures/status/*.expected.txt) are the ten views of
+// make-target.sh's target, byte for byte. They were first printed by the
+// last bash status.sh (14f675e, C.UTF-8) and have changed since only where
+// a view names a command (`fleet merge`, not merge.sh). The target is built
+// here and rendered; no process runs in its worktrees.
 const FLEET_HOME = resolve(import.meta.dirname, '../..');
 const FIXTURES = join(FLEET_HOME, 'ts/fixtures/status');
 
@@ -39,7 +40,7 @@ function golden(name: string): string {
   return readFileSync(join(FIXTURES, `${name}.expected.txt`), 'utf8');
 }
 
-describe('the ten views, byte for byte against the bash status.sh', () => {
+describe('the ten views, byte for byte against the goldens', () => {
   it.each([
     ['default', 'default', false, undefined],
     ['epics', 'epics', false, undefined],
@@ -116,13 +117,13 @@ describe('the edges the goldens cannot hold', () => {
     const out = renderEpics([{ name: 'epic/a\\tb', total: 1, merged: 0, ahead: 1 }], view('default'), {
       red: '', grn: '', ylw: '', dim: '', rst: '',
     });
-    expect(out).toBe('epic/a\\tb              1 story, 0 merged  1 ahead of base  → merge.sh t --epic epic/a\\tb\n');
+    expect(out).toBe('epic/a\\tb              1 story, 0 merged  1 ahead of base  → fleet merge t --epic epic/a\\tb\n');
   });
 
   it('24 Sep: an epic whose branch does not exist yet says so, not "in base"', () => {
     const plain = { red: '', grn: '', ylw: '', dim: '', rst: '' };
     const e = { name: 'epic/search', total: 1, merged: 0, ahead: 0, exists: false };
-    expect(renderEpics([e], view('default'), plain)).toBe('epic/search            1 story, 0 merged  no branch yet  → new-epic.sh t search\n');
+    expect(renderEpics([e], view('default'), plain)).toBe('epic/search            1 story, 0 merged  no branch yet  → fleet new-epic t search\n');
     expect(renderEpics([e], { ...view('default'), bot: true }, plain)).toBe('epic/search\n  1 story, 0 merged\n  no branch yet\n');
     expect(renderEpics([{ ...e, exists: true }], view('default'), plain)).toBe('epic/search            1 story, 0 merged  in base\n');
   });

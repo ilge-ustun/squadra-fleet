@@ -25,7 +25,7 @@ import {
 } from './lib/git.ts';
 import { log, warn } from './lib/log.ts';
 
-export const USAGE = 'usage: revert.sh <repo> <id>';
+export const USAGE = 'usage: fleet revert <repo> <id>';
 
 const isFile = (p: string): boolean => existsSync(p) && statSync(p).isFile();
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();

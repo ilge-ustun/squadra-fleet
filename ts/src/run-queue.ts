@@ -33,7 +33,7 @@ import { readReview } from './lib/review.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { nextReady } from './status.ts';
 
-export const USAGE = 'usage: run-queue.sh <repo>|--all [--max N]';
+export const USAGE = 'usage: fleet run-queue <repo>|--all [--max N]';
 
 const DIM = '\x1b[2m';
 const RST = '\x1b[0m';

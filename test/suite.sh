@@ -1570,7 +1570,7 @@ case_80_status_epics() {
   sed -i '2a base: epic/ghost' "$REPO/.stories/$STORY.md"
   out="$( status_run --epics )"
   assert_contains "$out" "no branch yet" "not 'in base'"
-  assert_contains "$out" "new-epic.sh t ghost" "with the command that makes it"
+  assert_contains "$out" "fleet new-epic t ghost" "with the command that makes it"
 }
 
 # AC1. Red when the refresh call is deleted from run-queue.sh: the
@@ -1977,7 +1977,7 @@ case_90_status_titles_and_landing() {
   out="$( status_run )"
   assert_contains "$out" "on epic" "merged into an epic that is not in the integration branch"
   assert_contains "$out" "1 merged" "the epic block leads the default output"
-  assert_contains "$out" "merge.sh t --epic epic/test" "with the command a human runs to land it"
+  assert_contains "$out" "fleet merge t --epic epic/test" "with the command a human runs to land it"
   local bot; bot="$( status_run --bot )"
   assert_contains "$bot" "/merge t epic/test" "--bot spells the hint as the phone command"
   assert_contains "$bot" $'\n→ epic/test | on epic | R1 | PASS\n' "and has the same state"
@@ -2193,7 +2193,7 @@ case_94_epic_naming() {
   }
   ws 901 feat/x
   assert_eq "$rc" 1 "write-story.sh refuses a base that is not epic/*"
-  assert_contains "$out" "new-epic.sh" "and says how an epic is made"
+  assert_contains "$out" "fleet new-epic" "and says how an epic is made"
   assert_eq "$(calls claude)" 0 "before any agent runs"
   ws 902 epic/test
   assert_eq "$(calls claude)" 1 "an epic/* base gets past the check to the agent"
@@ -2733,10 +2733,10 @@ case_110_check_through_the_loader() {
   assert_eq "$(cat "$err")" "" "nothing on stderr on success"
   out="$( cd "$FX" && bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" -x 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "an unknown flag is a die"
-  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+  assert_contains "$out" "usage: fleet check-mutation" "with the usage"
   out="$( cd "$FX" && bash "$FLEET/fleet" check-mutation t 2>&1 )"; rc=$?
   assert_eq "$rc" 1 "no patch is a die"
-  assert_contains "$out" "usage: check-mutation.sh" "with the usage"
+  assert_contains "$out" "usage: fleet check-mutation" "with the usage"
 }
 
 # Two paths of the builder block no case exercised, characterised before the
@@ -2945,10 +2945,10 @@ case_118_merge_nothing_to_do_and_usage() {
   assert_grep 'unknown option --bogus' "$MLOG" "naming it"
   ( cd "$FX" && bash "$FLEET/fleet" merge t ) > "$FX/usage.log" 2>&1
   assert_eq "$?" 1 "no id is a die"
-  assert_grep 'usage: merge.sh' "$FX/usage.log" "with the usage"
+  assert_grep 'usage: fleet merge' "$FX/usage.log" "with the usage"
   ( cd "$FX" && bash "$FLEET/fleet" merge t "$STORY" 901 ) > "$FX/two.log" 2>&1
   assert_eq "$?" 1 "two ids are a die"
-  assert_grep 'usage: merge.sh' "$FX/two.log" "with the usage"
+  assert_grep 'usage: fleet merge' "$FX/two.log" "with the usage"
   ( cd "$FX" && bash "$FLEET/fleet" merge t --epic epic/test --land ) > "$FX/epic-land.log" 2>&1
   assert_eq "$?" 1 "--epic with --land is a die"
   assert_grep '[-]-land is for a story' "$FX/epic-land.log" "saying which flag is for what"
@@ -3150,7 +3150,7 @@ case_124_reset_flags_and_second_run() {
   assert_grep 'unknown option: --nope' "$RLOG" "naming it"
   reset_run
   assert_eq "$RRC" 1 "no id"
-  assert_grep 'usage: reset.sh' "$RLOG" "the usage"
+  assert_grep 'usage: fleet reset' "$RLOG" "the usage"
 
   CASE="124c a second reset finds nothing to do and says so"
   local head; head="$(git -C "$REPO" rev-parse HEAD)"

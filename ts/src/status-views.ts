@@ -67,9 +67,9 @@ export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): strin
       continue;
     }
     const state = e.exists === false
-      ? `${p.ylw}no branch yet${p.rst}  → new-epic.sh ${o.repoName} ${e.name.replace(/^epic\//, '')}`
+      ? `${p.ylw}no branch yet${p.rst}  → fleet new-epic ${o.repoName} ${e.name.replace(/^epic\//, '')}`
       : e.ahead > 0
-      ? `${p.ylw}${e.ahead} ahead of ${o.baseBranch}${p.rst}  → merge.sh ${o.repoName} --epic ${e.name}`
+      ? `${p.ylw}${e.ahead} ahead of ${o.baseBranch}${p.rst}  → fleet merge ${o.repoName} --epic ${e.name}`
       : `${p.dim}in ${o.baseBranch}${p.rst}`;
     out += `${pad(e.name, 22)} ${e.total} ${word}, ${e.merged} merged  ${state}\n`;
   }

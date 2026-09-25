@@ -27,7 +27,7 @@ import { dieMessage, out } from '../lib/log.ts';
 import { statusOf } from '../status.ts';
 import { renderStatus } from '../status-views.ts';
 
-const USAGE = 'usage: status.sh <repo> [--json|--epics|--bot] [--all] [story-id]';
+const USAGE = 'usage: fleet status <repo> [--json|--epics|--bot] [--all] [story-id]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 class UsageError extends Error {

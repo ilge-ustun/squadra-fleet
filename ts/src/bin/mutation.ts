@@ -34,7 +34,7 @@ import { dieMessage, out, warn } from '../lib/log.ts';
 import { runSync } from '../lib/proc.ts';
 
 const USAGE = 'usage: mutation.ts check <repo> <patch…> [--wt <dir>]';
-const CHECK_USAGE = 'usage: check-mutation.sh <repo> <patch…> [--wt <dir>]';
+const CHECK_USAGE = 'usage: fleet check-mutation <repo> <patch…> [--wt <dir>]';
 const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 class UsageError extends Error {}
