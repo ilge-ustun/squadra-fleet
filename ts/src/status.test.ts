@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
-import { DASH, byCodePoint, landingOf, listDir, storyIds, titleOf } from './status.ts';
+import { DASH, byCodePoint, landingOf, listDir, nextReady, storyIds, titleOf } from './status.ts';
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
@@ -58,6 +58,37 @@ describe('storyIds — ls .stories/*.md | sort, under C.UTF-8', () => {
     expect(byCodePoint(a, b)).toBeGreaterThan(0);
     expect([a, b].sort()).toEqual([a, b]);
     expect([a, b].sort(byCodePoint)).toEqual([b, a]);
+  });
+});
+
+describe('nextReady — the one choice a bare launch and the queue both make', () => {
+  const write = (root: string, id: string, status: string): void => {
+    mkdirSync(join(root, '.stories'), { recursive: true });
+    writeFileSync(join(root, '.stories', `${id}.md`), `---\nstatus: ${status}\nround: 0\n---\n`);
+  };
+
+  it('the first ready story, by storyIds() order', () => {
+    const root = join(dir, 'nextready-order');
+    write(root, '900', 'done');
+    write(root, '901', 'ready');
+    write(root, '902', 'ready');
+    expect(nextReady(root)).toBe('901');
+  });
+
+  it('nothing ready: empty string', () => {
+    const root = join(dir, 'nextready-none');
+    write(root, '900', 'done');
+    expect(nextReady(root)).toBe('');
+  });
+
+  it("TEMPLATE.md is never picked, even when its own status is ready — a real state, not a hypothetical one", () => {
+    const root = join(dir, 'nextready-template');
+    write(root, 'TEMPLATE', 'ready');
+    expect(nextReady(root)).toBe('');
+  });
+
+  it('no .stories directory: empty string, not a throw', () => {
+    expect(nextReady(join(dir, 'nextready-missing'))).toBe('');
   });
 });
 

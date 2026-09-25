@@ -405,11 +405,11 @@ over `warn`. Prompts on stdin, never argv. One task, one commit.
 
 ```
 lib.sh              FLEET_HOME, load_repo, the frontmatter reader, procs_in_worktree, log/warn/die
-launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain
+launch.sh           the launcher (wrapper over ts/src/bin/launch.ts)   run-queue.sh   the drain (wrapper over ts/src/bin/run-queue.ts)
 check-mutation.sh   the verdict's classifier on a working tree (wrapper over mutation.ts check)
-ts/                 the TypeScript side: src/{launch,merge,revert,reset,classifier,status}.ts, src/lib/{agents,render,baseline,scope,evidence,
-                    config,verdict,machine-block,review,frontmatter,lock,git,proc,die,exit-hooks}.ts, src/bin/{launch,merge,revert,reset,mutation,status}.ts
-                    — run by node as is, no build
+ts/                 the TypeScript side: src/{launch,merge,revert,reset,run-queue,classifier,status}.ts, src/lib/{agents,render,baseline,scope,
+                    evidence,config,verdict,machine-block,review,frontmatter,lock,git,proc,die,exit-hooks}.ts,
+                    src/bin/{launch,merge,revert,reset,run-queue,mutation,status}.ts — run by node as is, no build
 .nvmrc              the Node the units pin    docs/plans/2026-09-23-typescript-migration.md  the seams
 write-story.sh      intent → story            lint-story.sh  mechanical checks against the story's base
 new-epic.sh         an epic branch            status.sh      what the fleet is doing (wrapper over ts/src/bin/status.ts)

@@ -3254,6 +3254,84 @@ case_127_reset_through_the_loader() {
   assert_not_grep '^ +at ' "$RLOG" "no stack frames"
 }
 
+# Seam 6. run-queue.sh's next_ready always skipped TEMPLATE.md; launch.ts's
+# own nextReady did not (storyFiles() kept the bash glob's non-skipping
+# behaviour). A bare `launch.sh <repo>` picks a story to build when none is
+# named — TEMPLATE.md carrying status: ready is real, not hypothetical
+# (khaita's does). Red today: launch.ts would try to build the template.
+case_128_bare_launch_never_picks_template() {
+  CASE="128 a bare launch never picks TEMPLATE.md, ready or not"; fixture c128 draft
+  sed -i 's/^status: draft/status: ready/' "$REPO/.stories/TEMPLATE.md"
+  ( cd "$FX" && env PATH="$(FAKES)" \
+      PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" \
+      bash "$FLEET/launch.sh" t ) > "$FX/bare.log" 2>&1
+  local rc=$?
+  assert_eq "$rc" 0 "nothing ready is not an error"
+  assert_grep 'queue empty' "$FX/bare.log" "it says the queue is empty"
+  assert_eq "$(calls claude)" 0 "the builder never ran"
+  assert_eq "$(frontmatter "$REPO/.stories/TEMPLATE.md" status)" ready "TEMPLATE.md is untouched"
+}
+
+# Seam 6. run-queue.sh's own loop guards, characterised before the port so
+# the TypeScript drain preserves them. Red against a scratch copy with the
+# ceiling check (run-queue.sh:167) blanked: it would run all three stories
+# and never print the ceiling warning.
+case_129_queue_max_ceiling() {
+  CASE="129 --max stops the drain and says so"; fixture c129
+  for extra in 901 902; do
+    sed "s/Story $STORY/Story $extra/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/$extra.md"
+  done
+  queue MAX=2 FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the runner still exits cleanly"
+  assert_grep 'stopped at the --max ceiling of 2 stories' "$FX/queue.log" "the ceiling is named"
+  assert_eq "$(frontmatter "$REPO/.stories/$STORY.md" status)" done "the first two ran…"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" done "…both of them"
+  assert_eq "$(frontmatter "$REPO/.stories/902.md" status)" ready "…the third did not"
+  assert_eq "$(calls claude)" 2 "the builder ran exactly twice"
+  assert_grep 'queue finished, started' "$FX/queue.log" "the closing table header"
+  assert_grep "^  $STORY done PASS exit=0" "$FX/queue.log" "…one RAN line per story run"
+  assert_grep '^  901 done PASS exit=0' "$FX/queue.log" "…in the order they ran"
+}
+
+# Red against a scratch copy with the PREV comparison (run-queue.sh:122)
+# blanked: a story a fake builder leaves `ready` (never reaching a terminal
+# status) would be picked again and again, forever.
+case_130_queue_same_story_twice_stops() {
+  CASE="130 a story ready again without finishing stops the queue, not loops it"; fixture c130
+  # FAKE_REVIEWER=NONE: the launcher's own MAX_ROUNDS exhausts to needs_human
+  # normally; here the fixture story is put back to `ready` by hand after the
+  # launcher returns, standing in for a launcher bug that never reaches a
+  # terminal state — next_ready would pick it right back up.
+  cp "$FLEET/launch.sh" "$FLEET/launch.sh.real"
+  cat > "$FLEET/launch.sh" <<EOF
+#!/usr/bin/env bash
+bash "$FLEET/launch.sh.real" "\$@"
+rc=\$?
+sed -i 's/^status:.*/status: ready/' "$REPO/.stories/$STORY.md"
+exit \$rc
+EOF
+  chmod +x "$FLEET/launch.sh"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the runner exits cleanly, not hung"
+  assert_grep "$STORY is ready again without having finished" "$FX/queue.log" "the loop names the story"
+  assert_grep 'stopping rather than looping' "$FX/queue.log" "…and says why it stopped"
+  assert_eq "$(calls claude)" 1 "the launcher ran exactly once, not forever"
+}
+
+# refresh_from_origin (run-queue.sh:79-100) never fails the drain: a fetch
+# failure is a warning, and the story still runs from local state. Red
+# against a scratch copy that lets a fetch failure `die` instead of `warn`.
+case_131_queue_refresh_resilience() {
+  CASE="131 a fetch failure warns, the drain still runs from local state"; fixture c131
+  # Point origin at a path that no longer exists: `git fetch` fails, cleanly.
+  git -C "$REPO" remote set-url origin "$FX/gone.git"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the runner exits cleanly"
+  assert_grep 'refresh failed: fetch from origin failed, continuing on local state' "$FX/queue.log" "warned, not died"
+  assert_eq "$(field status)" done "the story still ran"
+}
+
 CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_5_restart_after_fail case_6_unparseable
        case_7_status_commits_land case_8_is_error_false case_9_spec
@@ -3310,7 +3388,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_120_merge_and_the_local_base_branch case_121_merge_conflict
        case_122_merge_without_push case_123_revert_refusals
        case_124_reset_flags_and_second_run case_125_merge_through_the_loader
-       case_126_revert_through_the_loader case_127_reset_through_the_loader)
+       case_126_revert_through_the_loader case_127_reset_through_the_loader
+       case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
+       case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience)
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

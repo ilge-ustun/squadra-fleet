@@ -3,6 +3,7 @@
 // cwd. Where the bash let git's stderr through to the log (a hook's output,
 // `Preparing worktree …`, a fatal), so does the call here; where it dropped
 // it (`push -q 2>/dev/null`, `worktree remove … 2>/dev/null`), so does this.
+import { out } from './log.ts';
 import { runSync, runToFile, type RunResult } from './proc.ts';
 
 /** `git status --porcelain` minus the untracked .review-out/ line: the one
@@ -213,4 +214,35 @@ export function currentBranch(root: string): string {
  *  dropped — the caller says what it did. */
 export function mergeFfOnly(root: string, ref: string): number {
   return runSync('git', ['-C', root, 'merge', '-q', '--ff-only', ref]).status;
+}
+
+// ── the queue's operations (run-queue.sh:79-100 — seam 6) ────────────────────
+
+/** `git rev-parse --abbrev-ref @{u} 2>/dev/null`: the upstream's short name,
+ *  '' when there is none (run-queue.sh:81). */
+export function upstreamBranch(root: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
+/** `git rev-parse --absolute-git-dir 2>/dev/null`, `<root>/.git` on failure
+ *  (run-queue.sh:85) — where MERGE_HEAD/rebase-merge would live. */
+export function gitDir(root: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir']);
+  return r.status === 0 ? r.stdout.trim() : `${root}/.git`;
+}
+
+/** `git fetch <remote> 2>/dev/null` (run-queue.sh:90): both streams dropped,
+ *  a refresh's fetch failure is a warning, not a die. */
+export function fetchQuiet(root: string, remote: string): number {
+  return runSync('git', ['-C', root, 'fetch', remote]).status;
+}
+
+/** `git merge --no-edit <ref> 2>/dev/null` (run-queue.sh:94): only stderr is
+ *  dropped — git's stdout (`Already up to date.`, a merge summary) reaches
+ *  ours, as the bash's did. */
+export function mergeNoEditQuiet(root: string, ref: string): number {
+  const r = runSync('git', ['-C', root, 'merge', '--no-edit', ref]);
+  if (r.stdout !== '') out(r.stdout);
+  return r.status;
 }

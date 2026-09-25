@@ -62,7 +62,7 @@ import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
 import { computeVerdict } from './lib/verdict.ts';
-import { byCodePoint } from './status.ts';
+import { byCodePoint, nextReady } from './status.ts';
 
 /** lib.sh's `die`, from lib/die.ts; still exported here for launch.test.ts. */
 export { Die };
@@ -263,8 +263,6 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     }
   };
 
-  const nextReady = (): string => storyFiles().find((id) => storyField(root, id, 'status') === 'ready') ?? '';
-
   /** seed_env (launch.sh:332-345): the untracked files a fresh worktree does
    *  not inherit, named by the target (SEED_FILES). Missing is a die. */
   const seedEnv = (target: string): void => {
@@ -283,7 +281,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   reapOrphans();
   if (o.argv[0] === '--reap') return 0;
 
-  const storyId = o.argv[0] || nextReady();
+  const storyId = o.argv[0] || nextReady(root);
   if (storyId === '') {
     log('queue empty — nothing ready');
     return 0;

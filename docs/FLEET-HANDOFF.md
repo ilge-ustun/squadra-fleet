@@ -60,8 +60,15 @@ systemctl --user is-active fleet-bot.service fleet-queue.service
   Its plan review found that `render.sh` had been corrupting every `&` in
   a prompt (bash 5.2's `patsub_replacement`; four khaita stories carried
   it); fixed on both sides, L-28. `mutation.sh` and `bin/verdict.ts` are
-  gone. `docs/plans/2026-09-23-typescript-migration.md` is the plan for
-  every seam and the record of each built one.
+  gone. **24 Sep — the migration continues**, reversing the "stays bash
+  indefinitely" line for the remaining scripts, after the fleet's first
+  real stories ran on the TypeScript side. Seam 5 — `merge.sh`, `revert.sh`,
+  `reset.sh` — landed the same day, L-29 (a redirect into a directory that
+  may not exist), then a same-day follow-up fixing `--land` on a checked-out
+  base. Seam 6 — `run-queue.sh` — landed the same day: `nextReady` unified
+  between the launcher and the queue (they had disagreed on `TEMPLATE.md`;
+  a real bug, not hypothetical — L-30). `docs/plans/2026-09-23-typescript-migration.md`
+  is the plan for every seam and the record of each built one.
 
 Fleet `main` is at `b8781b9`, suite 644, both units inactive at the last
 fast-forward. khaita `develop` is at `227b781`.
@@ -82,13 +89,14 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   status.sh              what the fleet is doing — wrapper over ts/src/bin/status.ts
   merge.sh               story → epic, --land, --epic, MERGE_MODE — wrapper over ts/src/bin/merge.ts
   revert.sh reset.sh     undo a story's merge; a story back to the queue — wrappers over ts/src/bin/{revert,reset}.ts
+  run-queue.sh           drain every ready story, --all, --max — wrapper over ts/src/bin/run-queue.ts
   ts/                    the TypeScript side: src/launch.ts (the story loop), src/merge.ts, src/revert.ts, src/reset.ts,
-                         src/classifier.ts, src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,
-                         lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks}.ts,
-                         src/bin/{launch,merge,revert,reset,mutation,status}.ts; run by node as is, no build, no runtime
-                         deps; fixtures/ hold the goldens and their generators
+                         src/run-queue.ts, src/classifier.ts, src/status.ts, src/status-views.ts, src/lib/{agents,render,
+                         baseline,scope,evidence,lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,
+                         die,exit-hooks}.ts, src/bin/{launch,merge,revert,reset,run-queue,mutation,status}.ts; run by
+                         node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
-  run-queue.sh write-story.sh lint-story.sh new-epic.sh
+  write-story.sh lint-story.sh new-epic.sh
   telegram.sh            send | poll           render.sh          render_prompt() for write-story.sh (the launcher: ts/src/lib/render.ts)
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop

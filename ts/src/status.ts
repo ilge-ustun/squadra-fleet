@@ -114,6 +114,17 @@ export function storyIds(root: string): string[] {
     .filter((id) => id !== 'TEMPLATE');
 }
 
+/** Seam 6: the one choice of "next ready story", shared by a bare
+ *  `launch.sh <repo>` and the queue's drain — run-queue.sh's own next_ready
+ *  always skipped TEMPLATE.md; launch.ts's did not (storyFiles() kept the
+ *  bash glob's original, non-skipping behaviour), so a bare launch on a repo
+ *  whose TEMPLATE.md carries `status: ready` (a real state, not a
+ *  hypothetical one — khaita's TEMPLATE.md does) would try to build the
+ *  template itself. */
+export function nextReady(root: string): string {
+  return storyIds(root).find((id) => storyField(root, id, 'status') === 'ready') ?? '';
+}
+
 /** `ls -1 <dir>`: no dotfiles, code-point order; undefined when not a directory. */
 export function listDir(dir: string): string[] | undefined {
   try {
