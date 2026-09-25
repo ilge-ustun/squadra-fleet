@@ -16,7 +16,8 @@ cd ../fleet-wt-<topic>
 ```
 
 `test-lib.sh` tests the working tree it lives in, with fake agents from
-`test/` (`claude`, `codex`, `vitest`, `curl`, `npm`) put first on PATH and
+`test/` (`claude`, `codex`, `vitest`, `npm`) put first on PATH, the bot
+pointed at `test/telegram-api.mts` by `TELEGRAM_API_BASE`, and
 re-executed under `env -i`. No network, no model.
 
 ## The rules, each with its reason

@@ -467,7 +467,16 @@ splits and joins, never `String.replace` with a string (whose `$&` is the
 same trap). The differential test renders a value holding `& \& \\ $& $1`
 through both and requires the same bytes.
 
-**Enforced by:** `ts/src/lib/render.test.ts` — the row "a value is inserted literally"
+**Found again at seam 8 (25 Sep 2026):** `telegram.sh:71` escaped a `--pre`
+message with `${text//</&lt;}` — the same construct — so every code-block
+message went to Telegram as `<pre>…<lt;…>gt;…</pre>`, invalid HTML that the
+API refuses, and `curl -sS` without `--fail` swallowed the refusal. Any
+`/status` reply with an angle bracket in a title was never delivered, and
+nothing said so. The old-vs-new differential of the TypeScript port put
+`<` in a value and the bash side came out wrong.
+
+**Enforced by:** `ts/src/lib/render.test.ts` — the row "a value is inserted literally";
+`test-lib.sh` case 135 for the bot's escape
 
 ### L-29 — a redirect into a directory that may not exist reports the command as failed
 

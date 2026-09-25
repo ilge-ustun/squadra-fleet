@@ -95,16 +95,17 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   write-story.sh         intent → draft story, one agent — wrapper over ts/src/bin/write-story.ts
   ts/                    the TypeScript side: src/launch.ts (the story loop), src/merge.ts, src/revert.ts, src/reset.ts,
                          src/run-queue.ts, src/lint-story.ts, src/new-epic.ts, src/write-story.ts, src/classifier.ts,
-                         src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,lock,config,
-                         verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks}.ts,
-                         src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status}.ts;
+                         src/status.ts, src/status-views.ts, src/telegram.ts, src/lib/{agents,render,baseline,scope,
+                         evidence,lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks,
+                         telegram-api,env-file}.ts, src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,
+                         write-story,mutation,status,telegram}.ts;
                          run by node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
-  telegram.sh            send | poll — bash still, prompts rendered via ts/src/lib/render.ts
+  telegram.sh            send | poll — the notifications and the phone commands — wrapper over ts/src/bin/telegram.ts
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
   install-skills.sh      links skills/ into ~/.claude/skills; Codex reads .agents/skills (→ skills/) in this repo only
-  test-lib.sh test/      the suite and the fakes (claude, codex, vitest, curl, npm)
+  test-lib.sh test/      the suite and the fakes (claude, codex, vitest, npm; telegram-api.mts, the fake Bot API)
   systemd/               the two timer pairs, live since 20 Sep
   repos/<name>.env       the registry — REPO_PATH=/abs/path and nothing else
   .env.fleet .bot-offset machine-local, gitignored: the bot's token and cursor
@@ -394,8 +395,10 @@ a per-case copy, only the fakes come through `PATH`.
 **Status:** all four seams landed on `main` on 24 Sep 2026 (PR #1; the model
 policy in PR #2, the first fixes in PR #3): the classifier, the verdict and
 the round section, `status.sh` and `check-mutation.sh` with the config
-loader, and the launcher. Seam 5 (`merge.sh`, `revert.sh`, `reset.sh`) is
-built on branch `ts-landing`, 24 Sep; seams 6–8 are next. Step 2's
+loader, and the launcher. Seams 5–7 (`merge.sh`, `revert.sh`, `reset.sh`;
+`run-queue.sh`; story authoring) landed 24–25 Sep (PRs #5, #7, #8); seam 8
+(`telegram.sh`, the last numbered seam) is built on branch `ts-landing-8`,
+25 Sep. Step 2's
 "with the agent calls moved to the SDKs" was weighed at seam 4 and
 declined, with the human: `@anthropic-ai/claude-agent-sdk` runs a 234 MB CLI
 it bundles over a stream-json protocol, not the `claude` on PATH, and needs

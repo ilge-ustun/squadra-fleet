@@ -68,7 +68,7 @@ fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLEET_HOME="$HERE"                    # the fleet under test is this working tree
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fleet-test.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+trap 'api_stop; rm -rf "$TMP"' EXIT
 
 ONLY="${1:-}"
 STORY=900
@@ -91,7 +91,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm curl; do
+  for name in claude codex npm; do
     got="$(PATH="$fleet/test:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/$name" ]]; then
       echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -112,7 +112,39 @@ copy_fleet() {                        # copy_fleet <src> <dst>
   rm -rf "$2/.env.fleet" "$2/.bot-offset"
 }
 
+# The fake Telegram API (seam 8). The bash bot's curl was shadowed by a fake
+# on PATH; Node's fetch never looks at PATH, so the bot is pointed by
+# TELEGRAM_API_BASE at test/telegram-api.mts on a loopback port instead. One
+# server per fixture, started by the first bot call, stopped when the fixture
+# goes: a detached /merge sends its result after the poll that started it
+# has returned, and that late send must still find the recorder. It reads
+# $FX/updates.json on every getUpdates — the file `update` writes — so a
+# case may rewrite it between polls.
+api_start() {                         # api_start → API_BASE
+  if [[ ! -s "$TRACE/api-port" ]]; then
+    ( cd "$FX" && exec node "$FLEET/test/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
+    echo $! > "$FX/api.pid"
+    local i=0
+    until [[ -s "$TRACE/api-port" ]]; do
+      (( i++ > 100 )) && { fail "the fake Telegram API did not start"; return 1; }
+      sleep 0.05
+    done
+  fi
+  API_BASE="http://127.0.0.1:$(cat "$TRACE/api-port")"
+}
+api_stop() {
+  [[ -n "${FX:-}" && -f "$FX/api.pid" ]] || return 0
+  kill "$(cat "$FX/api.pid")" 2>/dev/null; rm -f "$FX/api.pid"
+}
+# What reached the API: one request per api-args-N, the URL then the decoded
+# form fields, text= first on its line and a multi-line message's remaining
+# lines as they are; api-calls has one `api <url>` line per request.
+api_args()  { cat "$TRACE"/api-args-* 2>/dev/null; }
+api_calls() { cat "$TRACE"/api-calls 2>/dev/null; }
+api_clear() { rm -f "$TRACE"/api-args-*; }
+
 fixture() {                           # fixture <case-name> [story-status] → FX FLEET REPO TRACE
+  api_stop
   FX="$TMP/$1"; FLEET="$FX/fleet"; REPO="$FX/repo"; TRACE="$FX/trace"
   local status="${2:-ready}"
   mkdir -p "$TRACE"; : > "$TRACE/calls"
@@ -1116,15 +1148,17 @@ case_59_merge_refuses_integration_branch() {
 }
 
 # Phase D. The bot is both halves of the control plane: how the fleet reaches
-# a human and how the human reaches back. test/curl shadows curl, so no
-# case here touches the network.
+# a human and how the human reaches back. TELEGRAM_API_BASE names the fake
+# API, so no case here touches the network.
 
 bot() {                               # bot <verb> [args…] → BLOG BRC
   BLOG="$FX/bot.log"
+  api_start || return
   ( cd "$FX" && env PATH="$(FAKES)" \
       FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass \
       TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 \
       FAKE_TELEGRAM_UPDATES="${FAKE_TELEGRAM_UPDATES:-}" \
+      TELEGRAM_API_BASE="$API_BASE" \
       QUEUE_START_CMD=true \
       bash "$FLEET/telegram.sh" "$@" ) > "$BLOG" 2>&1
   BRC=$?
@@ -1137,7 +1171,7 @@ update() {                            # update <update_id> <from_id> <text> → 
   FAKE_TELEGRAM_UPDATES="$FX/updates.json"
 }
 
-sent() { cat "$TRACE"/curl-args-* 2>/dev/null | grep -c 'sendMessage' ; }
+sent() { api_args | grep -c 'sendMessage' ; }
 
 # A detached merge answers twice: the acknowledgement while it runs, and its
 # result when it ends. Nothing in the poll waits for the second one, so a case
@@ -1155,7 +1189,7 @@ wait_for_send() {                     # wait_for_send <n> [seconds]
 }
 # The whole recorded argv, not just the line starting with text=: a message is
 # multi-line and only its first line carries the prefix.
-sent_text() { cat "$TRACE"/curl-args-* 2>/dev/null; }
+sent_text() { api_args; }
 
 # Red when the send call is removed, or when it stops passing the text.
 case_60_bot_send() {
@@ -1225,9 +1259,9 @@ case_65_bot_offset_advances() {
   update 500 42 "/status t"
   bot poll
   assert_eq "$(cat "$FLEET/.bot-offset" 2>/dev/null)" 501 "offset is one past the last update"
-  assert_grep 'offset=0' "$TRACE/curl-calls" "the first poll started from 0"
+  assert_contains "$(api_calls)" 'offset=0' "the first poll started from 0"
   bot poll
-  assert_grep 'offset=501' "$TRACE/curl-calls" "the second asked only for what follows"
+  assert_contains "$(api_calls)" 'offset=501' "the second asked only for what follows"
 }
 
 # Phase E3. Auto-merge is allowed to change an epic branch without asking
@@ -1985,10 +2019,10 @@ case_93_bot_status_pre() {
   update 111 42 "/status t"
   bot poll
   assert_eq "$(sent)" 2 "two messages"
-  local n; n="$(cat "$TRACE"/curl-args-* | grep -c '^text=<pre>')"
+  local n; n="$(api_args | grep -c '^text=<pre>')"
   assert_eq "$n" 2 "each its own code block"
   # A row is never cut in half: every one of the 25 arrives as a whole line.
-  assert_eq "$(cat "$TRACE"/curl-args-* | grep -cE "(^|<pre>)9[0-9][0-9] $long\$")" 25 "every title arrived whole on its own line, one opening the second message"
+  assert_eq "$(api_args | grep -cE "(^|<pre>)9[0-9][0-9] $long\$")" 25 "every title arrived whole on its own line, one opening the second message"
 }
 
 # Plan of 20 Sep. merge.sh refuses the integration branch because the QUEUE
@@ -2326,13 +2360,13 @@ case_95_bot_help_and_repo_default() {
   assert_not_contains "$(sent_text)" "unknown repo" "no registry error"
   assert_contains "$(sent_text)" "computed" "the machine block came back"
 
-  rm -f "$TRACE"/curl-args-*
+  api_clear
   CASE="95 /status with no repo at all uses the only one"
   update 123 42 "/status"
   bot poll
   assert_contains "$(sent_text)" "fixture story" "the table came back"
 
-  rm -f "$TRACE"/curl-args-*
+  api_clear
   CASE="95 a misspelt repo is told so, not read as a story id"
   update 124 42 "/why nosuch $STORY"
   bot poll
@@ -2365,7 +2399,7 @@ EOS
   assert_contains "$(sent_text)" "still going" "the open story is shown"
   assert_not_contains "$(sent_text)" "fixture story" "the landed one is not"
 
-  rm -f "$TRACE"/curl-args-*
+  api_clear
   CASE="96 /status-all shows it again"
   update 131 42 "/status-all t"
   bot poll
@@ -2373,7 +2407,7 @@ EOS
   assert_contains "$(sent_text)" "still going" "and the open one too"
   assert_contains "$(sent_text)" "text=<pre>" "still a code block"
 
-  rm -f "$TRACE"/curl-args-*
+  api_clear
   CASE="96 with nothing in flight /status says so"; fixture c96-empty
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   merge_run -- --land
@@ -3389,7 +3423,83 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_126_revert_through_the_loader case_127_reset_through_the_loader
        case_128_bare_launch_never_picks_template case_129_queue_max_ceiling
        case_130_queue_same_story_twice_stops case_131_queue_refresh_resilience
-       case_132_write_story_end_to_end)
+       case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html)
+
+# Seam 8. The recorder the TypeScript bot is tested against, checked
+# against itself before any bot case relies on it: a sendMessage with a
+# multi-line text arrives decoded, one field per line, and a getUpdates
+# carries its query string into the call log and answers what
+# $FX/updates.json holds. Red while test/telegram-api.mts is absent.
+case_133_telegram_api_fake() {
+  CASE="133 the fake Telegram API records what it is sent"; fixture c133
+  update 7 42 "/repo"
+  api_start || return
+  local out
+  out="$( cd "$FX" && node -e '
+    const b = process.argv[1];
+    (async () => {
+      let r = await fetch(b + "/bottest-token/sendMessage", { method: "POST",
+        body: new URLSearchParams({ chat_id: "42", text: "<pre>row one\nrow two</pre>", parse_mode: "HTML" }) });
+      process.stdout.write(await r.text());
+      r = await fetch(b + "/bottest-token/getUpdates?offset=7&timeout=0");
+      process.stdout.write(await r.text());
+    })();' "$API_BASE" 2>&1 )"
+  assert_contains "$out" '"ok":true,"result":{"message_id"' "sendMessage is acknowledged"
+  assert_contains "$out" '"update_id":7' "getUpdates answers with the fixture's update"
+  assert_eq "$(sent)" 1 "one sendMessage recorded"
+  assert_file "$TRACE/api-args-1" "as the first request"
+  assert_grep '^chat_id=42$' "$TRACE/api-args-1" "the chat id, decoded"
+  assert_grep '^text=<pre>row one$' "$TRACE/api-args-1" "the text's first line"
+  assert_grep '^row two</pre>$' "$TRACE/api-args-1" "and its second line, as it was"
+  assert_grep '^parse_mode=HTML$' "$TRACE/api-args-1" "the parse mode"
+  assert_contains "$(api_calls)" "getUpdates?offset=7" "the poll's query string is in the call log"
+  assert_eq "$(api_calls | grep -c '^api ')" 2 "two calls in all"
+}
+
+# Seam 8. Two states the bash-era fake curl could not express: Telegram
+# unreachable at all (its FAKE_CURL=fail was never used), and a poll answered with
+# something other than updates. Both are warnings and exit 0 — a bot whose
+# API is gone must say so and end normally, as fleet-bot.service runs it
+# every minute and a failed unit is noise, not information — and neither
+# moves the offset. Red when a failed request is allowed to throw.
+case_134_bot_api_unreachable() {
+  CASE="134 an unreachable API is a warning, not a failure"; fixture c134
+  local rc
+  BLOG="$FX/bot.log"
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
+      bash "$FLEET/telegram.sh" send "anyone there" ) > "$BLOG" 2>&1; rc=$?
+  assert_eq "$rc" 0 "send exits 0"
+  assert_grep 'sendMessage failed' "$BLOG" "and says so"
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      TELEGRAM_BOT_TOKEN=test-token TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE=http://127.0.0.1:1 \
+      bash "$FLEET/telegram.sh" poll ) > "$BLOG" 2>&1; rc=$?
+  assert_eq "$rc" 0 "poll exits 0"
+  assert_grep 'getUpdates failed' "$BLOG" "and says so"
+  assert_no_file "$FLEET/.bot-offset" "nothing was acknowledged"
+
+  CASE="134 a poll answered with something other than updates"
+  printf '<html>oops</html>\n' > "$FX/updates.json"
+  bot poll
+  assert_eq "$BRC" 0 "poll exits 0"
+  assert_grep 'getUpdates returned no result' "$BLOG" "and says what it got"
+  assert_no_file "$FLEET/.bot-offset" "nothing was acknowledged"
+  assert_eq "$(sent)" 0 "nothing was sent"
+}
+
+# Seam 8's one behaviour change, found by the old-vs-new differential: the
+# bash escaped `<` as `<lt;` and `>` as `>gt;` — L-28 again, `&` in a
+# ${var//x/&lt;} replacement is the match under bash 5.2 — so any --pre
+# message with an angle bracket was invalid HTML that Telegram refused,
+# and curl -sS without --fail swallowed the refusal. Red against the bash
+# bot (main before this seam); the port escapes as HTML does.
+case_135_bot_pre_escapes_html() {
+  CASE="135 --pre escapes the characters HTML would misread"; fixture c135
+  bot send --pre "a & b <c> d"
+  assert_eq "$BRC" 0 "exit code"
+  assert_eq "$(sent)" 1 "one message"
+  assert_contains "$(sent_text)" "text=<pre>a &amp; b &lt;c&gt; d</pre>" "escaped, then wrapped"
+}
 
 for c in "${CASES[@]}"; do
   [[ -z "$ONLY" || "$c" == *"$ONLY"* ]] || continue

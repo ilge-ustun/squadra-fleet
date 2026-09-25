@@ -1,4 +1,4 @@
-# Fleet: the migration to TypeScript — plan, and seams 1–7 as built
+# Fleet: the migration to TypeScript — plan, and seams 1–8 as built
 
 Decided by the human on 23 Sep 2026 (`FLEET-HANDOFF.md` §9): the harness
 moves from bash to TypeScript, one seam at a time behind the existing
@@ -69,10 +69,10 @@ TypeScript fleet: the migration continues, in this order.
    built, below. `render.sh` retired with `write-story.sh`, its last user.
    The citation checks against a story's base were the delicate part; they
    ported unchanged, pinned by the cases that already characterised them.
-8. **`telegram.sh`** — the hard part is testing: the bot's `curl` is faked
-   on PATH, Node's `fetch` bypasses PATH, so the suite needs a new seam (an
-   API base URL pointing at a local fake server) before anything moves.
-   `flock` becomes `lock.ts`.
+8. **`telegram.sh`** — built, below. The hard part was testing, as
+   predicted: the bot's `curl` was faked on PATH, Node's `fetch` bypasses
+   PATH, so a fake Bot API behind `TELEGRAM_API_BASE` came first. `flock`
+   became `lock.ts`.
 
 Small ones any time: `install-skills.sh`, `update-agents.sh`, the wrappers.
 
@@ -606,7 +606,85 @@ harness was checked against itself first — a deliberately wrong error
 message was confirmed to produce a MISMATCH before the real, clean run was
 taken as proof.
 
-Next: seam 8, `telegram.sh` — the hard part is testing (the bot's `curl` is
-faked on PATH; Node's `fetch` bypasses PATH, so the suite needs a way to
-point it at a local fake server before anything moves). `flock` becomes
-`lock.ts`.
+## Seam 8: `telegram.sh`, as built (branch `ts-landing-8`, 25 Sep 2026)
+
+```
+test/telegram-api.mts          the test seam, built first: a fake Bot API on a loopback port that records each
+                               request as api-calls / api-args-N — the shape test/curl recorded curl's argv —
+                               and answers getUpdates from the fixture's updates.json, read on every request.
+                               Node's fetch never looks at PATH, so a fake on PATH could not stand in;
+                               TELEGRAM_API_BASE points a bot here. Checked against itself first (case 133)
+ts/src/lib/telegram-api.ts     sendMessage (a form POST) and getUpdates (GET, offset, timeout=0) on fetch, with
+                               AbortSignal.timeout for curl's --max-time. Never throws — false, 'failed' or
+                               'no-result' — because the caller warns and goes on
+ts/src/lib/env-file.ts         .env.fleet through a child bash under set -a, the keys back as NUL pairs: the file
+                               is sourced bash, so the technique is lib/config.ts's for .fleet/config
+ts/src/telegram.ts             splitText, htmlPre, send; parseCommand (bash read's four fields, first line only),
+                               resolveRepo (the one-repo shorthand and its refusals), one cmd* per verb, dispatch,
+                               poll. BotDeps — the API, the shell-outs, the detached job, the clock — is a seam
+                               per side effect, so the 51 unit tests run with none of them
+ts/src/bin/telegram.ts         send [--pre] <text…> | poll; usage 2, everything else 0; an uncaught exception 1
+telegram.sh                    the wrapper: source lib.sh, require node, exec the bin
+test/curl                      deleted — telegram.sh was its last caller; shadow_check no longer lists curl
+test-lib.sh                    api_start/api_stop (one fake API per fixture, stopped when the fixture goes, so
+                               a detached /merge's late send still finds it); bot() passes TELEGRAM_API_BASE;
+                               sent/sent_text read the fake's record; cases 133 (the recorder itself), 134
+                               (Telegram unreachable; a poll answered with non-JSON), 135 (the <pre> escape)
+```
+
+What changed in substance:
+
+- **The test seam came before the port**, as the plan said it had to.
+  Every bot case (60–65, 68, 79, 93, 93b–d, 95–97, 99) then passed
+  unmodified against the port, and case 60 was seen red under a
+  `FLEET_TS_OVERRIDE` stub of `lib/telegram-api.ts` that records nothing —
+  the port really goes through the client.
+- **Reused, not rewritten:** `withFleetLock` for `with_lock`; `readReview`
+  for `/why` (its block minus the heading, as the awk printed it);
+  `replaceFrontmatterField` for the `status: ready` edit; `lib/git`'s
+  `add`/`stagedIsEmpty`/`commit`/`pushQuiet`; `launch.ts`'s `splitCommand`
+  for `QUEUE_START_CMD`. `/status`, `/revert` and `/merge` stay child
+  processes of their scripts, as the bash had them — each owns its own
+  refusals. `/merge`'s detached job is the same `bash -c` line under
+  `flock -w 900`; the bash also closed its inherited lock descriptor first
+  (`9>&-`), which Node makes unnecessary — a child gets only the stdio it
+  is given.
+- **`LOG_TAG=bot` reaches the loader's child bash.** In the bash it was a
+  shell variable seen by `die` in the same process; the differential
+  caught the missing `[bot]` in a reply whose text was `load_repo`'s die
+  line. Captured stderr (`captureStderr: true`), because inside the bash's
+  `$(dispatch … 2>&1)` that line *was* the reply.
+- **Three small deliberate differences.** A lock-wait warning inside a
+  reply carries no colour codes (a phone shows them raw). The registry the
+  bot lists and checks is `FLEET_REGISTRY_DIR` when set — the one
+  `load_repo` reads — where the bash had `$FLEET_HOME/repos` literally. A
+  `sendMessage` answered with an error status is a failed send and a
+  warning; `curl -sS` without `--fail` counted a 400 as sent.
+- **A latent bug in the bash, found by the differential (L-28 again):**
+  `telegram.sh:71` escaped `<` with `${text//</&lt;}`, and under bash 5.2
+  `&` in an unquoted replacement is the match — so every `--pre` message
+  went out with `<lt;` and `>gt;`, invalid HTML that Telegram refuses, and
+  the refusal was swallowed by `curl -sS`. Any `/status` reply carrying an
+  angle bracket was never delivered. The port escapes as HTML does; case
+  135 pins it, and `docs/lessons.md` L-28 records the second instance.
+- **Knobs:** `CURL_TIMEOUT` is `TELEGRAM_TIMEOUT` (nothing outside
+  `telegram.sh` set it); `TELEGRAM_API_BASE` is the test seam. The bot
+  needs `node` and `git`, no longer `jq` and `curl`.
+
+Verified: `bash test-lib.sh` 916/916 (894 before: case 133 seen red with
+the fake absent; 134 and 135 new); 538 unit tests (472 before), tsc clean.
+Parity beyond the suite: 21 scenarios — every verb and every refusal, the
+one-repo shorthand, a misspelt repo, `.env.fleet`, an unconfigured bot,
+usage, the split, a stranger, the offset across polls, a repo the loader
+refuses, a command with a second line — run under `main`'s bash (through
+`test/curl`) and under the port (through the fake API), on identical
+fixtures: byte-identical (stdout+stderr+exit, the messages recorded, the
+target's git log and story status, the offset) once `LOG_TAG` reached the
+loader, except the one scenario where the bash was wrong. The harness was
+checked against itself first: a sabotaged `SEND_MAX` on the new side
+produced 13 mismatches before the clean run was taken as proof.
+
+Next: no numbered seam remains. `lib.sh`'s `load_repo` (the `.fleet/config`
+contract), `test-lib.sh` (the acceptance layer) and the systemd units stay
+bash by decision; `install-skills.sh` and `update-agents.sh` are small ones
+for any time.
