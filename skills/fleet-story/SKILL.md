@@ -72,7 +72,7 @@ checkout, which is usually `develop`):
    picked up with no edit: omit it for the default (`sonnet`) on a bounded
    story; `opus` for design-heavy or diagnose-first stories (service-worker
    rewrites, state machines, an unknown cause). `fable` only after a trial
-   is recorded in `docs/coordinator-trials.md`. (`haiku` was retired 24 Sep
+   is recorded in `docs/COORDINATORS.md` (Trials). (`haiku` was retired 24 Sep
    2026 — both real trials, khaita 021 and 025, needed round-2 escalation
    on round 1, so the cheap tier never once saved a round.)
 
@@ -92,7 +92,7 @@ git -C <target> push
 ```
 
 The trailer names who drafted it, so the trials in
-`docs/coordinator-trials.md` can be read out of git later.
+`docs/COORDINATORS.md` can be read out of git later.
 
 Then tell the human: the story id, its title, what it asks, any question
 still open, and that `/promote <repo> <id>` puts it in the queue. Do not

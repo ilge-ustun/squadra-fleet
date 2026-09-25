@@ -71,11 +71,10 @@ lingering on (`systemd/README.md`):
   (`api` scope, Developer role), then `MERGE_MODE=pr` and the `PR_CMD` from
   `README.md` in that target's `.fleet/config`, and one `/merge` to see the
   URL come back.
-- **The first coordinator trial on Codex.** Before it, from inside a
-  `codex -C <target> --add-dir <target's parent> --add-dir ~/work/fleet
-  -s workspace-write -c sandbox_workspace_write.network_access=true`
-  session, check once that `git push` and `./fleet write-story` work. Then
-  the protocol in `docs/COORDINATORS.md`.
+- **The first coordinator trial on Codex.** Before it, from inside the
+  session `docs/COORDINATORS.md` gives (`codex -C ~/work/fleet --add-dir
+  ~/work …`), check once that it lists the five skills and that `git push`
+  and `./fleet write-story` work. Then the protocol on the same page.
 
 What a target needs from a human — epics to land, stories to order,
 deploys — belongs to that target, not here.
