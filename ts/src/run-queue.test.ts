@@ -6,7 +6,7 @@ import { Die } from './lib/die.ts';
 import { formatRanLine, readMax, registeredRepos } from './run-queue.ts';
 
 // The pure parts of run-queue.sh; the drain loop itself is proven by
-// test-lib.sh (cases 41, 69-71, 87, 91d, 99, 128-131), as the launcher's is.
+// test/suite.sh (cases 41, 69-71, 87, 91d, 99, 128-131), as the launcher's is.
 
 describe('readMax — run-queue.sh:32,37', () => {
   it('the default, MAX from the environment, and --max as argv[0]', () => {

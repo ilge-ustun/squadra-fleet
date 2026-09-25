@@ -29,7 +29,7 @@ after boot. That is also the crash-recovery path: the first thing
 `run-queue.sh` does is reap orphans, so a story stranded at `in_progress` by a
 power cut is returned to the queue and resumed — its worktree reused, the
 builder's existing commits intact, rounds continuing from the frontmatter
-rather than restarting at one. `test-lib.sh` case 42 covers exactly that
+rather than restarting at one. `test/suite.sh` case 42 covers exactly that
 state.
 
 The queue unit runs `run-queue.sh --all`: every repo in `repos/` is drained in

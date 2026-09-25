@@ -5,7 +5,7 @@
 # The bash status.sh was retired by seam 3; its final version is commit
 # 14f675e. This runs that version — never the TypeScript, whatever
 # status.sh is today — on make-target.sh's target, under the suite's
-# locale (test-lib.sh:58: C.UTF-8, where bash counts characters), and
+# locale (test/suite.sh:58: C.UTF-8, where bash counts characters), and
 # writes <view>.expected.txt (ten views). status-views.test.ts compares the TypeScript
 # against these byte for byte.
 set -euo pipefail

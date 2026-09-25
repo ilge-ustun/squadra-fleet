@@ -10,7 +10,7 @@ const FLEET_HOME = resolve(import.meta.dirname, '../../..');
 
 // L-27: the loader hands the whole environment on, so a BASE_BRANCH exported
 // in the shell running vitest would win over the file. The tests pass an
-// allowlist, as test-lib.sh:57-63 does, plus the override under test.
+// allowlist, as test/suite.sh:57-63 does, plus the override under test.
 function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { FLEET_REGISTRY_DIR: registry, ...extra };
   for (const k of ['PATH', 'HOME', 'LANG']) if (process.env[k] !== undefined) e[k] = process.env[k];

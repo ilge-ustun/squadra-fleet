@@ -7,7 +7,7 @@ import { readdirSync, realpathSync } from 'node:fs';
 
 // launch.sh:129-152 — the harness runs the suite, the build and the lint in
 // the clean reviewer tree, before the reviewer is asked anything.
-const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/vitest');
+const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/fakes/vitest');
 
 // The rule at launch.sh:135: `jq -e '.numTotalTests > 0 and .numFailedTests == 0'`
 // — anything jq cannot read or that lacks a count is RED. Not the classifier's

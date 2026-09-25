@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# fleet/test/codex — stand-in for the real `codex exec --json …` under fleet/test-lib.sh.
+# fleet/test/fakes/codex — stand-in for the real `codex exec --json …` under fleet/test/suite.sh.
 #
 # The launcher invokes `codex` by bare name with the review prompt on stdin
 # (launch.sh: `printf '%s' "$REVIEW_PROMPT" | codex exec --json --sandbox …`),
@@ -19,7 +19,7 @@
 #   none      nothing written
 #   patch     .review-out/mutations/AC1-marker.patch + AC1-marker.test
 #             The patch appends FLEET_MUTANT_MARKER to src/marker.txt;
-#             fleet/test/vitest in `marker` mode fails iff that line exists.
+#             fleet/test/fakes/vitest in `marker` mode fails iff that line exists.
 #             The tree is left clean (patch generated, then reverted).
 #   cmd       same patch, but AC1-marker.cmd instead of .test
 #   badpatch  AC1-bad.patch that does not apply, + .test
@@ -80,7 +80,7 @@ case "${FAKE_MUTATIONS:-none}" in
   badpatch) mkdir -p .review-out/mutations
             printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-this line does not exist\n+so this cannot apply\n' > .review-out/mutations/AC1-bad.patch
             printf 'fake.test.tsx\n' > .review-out/mutations/AC1-bad.test ;;
-  *) echo "fleet/test/codex: unknown FAKE_MUTATIONS='$FAKE_MUTATIONS'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/codex: unknown FAKE_MUTATIONS='$FAKE_MUTATIONS'" >&2; exit 2 ;;
 esac
 
 # A probe carries no patch and needs no selector — the file IS both. Its name
@@ -91,7 +91,7 @@ case "${FAKE_PROBES:-none}" in
   green|red) mkdir -p .review-out/probes
              printf '// fake probe (%s)\n' "$FAKE_PROBES" \
                > ".review-out/probes/probe-$FAKE_PROBES.test.tsx" ;;
-  *) echo "fleet/test/codex: unknown FAKE_PROBES='$FAKE_PROBES'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/codex: unknown FAKE_PROBES='$FAKE_PROBES'" >&2; exit 2 ;;
 esac
 
 [[ "$FAKE_REVIEWER" == hang ]] && sleep 999
@@ -100,7 +100,7 @@ case "$FAKE_REVIEWER" in
   PASS|FAIL|SPEC) text=$'fake review, call '"$n"$'.\nfinding: none.\nVERDICT: '"$FAKE_REVIEWER" ;;
   garbage)        text=$'fake review, call '"$n"$'.\nverdict: pass (lowercase, not the contract)' ;;
   silent)         text="" ;;
-  *) echo "fleet/test/codex: unknown FAKE_REVIEWER='$FAKE_REVIEWER'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/codex: unknown FAKE_REVIEWER='$FAKE_REVIEWER'" >&2; exit 2 ;;
 esac
 
 # Output shaped like real codex 0.153 (read from a real run, 17 Sep):

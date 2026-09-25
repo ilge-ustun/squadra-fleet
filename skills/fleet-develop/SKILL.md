@@ -1,6 +1,6 @@
 ---
 name: fleet-develop
-description: Change the fleet harness itself (~/work/fleet) — worktree, a test-lib.sh case observed red first, one task one commit, suite green before every commit, launch.sh diff shown before applying, fast-forward main only when both systemd units are inactive. Use when fixing or extending launch.sh, merge.sh, telegram.sh, status.sh, lint-story.sh, prompts or the tests.
+description: Change the fleet harness itself (~/work/fleet) — worktree, a test/suite.sh case observed red first, one task one commit, suite green before every commit, launch.sh diff shown before applying, fast-forward main only when both systemd units are inactive. Use when fixing or extending launch.sh, merge.sh, telegram.sh, status.sh, lint-story.sh, prompts or the tests.
 ---
 
 # Changing the harness
@@ -15,9 +15,9 @@ git worktree add ../fleet-wt-<topic> -b <topic> main
 cd ../fleet-wt-<topic>
 ```
 
-`test-lib.sh` tests the working tree it lives in, with fake agents from
+`test/suite.sh` tests the working tree it lives in, with fake agents from
 `test/` (`claude`, `codex`, `vitest`, `npm`) put first on PATH, the bot
-pointed at `test/telegram-api.mts` by `TELEGRAM_API_BASE`, and
+pointed at `test/fakes/telegram-api.mts` by `TELEGRAM_API_BASE`, and
 re-executed under `env -i`. No network, no model.
 
 ## The rules, each with its reason
@@ -30,8 +30,8 @@ re-executed under `env -i`. No network, no model.
   many), or the case writes a stub into the fixture's `ts/src/lib/` after
   `fixture` (cases 106-110, 113). A new feature is red because it is absent. A case
   never seen red is not a case; it has passed by accident before.
-- **`bash test-lib.sh` green before every commit**; the count is on the
-  last line. `bash test-lib.sh <substring>` runs a subset while iterating.
+- **`bash test/suite.sh` green before every commit**; the count is on the
+  last line. `bash test/suite.sh <substring>` runs a subset while iterating.
 - **The TypeScript side too:** `cd ts && npm ci && npm run check && npm test`
   green before every commit that touches `ts/`, its unit tests red first.
   `npm test` goes through esbuild, which accepts syntax Node's type
@@ -67,7 +67,7 @@ git worktree remove ../fleet-wt-<topic> && git branch -d <topic>
 Fast-forward only: the live checkout must be exactly a commit that passed
 the suite. If a unit is `active` or `activating`, wait for the next minute;
 the bot is a one-minute oneshot, the queue is idle unless a story is ready.
-Then run `bash test-lib.sh` once more in `~/work/fleet` — the tree the
+Then run `bash test/suite.sh` once more in `~/work/fleet` — the tree the
 timers execute.
 
 Document the seam or command you added: `README.md` (the map),

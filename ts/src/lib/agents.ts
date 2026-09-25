@@ -2,7 +2,7 @@
 // `claude -p …` for the builder with stdout and stderr merged, `codex exec
 // --json …` for the reviewer with stderr kept as evidence; the prompt on
 // stdin for both (L-18); `timeout -k 30 $AGENT_TIMEOUT` as run()'s timer.
-// The CLIs are found on PATH by bare name, which is what lets test-lib.sh's
+// The CLIs are found on PATH by bare name, which is what lets test/suite.sh's
 // fakes stand in (L-14). This file is the seam a later move to the agent
 // SDKs would replace; nothing else in the launcher knows how an agent is
 // started or what its output looks like.

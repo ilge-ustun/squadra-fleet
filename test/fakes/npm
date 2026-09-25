@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# fleet/test/npm — tripwire under fleet/test-lib.sh.
+# fleet/test/fakes/npm — tripwire under fleet/test/suite.sh.
 #
-# The launcher must not run a real install inside a test fixture; test-lib
+# The launcher must not run a real install inside a test fixture; the suite
 # sets INSTALL_CMD=true. If `npm` is reached anyway, the INSTALL_CMD seam is
 # not honoured. Record the call so the test can see it, and fail the install.
 #

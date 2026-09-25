@@ -16,7 +16,7 @@ Entries marked *by discipline* are a work queue, not a record.
 
 ## Carried over from the 14 Sep handoff
 
-**Enforced by:** on a lesson names the `test-lib.sh` case or function
+**Enforced by:** on a lesson names the `test/suite.sh` case or function
 that fails if the lesson is un-learned. A lesson without the field is making no
 such claim — it is advice, and says so by its absence. `case_72` checks that
 every name here still exists, so a lesson cannot go on claiming an instrument
@@ -163,7 +163,7 @@ empty, and L-05 returns *looking fixed*.
 ## Found while building the verdict runner (17 Sep, evening)
 
 ### L-14 — a fake that does not shadow the real binary is the real binary
-`test-lib.sh`'s first run named its stand-ins `fake-claude` and
+`test/suite.sh`'s first run named its stand-ins `fake-claude` and
 `fake-codex`. The launcher calls `claude` and `codex` by bare name, so the
 *real* Claude Code started with the fixture story, ran the test script
 itself, and recursed three deep on real quota before being killed by
@@ -217,7 +217,7 @@ path that will be taken when least expected.
 **Prevention:** by construction — stderr captured as evidence
 (`reviewer.stderr`), never merged; extraction skips non-JSON lines and takes
 only `agent_message` items; an empty extraction is recorded, not papered
-over. `test/codex` emits the notice on every run.
+over. `test/fakes/codex` emits the notice on every run.
 
 **Enforced by:** `case_31_codex_stderr_notice`
 
@@ -235,7 +235,7 @@ nothing, when the builder was never started.
 **Prevention:** by construction — prompts go to both agents on stdin
 (`ts/src/lib/agents.ts` since seam 4; before it `printf '%s' … | claude -p`,
 `… | codex exec`), which is also codex's intended mode and removes the L-17
-notice at its root. `test-lib.sh` case 32 grows a review past the limit on
+notice at its root. `test/suite.sh` case 32 grows a review past the limit on
 a rerun and asserts the builder still receives it.
 
 **Enforced by:** `case_32_huge_review_prompt`
@@ -254,7 +254,7 @@ nobody reads. State that is "in git" is only in the branch it is in.
 **Prevention:** by construction — `sync_story` copies the base story into
 the builder worktree and commits it there as the launcher's own commit
 before the round's start SHA (so it is never the builder's work), which
-the reviewer's detached tree inherits. `test-lib.sh` case 33.
+the reviewer's detached tree inherits. `test/suite.sh` case 33.
 
 ## Found by running two stories back to back (18 Sep)
 
@@ -300,7 +300,7 @@ cost a full builder round and put unrelated changes in the branch.
 **Lesson:** `needs_human` exists so a human can change the story. The harness
 must then be able to re-judge the same head against the new story.
 **Prevention:** by construction — `REVIEW_ONLY=1` skips the builder and the
-postcondition, and nothing else; `test-lib.sh` case 34. Used on 008
+postcondition, and nothing else; `test/suite.sh` case 34. Used on 008
 round 3, which is the run that passed.
 
 ## Found by story 010 — the first production-code story after Phase 3
@@ -338,7 +338,7 @@ produce anything the harness can judge", and commits had been the only
 possible answer.
 **Prevention:** by construction — the check also stands down when the builder
 handed evidence over, which the runner judges exactly as the reviewer judges
-commits. Nothing at all is still a die; `test-lib.sh` case 2 is
+commits. Nothing at all is still a die; `test/suite.sh` case 2 is
 unchanged and case 37 covers the new path.
 
 **Enforced by:** `case_37_evidence_only_round`
@@ -356,7 +356,7 @@ escalation if its criteria cannot be met without picking between materially
 different outcomes. Naming the open question in the story — 010 quoted 006
 naming it — is not the same as making it load-bearing.
 **Prevention:** by discipline, and unproven: `.blocked/` has still never fired
-in fourteen stories. The mechanism is tested (`test-lib` case 3); what is untested
+in fourteen stories. The mechanism is tested (`test/suite.sh` case 3); what is untested
 is any real agent's willingness to use it.
 
 ## Found by story 014 — the fleet working on its own harness (18 Sep)
@@ -383,17 +383,17 @@ instrument. The writing prompt now says it; nothing enforces it.
 ### L-26 — the harness verifies the app, not itself
 The baseline is `npm test`, `npm run build`, `npm run lint`. All three exercise
 the application. **Nothing in the baseline touches ``.** So story 014 —
-which changed `run-queue.sh` and `test-lib.sh` — passed a green
+which changed `run-queue.sh` and `test/suite.sh` — passed a green
 baseline that proved nothing about it, and its only real verification was the
-reviewer's mutations plus a human running `test-lib` by hand afterwards.
-Worse, `test-lib.sh` itself was writable by the builder: a quietly weakened
+reviewer's mutations plus a human running `test/suite.sh` by hand afterwards.
+Worse, `test/suite.sh` itself was writable by the builder: a quietly weakened
 unrelated case would have been invisible to the pipeline. It did not happen —
 the diff was purely additive — but nothing prevented it.
 **Lesson:** a verification system's weakest coverage should not be of itself.
 `launch.sh` was protected by `scope_deny`, so the judge was never the judged;
 that part was right. The baseline was the hole.
 **Prevention:** closed by construction, 18 Sep. `run_baseline` runs
-`SELF_TEST_CMD` (default `bash test-lib.sh`) whenever the round's changed
+`SELF_TEST_CMD` (default `bash test/suite.sh`) whenever the round's changed
 paths include ``, and a RED result vetoes like any other baseline
 failure. It reports SKIPPED rather than GREEN when it does not run: a check
 that did not run must not read as a check that passed. Cases 46 and 47.
@@ -405,14 +405,14 @@ visible to the same instrument every other change already faces.
 **19 Sep 2026:** the harness is its own repository now and is never a fleet
 target, so no round's diff can contain a harness file and the self-test branch
 was removed — a check that cannot fire is absent, not weak. Prevention is
-`bash test-lib.sh` by hand before every commit in the fleet repo (CLAUDE.md
+`bash test/suite.sh` by hand before every commit in the fleet repo (CLAUDE.md
 there). No case enforces this any more.
 
 ### L-27 — a self-test inherits the configuration of the run that calls it
 
 Story 014's round three was started with `MAX_ROUNDS=1`, because it needed
 exactly one more round. The baseline's new self-test step ran
-`bash test-lib.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
+`bash test/suite.sh` in the reviewer worktree — and `MAX_ROUNDS=1` was in
 the environment, so the suite's own fixtures inherited it. Cases 4, 5, 9 and
 27 exist to check what happens across *two* rounds; with the ceiling at one
 they failed. 230 passed, 14 failed, and the machine vetoed a story whose
@@ -434,7 +434,7 @@ the environment is clean by making the child's environment the log
 subprocess cannot report back.
 
 **19 Sep 2026:** the launcher no longer runs the suite (see L-26), so the
-`env -i` moved into `test-lib.sh` itself, which re-executes under a clean
+`env -i` moved into `test/suite.sh` itself, which re-executes under a clean
 environment before any fixture is built: a developer shell with `MAX_ROUNDS=1`
 exported would otherwise reproduce this exactly.
 
@@ -477,7 +477,7 @@ nothing said so. The old-vs-new differential of the TypeScript port put
 `<` in a value and the bash side came out wrong.
 
 **Enforced by:** `ts/src/lib/render.test.ts` — the row "a value is inserted literally";
-`test-lib.sh` case 135 for the bot's escape
+`test/suite.sh` case 135 for the bot's escape
 
 ### L-29 — a redirect into a directory that may not exist reports the command as failed
 

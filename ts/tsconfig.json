@@ -13,5 +13,5 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src", "vitest.config.ts", "../test/telegram-api.mts"]
+  "include": ["src", "vitest.config.ts", "../test/fakes/telegram-api.mts"]
 }

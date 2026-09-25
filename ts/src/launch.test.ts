@@ -4,7 +4,7 @@ import {
   runFileStart, splitCommand,
 } from './launch.ts';
 
-// The launcher's pure parts. The loop itself is proven by test-lib.sh's
+// The launcher's pure parts. The loop itself is proven by test/suite.sh's
 // sixty launcher cases and the old-versus-new diff recorded in the commit.
 
 describe('capture — what $(…) leaves', () => {

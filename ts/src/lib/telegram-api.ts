@@ -7,7 +7,7 @@
 // Nothing here throws. A notification is not part of a verdict, and a bot
 // that cannot reach Telegram must say so and go on; the caller warns.
 //
-// The base URL is a seam: test-lib.sh's fake API (test/telegram-api.mts)
+// The base URL is a seam: test/suite.sh's fake API (test/fakes/telegram-api.mts)
 // listens on a loopback port, and TELEGRAM_API_BASE points a bot at it —
 // fetch never looks at PATH, so a fake curl could not stand in.
 export const DEFAULT_BASE = 'https://api.telegram.org';

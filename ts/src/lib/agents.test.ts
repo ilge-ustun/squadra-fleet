@@ -6,7 +6,7 @@ import {
   ALLOWED_TOOLS, builderArgv, builderModelUsed, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, runBuilder, runReviewer,
 } from './agents.ts';
 
-const FAKES = resolve(import.meta.dirname, '../../../test');
+const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
 
 describe('the argv the CLIs get — launch.sh:521-524, 628-630', () => {
   it('builder: claude -p, the model, the turn ceiling, the tools, JSON out', () => {
@@ -45,7 +45,7 @@ describe('parseBuilderOutput — the jq rows', () => {
     expect(parseBuilderOutput(out)).toEqual({ isError, message, evidence });
   });
 
-  it('the fake builder\'s line, as test/claude prints it', () => {
+  it('the fake builder\'s line, as test/fakes/claude prints it', () => {
     expect(parseBuilderOutput('{"is_error":false,"result":"fake builder did: commit (call 1)"}\n')).toEqual({
       isError: 'false', message: 'fake builder did: commit (call 1)', evidence: '{\n  "is_error": false,\n  "result": "fake builder did: commit (call 1)"\n}',
     });
@@ -97,7 +97,7 @@ describe('reviewerMessages — the codex stream', () => {
 
 // The two calls end to end, against the suite's own fakes on PATH: the
 // prompt arrives on stdin, the argv is recorded, cwd is the worktree.
-describe('runBuilder / runReviewer with test/claude and test/codex', () => {
+describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex', () => {
   it('builder: prompt on stdin, argv recorded, the JSON object back', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
     const trace = join(dir, 'trace'); const wt = join(dir, 'wt');

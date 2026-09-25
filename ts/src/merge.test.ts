@@ -6,7 +6,7 @@ import { Die } from './lib/die.ts';
 import { USAGE, logIdOf, parseArgs, refusal, seedMergeWorktree } from './merge.ts';
 import { DASH, type StoryRow } from './status.ts';
 
-// The pure parts of merge.sh; the flow itself is proven by test-lib.sh
+// The pure parts of merge.sh; the flow itself is proven by test/suite.sh
 // (cases 56-59, 74, 75, 91, 92, 118-122, 125), as the launcher's is.
 
 describe('parseArgs — merge.sh:55-71', () => {

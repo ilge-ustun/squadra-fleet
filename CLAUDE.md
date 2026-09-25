@@ -42,8 +42,8 @@ against this checkout.
 ## Tests
 
 ```bash
-bash test-lib.sh            # every case; must be green before any commit
-bash test-lib.sh blocked    # cases whose name contains "blocked"
+bash test/suite.sh            # every case; must be green before any commit
+bash test/suite.sh blocked    # cases whose name contains "blocked"
 ```
 
 Nothing runs this for you. TDD is mandatory: write the failing case, run it,
@@ -63,7 +63,7 @@ cd ts && npm ci && npm run check && npm test   # tsc --noEmit, then vitest
 ```
 
 `npm test` compiles through esbuild, which accepts syntax Node rejects;
-`npm run check` and `bash test-lib.sh` (real `node`) are the proofs.
+`npm run check` and `bash test/suite.sh` (real `node`) are the proofs.
 Nothing under `ts/` needs `node_modules` at run time; the live checkout
 never runs `npm`. The plan: `docs/plans/2026-09-23-typescript-migration.md`.
 

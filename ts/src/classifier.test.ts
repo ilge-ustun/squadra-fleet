@@ -6,8 +6,8 @@ import { classFromVitestJson } from './lib/vitest-json.ts';
 import { runSync } from './lib/proc.ts';
 import { DirtyTreeError, classifyMutation, findSelector, runSelector } from './classifier.ts';
 
-// The fleet's one fake runner, the same one test-lib.sh points VITEST_CMD at.
-const FAKE_VITEST = resolve(import.meta.dirname, '../../test/vitest');
+// The fleet's one fake runner, the same one test/suite.sh points VITEST_CMD at.
+const FAKE_VITEST = resolve(import.meta.dirname, '../../test/fakes/vitest');
 
 describe('classFromVitestJson — the decision, row by row (mutation.sh@8fe954a:36-39)', () => {
   it.each([

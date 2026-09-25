@@ -229,7 +229,7 @@ answered by `telegram.sh poll` every minute.
 | `reset.sh <repo> <id> [--force] [--draft]` | | back to the queue |
 | `install-skills.sh` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
 | `update-agents.sh` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
-| `test-lib.sh [substring]` | | the harness's own suite |
+| `test/suite.sh [substring]` | | the harness's own suite |
 
 A merge from the phone is detached: the bot acknowledges it immediately and
 sends the result when it ends. It has to be — the merge installs deps and runs
@@ -386,14 +386,14 @@ Worktrees are siblings of the target: `../wt-<id>` for a builder,
 
 ## Tests and working rules
 
-`bash test-lib.sh` runs the suite (fake agents in `test/`, re-executed under
+`bash test/suite.sh` runs the suite (fake agents in `test/fakes/`, re-executed under
 `env -i`); its last line is the count. Green before every commit; a case
 that has never been observed red is not a case — a new feature is red
 because it is absent, a characterisation is red by running it against a
 copy with the block deleted (`FLEET_LIB_OVERRIDE` substitutes `lib.sh`;
 `FLEET_TS_OVERRIDE` lays a directory over `ts/src/`, or a case writes a stub
 into the fixture's `ts/src/lib/` after `fixture`). The bot is tested against
-`test/telegram-api.mts`, a fake Bot API that `TELEGRAM_API_BASE` points it at.
+`test/fakes/telegram-api.mts`, a fake Bot API that `TELEGRAM_API_BASE` points it at.
 The TypeScript side has its own unit tests beside the code: `cd ts && npm ci
 && npm run check && npm test`, green before every commit too; nothing under
 `ts/` needs `node_modules` at run time, so the live checkout never runs
@@ -417,7 +417,7 @@ over `warn`. Prompts on stdin, never argv. One task, one commit.
 - **The `claude` and `codex` CLIs** on `PATH`, logged in; the agents are
   spawned from `ts/src/lib/agents.ts`, not through an SDK.
 - **`gh` or `glab`**, logged in, only for a target with `MERGE_MODE=pr`.
-- **jq** only for `test-lib.sh`. Nothing at run time needs `jq` or `curl`
+- **jq** only for `test/suite.sh`. Nothing at run time needs `jq` or `curl`
   any more: the verdict parses JSON in TypeScript and the bot talks to
   Telegram through `fetch`.
 
@@ -445,7 +445,7 @@ telegram.sh         send | poll — the notifications and the phone commands (wr
 prompts/            the agents' prompts, README = the verdict contract
 skills/             the coordinator's procedures, linked by install-skills.sh (bash)
 update-agents.sh    the weekly CLI update (bash)
-test-lib.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
+test/suite.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
 systemd/            the two timer pairs       docs/          handoff, lessons, coordinators, trials, plans
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```

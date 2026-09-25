@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# test-lib.sh — tests for launch.sh and the other scripts, with fake agents.
+# test/suite.sh — tests for the fleet's commands, with fake agents.
 #
-#   bash test-lib.sh              run every case
-#   bash test-lib.sh blocked      run cases whose name contains "blocked"
+#   bash test/suite.sh              run every case
+#   bash test/suite.sh blocked      run cases whose name contains "blocked"
 #
 # No network, no npm, no models. Each case gets a fresh fixture:
 #
@@ -47,7 +47,7 @@
 set -uo pipefail
 
 if [[ -n "${FAKE_TRACE_DIR:-}" ]]; then
-  echo "test-lib: FAKE_TRACE_DIR is set — refusing to run inside a fixture (nested invocation)" >&2
+  echo "suite: FAKE_TRACE_DIR is set — refusing to run inside a fixture (nested invocation)" >&2
   exit 3
 fi
 
@@ -66,7 +66,7 @@ if [[ -z "${FLEET_TEST_CLEAN:-}" ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FLEET_HOME="$HERE"                    # the fleet under test is this working tree
+FLEET_HOME="$(dirname "$HERE")"       # the fleet under test is this working tree
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fleet-test.XXXXXX")"
 trap 'api_stop; rm -rf "$TMP"' EXIT
 
@@ -92,9 +92,9 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
   for name in claude codex npm; do
-    got="$(PATH="$fleet/test:$PATH" command -v "$name")"
-    if [[ "$got" != "$fleet/test/$name" ]]; then
-      echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
+    got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
+    if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
+      echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
       exit 3
     fi
   done
@@ -122,7 +122,7 @@ copy_fleet() {                        # copy_fleet <src> <dst>
 # case may rewrite it between polls.
 api_start() {                         # api_start → API_BASE
   if [[ ! -s "$TRACE/api-port" ]]; then
-    ( cd "$FX" && exec node "$FLEET/test/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
+    ( cd "$FX" && exec node "$FLEET/test/fakes/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
     echo $! > "$FX/api.pid"
     local i=0
     until [[ -s "$TRACE/api-port" ]]; do
@@ -174,7 +174,7 @@ fixture() {                           # fixture <case-name> [story-status] → F
   cat > "$REPO/.fleet/config" <<EOF
 BASE_BRANCH=base
 INSTALL_CMD=true
-VITEST_CMD=$FLEET/test/vitest
+VITEST_CMD=$FLEET/test/fakes/vitest
 BUILD_CMD=true
 LINT_CMD=true
 SEED_FILES=.env.local
@@ -220,7 +220,7 @@ EOF
 # that needs one changed puts it in "$@", and env takes the last assignment,
 # so the case's VAR=value wins over the defaults here — and, inside the
 # script, over the config file.
-FAKES() { printf '%s' "$FLEET/test:$PATH"; }
+FAKES() { printf '%s' "$FLEET/test/fakes:$PATH"; }
 run() {                               # run <story-id> [VAR=value …] → LOG RC
   local id="$1"; shift
   LOG="$FX/launch.log"
@@ -1383,7 +1383,7 @@ case_71_auto_merge_can_be_turned_off() {
 # is not in CASES and therefore never runs. Both observed, 18 Sep.
 case_72_lessons_name_real_cases() {
   CASE="72 every lesson that claims an instrument still has it"
-  local lessons="$FLEET_HOME/docs/lessons.md" lib="$FLEET_HOME/test-lib.sh"
+  local lessons="$FLEET_HOME/docs/lessons.md" lib="$FLEET_HOME/test/suite.sh"
   assert_file "$lessons" "the lessons file is where it is expected"
   local names cases_block missing="" unrun="" n
   cases_block="$(sed -n '/^CASES=(/,/)$/p' "$lib")"
@@ -1394,7 +1394,7 @@ case_72_lessons_name_real_cases() {
     grep -qE "^$n\(\)" "$lib" || { missing+="$n "; continue; }
     [[ "$n" == case_* ]] && ! grep -q "$n" <<< "$cases_block" && unrun+="$n "
   done <<< "$names"
-  assert_eq "$missing" "" "lessons naming something that is not in test-lib"
+  assert_eq "$missing" "" "lessons naming something that is not in the suite"
   assert_eq "$unrun"   "" "lessons naming a case that is not in CASES, so never runs"
 }
 
@@ -1843,7 +1843,7 @@ case_86_probe_dir() {
 case_84_prompts_carry_the_targets_facts() {
   CASE="84 the reviewer is told the target's commands, not npm's"; fixture c84
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "Run: $FLEET/test/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
+  assert_grep "Run: $FLEET/test/fakes/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
   assert_not_grep 'npm test' "$TRACE/codex-prompt-1" "and not khaita's"
 
   CASE="84b REPO_RULES reaches the builder through the rules"; fixture c84b
@@ -1863,7 +1863,7 @@ case_84_prompts_carry_the_targets_facts() {
   # the build or the lint exist. Red while the rules name only the tests.
   CASE="84d the builder is told to run the baseline's three commands"; fixture c84d
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "baseline, on your final commit: $FLEET/test/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
+  assert_grep "baseline, on your final commit: $FLEET/test/fakes/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
 }
 
 # One fleet, many repos. `--all` walks the registry and drains each repo in
@@ -1918,7 +1918,7 @@ case_89_shared_parent_dir_refused() {
 # before any fixture is built. This case is the suite looking at its own
 # environment — the only vantage point from which the leak is visible.
 #
-# Red when the re-exec at the top is deleted: MAX_ROUNDS=1 bash test-lib.sh 88
+# Red when the re-exec at the top is deleted: MAX_ROUNDS=1 bash test/suite.sh 88
 case_88_suite_env_is_clean() {
   CASE="88 the suite runs under a clean environment"
   local leaked="" v

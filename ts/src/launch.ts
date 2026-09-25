@@ -38,7 +38,7 @@
 // mutation in a clean tree, classifies, and vetoes a PASS on any surviving
 // mutation, any uncovered AC, or a red baseline (lib/verdict.ts). Evidence
 // goes to .review/<id>/round-N/ and is committed. See prompts/README.md,
-// "The verdict contract". test-lib.sh exercises every path with fake agents.
+// "The verdict contract". test/suite.sh exercises every path with fake agents.
 //
 // This file keeps the bash launcher's order and its every line of output;
 // the seam-4 record in docs/plans/2026-09-23-typescript-migration.md lists

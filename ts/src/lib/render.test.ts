@@ -19,7 +19,7 @@ function prompt(name: string, text: string): string {
 
 /** The rendered text, or the thrown RenderError's XX line, or the
  *  unsubstituted-placeholder warning line render.sh printed (render.sh:44)
- *  prefixed to a successful render — the same shape case 10 (test-lib.sh)
+ *  prefixed to a successful render — the same shape case 10 (test/suite.sh)
  *  captured by running the bash and this side against each other, until
  *  render.sh retired with write-story.sh (seam 7). This file was proved
  *  byte-for-byte equal to render.sh through seam 6; it is the sole

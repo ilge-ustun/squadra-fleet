@@ -83,7 +83,7 @@ human should run instead.
 | `in_progress` | wait. `status.sh <repo> <id>` shows the round; never touch its worktree `../wt-<id>` |
 | `done` with `PASS`, `on epic` or `awaiting merge` | `fleet-land` |
 | `done` with `FAIL`, `needs_human`, `blocked`, `UNPARSEABLE`, `SPEC` | `fleet-verdict` |
-| a harness defect, a missing seam, a test-lib case to write | `fleet-develop` |
+| a harness defect, a missing seam, a suite case to write | `fleet-develop` |
 
 ## The loop, once
 

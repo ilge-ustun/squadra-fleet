@@ -12,7 +12,7 @@
 //   probes     no probe RED — a probe is the inverse of a mutation
 //
 // This file holds the rule and nothing else, so a test can replace it
-// (test-lib case 108) and prove the launcher's verdict comes from here.
+// (suite case 108) and prove the launcher's verdict comes from here.
 import type { Baseline, MutRow, ProbeRow, Verdict } from './types.ts';
 
 export interface VerdictInput {

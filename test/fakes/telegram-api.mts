@@ -1,20 +1,17 @@
-// test/telegram-api.mts — a fake Telegram Bot API for test-lib.sh (seam 8).
+// test/fakes/telegram-api.mts — a fake Telegram Bot API for test/suite.sh.
 //
-//   node test/telegram-api.mts <trace-dir> <updates-file>
+//   node test/fakes/telegram-api.mts <trace-dir> <updates-file>
 //
-// test/curl shadowed `curl` on PATH, and that was the whole interception:
-// the bash bot never reached api.telegram.org. Node's fetch never looks at
-// PATH, so the TypeScript bot is pointed here instead — TELEGRAM_API_BASE
-// names this server on a loopback port — and this records what test/curl
-// recorded, in the same two-file shape, so a case can read either:
+// Node's fetch never looks at PATH, so a fake on PATH cannot intercept the
+// bot; it is pointed here instead — TELEGRAM_API_BASE names this server on a
+// loopback port — and this records every request in two files a case reads:
 //
 //   <trace>/api-calls     one line per request: `api <url>`, so a test can count
 //                         them or grep the query string (offset=…)
 //   <trace>/api-args-N    the URL, then for a sendMessage each decoded form
 //                         field as key=value on its own line — text= first
 //                         on its line, then the message's remaining lines as
-//                         they are, exactly where the message text was read
-//                         from curl's --data-urlencode arguments before
+//                         they are
 //
 // Two requests exist:
 //
