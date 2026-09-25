@@ -90,14 +90,17 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   merge.sh               story → epic, --land, --epic, MERGE_MODE — wrapper over ts/src/bin/merge.ts
   revert.sh reset.sh     undo a story's merge; a story back to the queue — wrappers over ts/src/bin/{revert,reset}.ts
   run-queue.sh           drain every ready story, --all, --max — wrapper over ts/src/bin/run-queue.ts
+  lint-story.sh          mechanical checks before any agent runs — wrapper over ts/src/bin/lint-story.ts
+  new-epic.sh            origin-only epic branch creation — wrapper over ts/src/bin/new-epic.ts
+  write-story.sh         intent → draft story, one agent — wrapper over ts/src/bin/write-story.ts
   ts/                    the TypeScript side: src/launch.ts (the story loop), src/merge.ts, src/revert.ts, src/reset.ts,
-                         src/run-queue.ts, src/classifier.ts, src/status.ts, src/status-views.ts, src/lib/{agents,render,
-                         baseline,scope,evidence,lock,config,verdict,machine-block,review,frontmatter,procs,git,proc,log,
-                         die,exit-hooks}.ts, src/bin/{launch,merge,revert,reset,run-queue,mutation,status}.ts; run by
-                         node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
+                         src/run-queue.ts, src/lint-story.ts, src/new-epic.ts, src/write-story.ts, src/classifier.ts,
+                         src/status.ts, src/status-views.ts, src/lib/{agents,render,baseline,scope,evidence,lock,config,
+                         verdict,machine-block,review,frontmatter,procs,git,proc,log,die,exit-hooks}.ts,
+                         src/bin/{launch,merge,revert,reset,run-queue,lint-story,new-epic,write-story,mutation,status}.ts;
+                         run by node as is, no build, no runtime deps; fixtures/ hold the goldens and their generators
   .nvmrc                 v24.20.0 — the Node the systemd units carry on PATH
-  write-story.sh lint-story.sh new-epic.sh
-  telegram.sh            send | poll           render.sh          render_prompt() for write-story.sh (the launcher: ts/src/lib/render.ts)
+  telegram.sh            send | poll — bash still, prompts rendered via ts/src/lib/render.ts
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
   install-skills.sh      links skills/ into ~/.claude/skills; Codex reads .agents/skills (→ skills/) in this repo only
@@ -296,8 +299,6 @@ none run yet — the next story's round count is the first data point for A2.
   `PreToolUse` hook on `git commit` running `VITEST_CMD` would have saved
   019's round 1 (baseline test and build RED). Decide after a few stories
   show whether A2 already brought rounds down.
-- **`next_ready` in `launch.sh` does not skip `TEMPLATE.md`** while
-  `run-queue.sh` does. Pre-existing; worth its own story.
 - **`.blocked/` has never fired from a builder** in nineteen stories; the
   writer escalates instead. Covered by `test-lib`, never exercised.
 - **Lanes.** One. The trigger, stated in advance: ≥3 stories `ready` for a
@@ -309,8 +310,10 @@ none run yet — the next story's round count is the first data point for A2.
   edit-while-running hazard (`launch.sh` execs node, which loads everything
   first). What the bash had hidden and the port found: `render.sh`'s `&`
   corruption (L-28), the builder's non-JSON output going unwarned, the
-  `.result` writer living in a CLI verb. `telegram.sh`, `merge.sh`,
-  `run-queue.sh` and the small scripts stay bash and keep the ceiling.
+  `.result` writer living in a CLI verb, a `TEMPLATE.md` a bare launch could
+  pick (L-30). Seams 5-7 closed it for `merge.sh`, `revert.sh`, `reset.sh`,
+  `run-queue.sh`, `lint-story.sh`, `new-epic.sh` and `write-story.sh`.
+  `telegram.sh` is what's left.
 
 ---
 

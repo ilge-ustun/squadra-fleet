@@ -49,8 +49,8 @@ re-executed under `env -i`. No network, no model.
 - **Prompts go to agents on stdin, never argv** — argv has a 128 KB ceiling
   and a round-2 prompt exceeded it (L-18).
 - **Placeholders in `prompts/*.md` are `{{NAME}}`**, substituted by
-  `render.sh`; a new one needs the substitution, the empty-guard list, and
-  the table in `prompts/README.md`.
+  `ts/src/lib/render.ts`'s `renderPrompt`; a new one needs the
+  substitution, the empty-guard list, and the table in `prompts/README.md`.
 - **Fakes must shadow the real binaries** (`shadow_check`), or a case runs
   the real agent on real quota — it happened (L-14).
 - **Never run the fleet against itself**; a target is another repo.
