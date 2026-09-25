@@ -1,8 +1,8 @@
 // fleet run-queue <repo>|--all [--max N] — every `ready` story in turn until
 // the queue is empty (src/run-queue.ts):
 //
-//   fleet run-queue khaita            drain the queue of the repo `khaita`
-//   fleet run-queue khaita --max 3    at most three stories
+//   fleet run-queue <repo>            drain the queue of one repo
+//   fleet run-queue <repo> --max 3    at most three stories
 //   fleet run-queue --all             every registered repo, one after another
 //
 // Every die is 1 with an XX line on stderr; a normal drain, an empty queue

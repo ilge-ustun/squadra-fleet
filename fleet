@@ -2,7 +2,7 @@
 #
 # fleet <command> [args…] — the fleet's one entry point; `fleet help` lists
 # the commands. Every command that touches a target names the repo first:
-# `fleet status khaita`, `fleet merge khaita --epic epic/search`.
+# `fleet status <repo>`, `fleet merge <repo> --epic epic/<name>`.
 #
 # A command is a TypeScript program, ts/src/bin/<command>.ts, run by node as
 # is — no build, no runtime dependencies — or one of the two bash chores in

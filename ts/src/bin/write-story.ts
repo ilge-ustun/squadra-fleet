@@ -1,6 +1,6 @@
 // fleet write-story <repo> <story-id> "<what you want>" [--base epic/<name>]
 //
-//   fleet write-story khaita 011 "the dark-theme toggle shows a sun, should be a moon" --base epic/ui-polish
+//   fleet write-story <repo> 011 "the dark-theme toggle shows a sun, should be a moon" --base epic/ui-polish
 //
 // An intent → a draft story, linted (src/write-story.ts). Authoring a story
 // by hand costs a careful session — read the code, verify every citation,
