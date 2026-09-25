@@ -422,7 +422,7 @@ revert.sh           undo a story's merge      reset.sh       back to the queue  
 telegram.sh         send | poll — the notifications and the phone commands, bash still (prompts render via ts/src/lib/render.ts)
 prompts/            the agents' prompts, README = the verdict contract
 skills/             the coordinator's procedures, linked by install-skills.sh
-test-lib.sh         the suite                 test/          fake claude, codex, vitest, curl, npm
+test-lib.sh         the suite                 test/          fake claude, codex, vitest, npm; telegram-api.mts
 systemd/            the two timer pairs       docs/          handoff, lessons, coordinators, trials, plans
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```

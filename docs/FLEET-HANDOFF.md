@@ -104,7 +104,7 @@ at. It is **never itself a target**. The checkout is live: the timers run it.
   prompts/               rules, build-round1/2, build-after-spec, review, write-story, README
   skills/                fleet-coordinate, fleet-story, fleet-verdict, fleet-land, fleet-develop
   install-skills.sh      links skills/ into ~/.claude/skills; Codex reads .agents/skills (→ skills/) in this repo only
-  test-lib.sh test/      the suite and the fakes (claude, codex, vitest, curl, npm)
+  test-lib.sh test/      the suite and the fakes (claude, codex, vitest, npm; telegram-api.mts, the fake Bot API)
   systemd/               the two timer pairs, live since 20 Sep
   repos/<name>.env       the registry — REPO_PATH=/abs/path and nothing else
   .env.fleet .bot-offset machine-local, gitignored: the bot's token and cursor

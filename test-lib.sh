@@ -91,7 +91,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm curl; do
+  for name in claude codex npm; do
     got="$(PATH="$fleet/test:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/$name" ]]; then
       echo "test-lib: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -112,14 +112,14 @@ copy_fleet() {                        # copy_fleet <src> <dst>
   rm -rf "$2/.env.fleet" "$2/.bot-offset"
 }
 
-# The fake Telegram API (seam 8). test/curl shadows curl on PATH, but Node's
-# fetch never looks at PATH, so the TypeScript bot is pointed by
+# The fake Telegram API (seam 8). The bash bot's curl was shadowed by a fake
+# on PATH; Node's fetch never looks at PATH, so the bot is pointed by
 # TELEGRAM_API_BASE at test/telegram-api.mts on a loopback port instead. One
 # server per fixture, started by the first bot call, stopped when the fixture
 # goes: a detached /merge sends its result after the poll that started it
 # has returned, and that late send must still find the recorder. It reads
 # $FX/updates.json on every getUpdates — the file `update` writes — so a
-# case may rewrite it between polls, as it did for test/curl.
+# case may rewrite it between polls.
 api_start() {                         # api_start → API_BASE
   if [[ ! -s "$TRACE/api-port" ]]; then
     ( cd "$FX" && exec node "$FLEET/test/telegram-api.mts" "$TRACE" "$FX/updates.json" ) &
@@ -136,11 +136,12 @@ api_stop() {
   [[ -n "${FX:-}" && -f "$FX/api.pid" ]] || return 0
   kill "$(cat "$FX/api.pid")" 2>/dev/null; rm -f "$FX/api.pid"
 }
-# What reached the API, from either recorder: test/curl's argv files while the
-# bot is bash, the fake API's request files once it is TypeScript.
-api_args()  { cat "$TRACE"/curl-args-* "$TRACE"/api-args-* 2>/dev/null; }
-api_calls() { cat "$TRACE"/curl-calls "$TRACE"/api-calls 2>/dev/null; }
-api_clear() { rm -f "$TRACE"/curl-args-* "$TRACE"/api-args-*; }
+# What reached the API: one request per api-args-N, the URL then the decoded
+# form fields, text= first on its line and a multi-line message's remaining
+# lines as they are; api-calls has one `api <url>` line per request.
+api_args()  { cat "$TRACE"/api-args-* 2>/dev/null; }
+api_calls() { cat "$TRACE"/api-calls 2>/dev/null; }
+api_clear() { rm -f "$TRACE"/api-args-*; }
 
 fixture() {                           # fixture <case-name> [story-status] → FX FLEET REPO TRACE
   api_stop
@@ -1147,8 +1148,8 @@ case_59_merge_refuses_integration_branch() {
 }
 
 # Phase D. The bot is both halves of the control plane: how the fleet reaches
-# a human and how the human reaches back. test/curl shadows curl and
-# TELEGRAM_API_BASE names the fake API, so no case here touches the network.
+# a human and how the human reaches back. TELEGRAM_API_BASE names the fake
+# API, so no case here touches the network.
 
 bot() {                               # bot <verb> [args…] → BLOG BRC
   BLOG="$FX/bot.log"
@@ -3448,15 +3449,15 @@ case_133_telegram_api_fake() {
   assert_eq "$(sent)" 1 "one sendMessage recorded"
   assert_file "$TRACE/api-args-1" "as the first request"
   assert_grep '^chat_id=42$' "$TRACE/api-args-1" "the chat id, decoded"
-  assert_grep '^text=<pre>row one$' "$TRACE/api-args-1" "the text's first line, where curl's argv had it"
+  assert_grep '^text=<pre>row one$' "$TRACE/api-args-1" "the text's first line"
   assert_grep '^row two</pre>$' "$TRACE/api-args-1" "and its second line, as it was"
   assert_grep '^parse_mode=HTML$' "$TRACE/api-args-1" "the parse mode"
   assert_contains "$(api_calls)" "getUpdates?offset=7" "the poll's query string is in the call log"
   assert_eq "$(api_calls | grep -c '^api ')" 2 "two calls in all"
 }
 
-# Seam 8. Two states test/curl could not express: Telegram unreachable at
-# all (FAKE_CURL=fail existed, no case used it), and a poll answered with
+# Seam 8. Two states the bash-era fake curl could not express: Telegram
+# unreachable at all (its FAKE_CURL=fail was never used), and a poll answered with
 # something other than updates. Both are warnings and exit 0 — a bot whose
 # API is gone must say so and end normally, as fleet-bot.service runs it
 # every minute and a failed unit is noise, not information — and neither
