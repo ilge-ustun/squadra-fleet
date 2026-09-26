@@ -99,12 +99,6 @@ deploys — belongs to that target, not here.
 - **The queue's own merge takes no fleet lock.** The bot holds it around
   `/merge`; the queue's `fleet merge`, after its launch has exited and let
   go of the launch lock, commits the `merged:` record without it.
-- **`/run` holds the bot's poll for the whole drain.** `QUEUE_START_CMD`
-  is `systemctl --user start fleet-queue.service`, which waits for the
-  oneshot to finish; the bot's own two-minute start timeout then kills
-  the poll (journal: 24 Sep 18:20, 25 Sep 11:27). The drain itself runs.
-  `--no-block` is the likely fix; `/fallback` does not start a drain for
-  this reason.
 - **The runner contract.** `VITEST_CMD` must accept
   `<selector> --reporter json --outputFile <f>` and write vitest's JSON
   shape. Another runner needs an adapter in `ts/src/lib/vitest-json.ts`,
@@ -145,6 +139,11 @@ deploys — belongs to that target, not here.
   one launcher per repo nothing else writes a `ready` story's status
   (`/promote` and `/answer` refuse `in_progress`), so it would guard
   against a writer that does not exist. A second lane needs it.
+- **`/run` enqueues, never waits.** `QUEUE_START_CMD` defaults to
+  `systemctl --user start --no-block fleet-queue.service`. A oneshot's
+  `start` waits for the whole unit, and the poll's two-minute timeout
+  killed it mid-drain with its reply unsent (L-33). A drain already running
+  makes the start a no-op; the reply is still true.
 - **What stays bash:** `./fleet` itself, `bin/lib.sh`'s `load_repo` (a
   target's `.fleet/config` is sourced bash), the two chores in `bin/`, and
   the suite, which runs every command end to end with fake agents.
