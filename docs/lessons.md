@@ -539,3 +539,35 @@ SIGKILLed launcher left running, since those do not hold the lock.
 without the lock: `--reap` returned a story under review to `ready`; 137c
 stays red with the two-tree scan alone), `case_138_reap_sees_a_storys_trees`,
 `case_139_bot_leaves_in_progress_alone`, `case_140_queue_leaves_a_busy_repo`.
+
+### L-32 — a provider's refusal was read as the reviewer's verdict
+
+On 21 Sep (khaita 015, round 3) codex's whole stream was a refusal:
+`{"type":"error","message":"You've hit your usage limit … try again at
+2:17 PM."}` and a `turn.failed`. The launcher kept only `agent_message`
+items, found none, and scored the round UNPARSEABLE — a reviewer failure.
+The round was spent, the builder ran again on a placeholder "review", and
+the phone got `015 needs_human — ` with no reason at all. A human read the
+raw stream, found the quota, and set the story back to ready an hour
+later; round 4 then rebuilt on that placeholder.
+
+**Lesson:** "the reviewer said nothing we can parse" and "nobody reviewed"
+are different outcomes with different owners. The first is the reviewer's
+and costs a round; the second is the provider's, costs nothing, and is
+news for a human. An extractor that keeps only the happy-path items cannot
+tell them apart.
+
+**Prevention:** `reviewerRefusal` reads the stream: an `error` or
+`turn.failed` and no `turn.completed` is a refusal. The round is not
+counted, line 3 says `UNAVAILABLE` (a type `computeVerdict` cannot return),
+`not_before` holds codex's own reset (its session rollouts, else its
+message), the queue pauses until the human chooses `/wait` or `/fallback`,
+and the resumed launch reviews the head with no builder round. Claude's
+refusal of the builder is detected the same way (`claudeRefusal`) and only
+reported, as the human decided.
+
+**Enforced by:** `case_141_refused_reviewer_costs_no_round` (red against the
+launcher before: UNPARSEABLE, a second builder round, the generic message),
+`case_142_refused_story_resumes_at_its_review`,
+`case_143_queue_pauses_on_a_refused_review`, `case_144_bot_wait_and_fallback`,
+`case_145_builder_refused_by_claude`, `case_146_fallback_reviewer_is_claude`.

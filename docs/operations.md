@@ -99,8 +99,12 @@ deploys — belongs to that target, not here.
 - **The queue's own merge takes no fleet lock.** The bot holds it around
   `/merge`; the queue's `fleet merge`, after its launch has exited and let
   go of the launch lock, commits the `merged:` record without it.
-- **Codex quota.** `REVIEWER_MODEL` exists; nothing falls back
-  automatically when the reviewer's model is out of quota.
+- **`/run` holds the bot's poll for the whole drain.** `QUEUE_START_CMD`
+  is `systemctl --user start fleet-queue.service`, which waits for the
+  oneshot to finish; the bot's own two-minute start timeout then kills
+  the poll (journal: 24 Sep 18:20, 25 Sep 11:27). The drain itself runs.
+  `--no-block` is the likely fix; `/fallback` does not start a drain for
+  this reason.
 - **The runner contract.** `VITEST_CMD` must accept
   `<selector> --reporter json --outputFile <f>` and write vitest's JSON
   shape. Another runner needs an adapter in `ts/src/lib/vitest-json.ts`,
@@ -124,6 +128,15 @@ deploys — belongs to that target, not here.
   (L-14). Switching would first have to show the fakes standing in through
   the SDKs' executable-path options, subscription login working through the
   bundled CLIs, and what `npm ci` in the live checkout costs.
+- **A refused agent: pause, and the human chooses.** When the reviewer's
+  provider refuses the call, the round is not counted, the story waits at
+  `needs_human` with line 3 `UNAVAILABLE`, the queue starts nothing, and
+  one message offers `/wait` (hold until the reset, then review this story
+  first) or `/fallback` (Claude reviews it). Nothing falls back on its
+  own: builder and reviewer on different vendors is the check, and giving
+  that up is the human's call, per story (L-32). When Claude refuses the
+  builder, a message is all that follows — no retry, no fallback, no hold
+  (the human's decision, 25 Sep).
 - **One launch per repo: a lock, not a claim.** `fleet launch` holds
   `<target>/.git/fleet-launch.lock` for its whole life; another launch —
   a drain's `--reap` included — says who holds it, exits 75 and touches

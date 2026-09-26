@@ -13,6 +13,13 @@
 #   FAKE_REVIEWER=garbage              no line the launcher can parse → UNPARSEABLE
 #   FAKE_REVIEWER=silent               a stream with no agent_message at all
 #   FAKE_REVIEWER=hang                 never returns — for the agent-timeout case
+#   FAKE_REVIEWER=limit                the provider refused: exactly the stream codex
+#                                      printed on 21 Sep (khaita 015 round 3) — no
+#                                      turn.completed, nothing under .review-out/ —
+#                                      and exit FAKE_REVIEWER_EXIT (default 1)
+#                                      FAKE_CODEX_RESETS_AT=<epoch> also writes a
+#                                      rollout whose codex window is at 100% and
+#                                      resets then, as the real sessions carry it
 #   FAKE_REVIEWER=gate                 parks, its cwd in the reviewer worktree, until
 #                                      $FAKE_TRACE_DIR/gate-open exists, then acts as
 #                                      FAKE_GATE_THEN (default PASS) — a launcher held
@@ -63,6 +70,23 @@ if [[ -n "${FAKE_REVIEWER_USED:-}" ]]; then
 fi
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
 printf '%s\n' "$@" > "$FAKE_TRACE_DIR/codex-args-$n"
+
+if [[ "$FAKE_REVIEWER" == limit ]]; then
+  if [[ -n "${FAKE_CODEX_RESETS_AT:-}" ]]; then
+    d="${CODEX_HOME:?FAKE_CODEX_RESETS_AT needs CODEX_HOME}/sessions/2026/09/21"
+    mkdir -p "$d"
+    jq -cn --argjson r "$FAKE_CODEX_RESETS_AT" \
+      '{type:"event_msg", payload:{type:"token_count", rate_limits:{limit_id:"codex", primary:{used_percent:100.0, window_minutes:300, resets_at:$r}, secondary:{used_percent:16.0, window_minutes:10080, resets_at:($r + 586800)}}}}' \
+      > "$d/rollout-fake-limit-$n.jsonl"
+  fi
+  msg="You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:17 PM."
+  echo "Reading prompt from stdin..." >&2
+  jq -cn '{type:"thread.started", thread_id:"01a0c3a2-5a0d-7a33-a3d4-55f3ec6edc49"}'
+  jq -cn '{type:"turn.started"}'
+  jq -cn --arg m "$msg" '{type:"error", message:$m}'
+  jq -cn --arg m "$msg" '{type:"turn.failed", error:{message:$m}}'
+  exit "${FAKE_REVIEWER_EXIT:-1}"
+fi
 
 if [[ "$FAKE_REVIEWER" == gate ]]; then
   until [[ -e "$FAKE_TRACE_DIR/gate-open" ]]; do sleep 0.05; done
