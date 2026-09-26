@@ -26,3 +26,11 @@ export function procsInWorktree(path: string): string[] {
   }
   return pids;
 }
+
+/** The two trees a story's agents work in, siblings of the target: the
+ *  builder's `wt-<id>` and the reviewer's `wt-<id>-review`. Liveness looks
+ *  in both — on 21 Sep a reap that looked only in the first returned a story
+ *  under review to the queue (L-31). */
+export function storyTrees(root: string, id: string): [string, string] {
+  return [`${root}/../wt-${id}`, `${root}/../wt-${id}-review`];
+}

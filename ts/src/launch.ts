@@ -53,7 +53,7 @@ import { withFleetLock } from './lib/lock.ts';
 import { dieMessage, log, out, warn } from './lib/log.ts';
 import { REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
 import { runBashTo } from './lib/proc.ts';
-import { procsInWorktree as realProcsInWorktree } from './lib/procs.ts';
+import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.ts';
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
@@ -181,6 +181,10 @@ export interface LaunchOptions {
    *  or SIGHUP). The normal exit runs it through `finally`. */
   onExit: (fn: () => void) => void;
   procsInWorktree?: (path: string) => string[];
+  /** The launch lock bin/launch.ts took before calling (lib/lock.ts): one
+   *  launch per repo. Told the story once one is selected, so a launch that
+   *  finds the lock held can say what it is behind. */
+  launchLock: { name(what: string): void };
 }
 
 export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number> {
@@ -241,18 +245,19 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     }
   };
 
-  /** A story left in_progress with nothing running in its worktree goes
-   *  back to the queue; one with live processes is not an orphan and the run
-   *  stops. Found by cwd (L-04). */
+  /** A story left in_progress goes back to the queue unless something still
+   *  runs in one of its trees, found by cwd (L-04). Under the launch lock no
+   *  launcher is alive while this runs, so such a process is an agent whose
+   *  launcher is gone, still at work on the story: the run stops (L-31). */
   const reapOrphans = (): void => {
     for (const id of storyFiles()) {
       if (storyField(root, id, 'status') !== 'in_progress') continue;
-      const wt = `${root}/../wt-${id}`;
-      if (isDir(wt)) {
+      for (const wt of storyTrees(root, id)) {
+        if (!isDir(wt)) continue;
         const pids = procs(wt);
-        if (pids.length > 0) throw new Die(`story ${id}: still running in ${wt} (pids: ${pids.map((p) => `${p} `).join('')}) — not an orphan`);
+        if (pids.length > 0) throw new Die(`story ${id}: its launcher is gone but processes still run in ${wt} (pids: ${pids.join(' ')}) — kill them by cwd, then run again`);
       }
-      warn(`orphan: ${id} was in_progress, nothing running in its worktree — returning to queue`);
+      warn(`orphan: ${id} was in_progress, nothing running in its trees — returning to queue`);
       setStatus(id, 'ready');
     }
   };
@@ -280,6 +285,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     log('queue empty — nothing ready');
     return 0;
   }
+  o.launchLock.name(`story ${storyId}`);
   const storyFile = `${root}/.stories/${storyId}.md`;
   if (!isFile(storyFile)) throw new Die(`no story file: ${storyFile}`);
 

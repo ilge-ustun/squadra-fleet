@@ -30,7 +30,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 import { loadRepo as loadRepoThroughBash, type RepoConfig } from './lib/config.ts';
 import { readEnvFile } from './lib/env-file.ts';
-import { replaceFrontmatterField } from './lib/frontmatter.ts';
+import { replaceFrontmatterField, storyField } from './lib/frontmatter.ts';
 import { add, commit, pushQuiet, stagedIsEmpty } from './lib/git.ts';
 import { lockPath, withFleetLock } from './lib/lock.ts';
 import { log as logLine, warn as warnLine } from './lib/log.ts';
@@ -324,8 +324,18 @@ function cmdWhy(cfg: RepoConfig, id: string): string {
   return machineBlockBody(readFileSync(f, 'utf8'));
 }
 
+/** While a story is in_progress its status is the launcher's: neither verb
+ *  may write `ready` over it. A launcher that died leaves it to the next
+ *  drain's reap, which checks the story's trees first (L-31). */
+function launcherHas(root: string, id: string): string | undefined {
+  if (storyField(root, id, 'status') !== 'in_progress') return undefined;
+  return `${id} is in_progress — a launcher has it; if that launcher died, the next drain returns it to the queue`;
+}
+
 function cmdPromote(cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
+  const running = launcherHas(cfg.root, id);
+  if (running !== undefined) return running;
   const rel = `.stories/${id}.md`;
   replaceFrontmatterField(join(cfg.root, rel), 'status', 'ready');
   add(cfg.root, rel);
@@ -337,6 +347,8 @@ function cmdPromote(cfg: RepoConfig, id: string): string {
 
 function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
+  const running = launcherHas(cfg.root, id);
+  if (running !== undefined) return running;
   const b = join(cfg.root, '.blocked', `${id}.md`);
   if (!existsSync(b)) return `${id} is not blocked — nothing is waiting for an answer`;
   appendFileSync(b, `\n## Answer (telegram, ${isoSeconds(c.deps.now())})\n\n${text}\n`);

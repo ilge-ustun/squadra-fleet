@@ -79,8 +79,10 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   <repo> <id> <text>`. A product question is theirs; a technical one you
   can answer from the code, say so and let them send it.
 - **`in_progress` for longer than `AGENT_TIMEOUT` (default 30 min per
-  agent call) with no new round** → the launcher may be dead. Check
-  `ps`, the `.runs/` log, and report; do not start another.
+  agent call) with no new round** → the launcher may be dead. A live one
+  holds `<target>/.git/fleet-launch.lock` (the file names its pid and
+  story; `flock -n <file> true` fails while it is held). Check `ps`, the
+  `.runs/` log, and report; do not start another.
 - **A PASS you doubt.** Read `Known weakness` in the story and the probes
   the reviewer left. What the criteria did not instrument is not verified;
   say so to the human before they land it. Human verification steps are in

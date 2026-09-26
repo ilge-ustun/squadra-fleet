@@ -507,3 +507,35 @@ invocation, the queue's drain — reads through it. There is now one
 real `launch.ts` before the fix: a bare launch with `TEMPLATE.md` at
 `status: ready` and nothing else ready actually ran the pipeline against
 it, leaving it `needs_human`).
+
+### L-31 — a scan for signs of life is not a lock
+
+On 21 Sep (khaita 015) two launchers ran one story. A launch started by
+hand was in its review phase when a queue drain began; the drain's
+`--reap` looked for processes in `wt-015`, found none — the reviewer, its
+install and its baseline all run in `wt-015-review`, and the launcher's own
+node process runs in neither — called the story an orphan, set it `ready`
+(390be3f) and claimed it again (7fe3750). Both launchers then worked on
+015 at once.
+
+The reap judged liveness by scanning one of the story's two trees, and a
+scan of both still cannot see a launcher between agents: running git,
+computing the verdict, waiting up to 120 s on the fleet lock at a status
+commit.
+
+**Lesson:** "is anyone still working on this?" is answered by something the
+worker holds, not by looking for traces of its work. A process scan answers
+a narrower question — were agents left behind — and only where it looks.
+
+**Prevention:** `fleet launch` takes `.git/fleet-launch.lock` before it
+reads or reaps anything and holds it until it exits; the kernel drops it
+however the process ends. Another launch, a drain's `--reap` included,
+exits 75 and touches nothing, and the queue leaves the repo to its next
+drain. The reap still scans — both trees now (`storyTrees`) — for agents a
+SIGKILLed launcher left running, since those do not hold the lock.
+`/promote` and `/answer` refuse an `in_progress` story.
+
+**Enforced by:** `case_137_one_launch_per_repo` (red against the launcher
+without the lock: `--reap` returned a story under review to `ready`; 137c
+stays red with the two-tree scan alone), `case_138_reap_sees_a_storys_trees`,
+`case_139_bot_leaves_in_progress_alone`, `case_140_queue_leaves_a_busy_repo`.

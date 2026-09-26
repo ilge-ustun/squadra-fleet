@@ -120,9 +120,12 @@ each journal entry is the whole picture.
 
 ## Running one story by hand while the timer is enabled
 
-Safe. The launcher refuses to touch a story whose worktree has live processes,
-and a `oneshot` service will not start a second drain. If you want to be sure
-the timer stays out of the way:
+Safe. A launcher holds the repo's launch lock for its whole life: a drain
+that starts meanwhile finds it held at its reap, says so in the journal and
+leaves the repo to the next drain, and a `oneshot` service will not start a
+second drain. The other way round, a hand launch while a drain is running
+exits 75 and touches nothing — wait for the drain. If you want to be sure the
+timer stays out of the way:
 
 ```bash
 systemctl --user stop fleet-queue.timer     # re-enable with `start`

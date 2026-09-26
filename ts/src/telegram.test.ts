@@ -281,6 +281,18 @@ describe('dispatch', () => {
     expect(git('log', '-1', '--format=%s')).toBe('story(900): answered, back to ready (telegram)');
     expect(git('status', '--porcelain')).toBe('');
   });
+  it('/promote and /answer leave an in_progress story alone — a launcher has it', () => {
+    const story = '---\nstatus: in_progress\nround: 1\n---\n\n# Story 900: fixture\n';
+    writeFileSync(join(root, '.stories', '900.md'), story);
+    writeFileSync(join(root, '.blocked', '900.md'), '# Question\n\nwhich?\n');
+    git('add', '.'); git('commit', '-q', '-m', 'in progress');
+    const refused = '900 is in_progress — a launcher has it; if that launcher died, the next drain returns it to the queue';
+    expect(dispatch(ctx(), '/promote t 900')).toBe(refused);
+    expect(dispatch(ctx(), '/answer t 900 go on')).toBe(refused);
+    expect(readFileSync(join(root, '.stories', '900.md'), 'utf8')).toBe(story);
+    expect(readFileSync(join(root, '.blocked', '900.md'), 'utf8')).toBe('# Question\n\nwhich?\n');
+    expect(git('log', '-1', '--format=%s')).toBe('in progress');
+  });
   it('/revert reports what fleet revert said, colours stripped, then the verdict', () => {
     expect(dispatch(ctx(), '/revert t 900')).toBe('ran revert t 900!\n900 reverted');
     expect(dispatch(ctx(), '/revert t 901')).toBe('no such story: 901');

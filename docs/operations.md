@@ -81,8 +81,6 @@ deploys — belongs to that target, not here.
 
 ## Harness gaps still open
 
-- **A lock around story selection.** A manual `fleet launch` and a queue
-  drain can both claim the same story. The queue lock covers drains only.
 - **Pre-commit hooks in the builder session.** A `PreToolUse` hook on
   `git commit` running `VITEST_CMD` would have saved at least one round
   (baseline test and build RED). Decide once enough stories show whether
@@ -90,8 +88,17 @@ deploys — belongs to that target, not here.
 - **`.blocked/` has never fired from a builder**; the writer escalates
   instead. The mechanism is tested (case 3), never exercised by a real agent
   (L-24).
-- **Lanes.** One. The trigger, stated in advance: ≥3 stories `ready` for a
-  day and peak RSS under 1.2 GB per lane. Needs the selection lock first.
+- **Lanes.** One, and enforced: the launch lock is the lane (L-31). The
+  trigger for a second, stated in advance: ≥3 stories `ready` for a day and
+  peak RSS under 1.2 GB per lane (one lane peaked at 1.8 GB on 25 Sep). A
+  second lane needs a second slot in the lock and a claim under the fleet
+  lock — two launchers could then pass the status check together.
+- **`fleet reset` and `fleet status` look only at `wt-<id>`.** `reset
+  --force` during a review removes the branch under a live launcher, and
+  `RUNNING` misses the review phase. `reset` should take the launch lock.
+- **The queue's own merge takes no fleet lock.** The bot holds it around
+  `/merge`; the queue's `fleet merge`, after its launch has exited and let
+  go of the launch lock, commits the `merged:` record without it.
 - **Codex quota.** `REVIEWER_MODEL` exists; nothing falls back
   automatically when the reviewer's model is out of quota.
 - **The runner contract.** `VITEST_CMD` must accept
@@ -117,6 +124,14 @@ deploys — belongs to that target, not here.
   (L-14). Switching would first have to show the fakes standing in through
   the SDKs' executable-path options, subscription login working through the
   bundled CLIs, and what `npm ci` in the live checkout costs.
+- **One launch per repo: a lock, not a claim.** `fleet launch` holds
+  `<target>/.git/fleet-launch.lock` for its whole life; another launch —
+  a drain's `--reap` included — says who holds it, exits 75 and touches
+  nothing, and the queue leaves the repo to its next drain (L-31). A
+  check-and-set claim under the fleet lock was weighed and left out: with
+  one launcher per repo nothing else writes a `ready` story's status
+  (`/promote` and `/answer` refuse `in_progress`), so it would guard
+  against a writer that does not exist. A second lane needs it.
 - **What stays bash:** `./fleet` itself, `bin/lib.sh`'s `load_repo` (a
   target's `.fleet/config` is sourced bash), the two chores in `bin/`, and
   the suite, which runs every command end to end with fake agents.

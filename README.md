@@ -223,7 +223,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
 | edit `status: ready` | `/promote <repo> <id>` | into the queue |
 | `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
-| `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session |
+| `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
 | `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
 | answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
 | `fleet check-mutation <repo> <patch…> [--wt <dir>]` | | the verdict's classifier on a working tree |
@@ -245,6 +245,13 @@ Run a launcher detached, never as a child of an interactive agent session:
 ```bash
 cd ~/work/fleet && setsid nohup bash -c './fleet launch <repo> <id>; echo "exit=$?"' > log 2>&1 < /dev/null &
 ```
+
+One launch per repo: a launcher holds `<target>/.git/fleet-launch.lock`
+from before it reads anything until it exits, however it exits. Another
+`fleet launch` — a drain's `--reap` included — prints who holds it (pid,
+story) and exits 75 having touched nothing, and the queue leaves the repo to
+its next drain. Exit codes: 0 a finished run, a blocked story, an empty
+queue, `--reap`; 1 a die; 75 another launch holds the repo.
 
 ## What a target provides
 
