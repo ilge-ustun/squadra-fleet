@@ -36,9 +36,12 @@ push; they cannot open a request — that is what the `gh`/`glab` logins are
 for.
 
 **Git identity and attribution:** each repo's `.git/config` `[user]` is
-the human's — `ilge ustun`, the GitHub noreply address in this repo, gmail
-in khaita-app. There is no global gitconfig, and a harness commit with no
-identity is fatal, so change the `[user]`, never unset it.
+the human's, as each host knows them: `ilge ustun` with the GitHub noreply
+address in this repo, `turrandott` with the GitLab noreply address
+(`5645500-turrandott@users.noreply.gitlab.com`) in khaita-app. A host
+always links its own noreply address to the account. There is no global
+gitconfig, and a harness commit with no identity is fatal, so change the
+`[user]`, never unset it.
 `~/.claude/settings.json` sets `attribution` to
 `{"commit": "", "pr": "", "sessionUrl": false}`; `builderArgv` passes the
 same with `--settings` to every claude the fleet starts.
