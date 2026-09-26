@@ -372,8 +372,9 @@ coordinate at all. It **promotes nothing and lands nothing**; it ends by
 naming the command. It **never touches tokens**.
 
 `docs/COORDINATORS.md` has the Codex recipe, the `model_providers` template
-for other providers, the trial protocol and the trials so far. The story
-commit carries a `Coordinator: <harness>/<model>` trailer.
+for other providers, the trial protocol and the trials so far. A
+coordinator names its harness and model in its hand-over message, never in
+a commit: commits and PRs carry the human's name only.
 
 ## What needs a human
 

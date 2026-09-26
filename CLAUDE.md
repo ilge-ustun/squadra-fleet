@@ -111,3 +111,7 @@ never runs `npm`.
 - Read the file, never only a diff hunk (L-09).
 - Prompts go to agents on stdin, never argv.
 - One task, one commit. Show `git status --short` with each.
+- Commits and PRs carry the human's name only: no `Co-Authored-By`,
+  `Claude-Session`, "Generated with" or model trailer. The model is
+  recorded in the Machine block and the round evidence, never in git; every
+  claude the fleet starts gets attribution off from `builderArgv` (case 147).

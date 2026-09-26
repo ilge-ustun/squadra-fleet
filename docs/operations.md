@@ -35,6 +35,14 @@ through a write-enabled deploy key bound to the host alias
 push; they cannot open a request — that is what the `gh`/`glab` logins are
 for.
 
+**Git identity and attribution:** each repo's `.git/config` `[user]` is
+the human's — `ilge ustun`, the GitHub noreply address in this repo, gmail
+in khaita-app. There is no global gitconfig, and a harness commit with no
+identity is fatal, so change the `[user]`, never unset it.
+`~/.claude/settings.json` sets `attribution` to
+`{"commit": "", "pr": "", "sessionUrl": false}`; `builderArgv` passes the
+same with `--settings` to every claude the fleet starts.
+
 **Memory, measured:** an interactive Claude Code session is ~530 MB; a Next
 build peaks near 1.4 GB. **Never run a launcher as a child of the session
 driving it** — the session's low-memory policy killed one mid-builder.
@@ -144,6 +152,13 @@ deploys — belongs to that target, not here.
   `start` waits for the whole unit, and the poll's two-minute timeout
   killed it mid-drain with its reply unsent (L-33). A drain already running
   makes the start a no-op; the reply is still true.
+- **Commits and PRs name the human only.** No `Co-Authored-By`,
+  `Claude-Session`, "Generated with" or model trailer, from the builder, a
+  coordinator or an interactive session (the human's decision, 26 Sep). The
+  model that built or reviewed a story is recorded in the Machine block and
+  the round evidence, where it is read; a coordinator names its own in the
+  hand-over message, which is what the Trials table is filled from. History
+  from before is left as it is.
 - **What stays bash:** `./fleet` itself, `bin/lib.sh`'s `load_repo` (a
   target's `.fleet/config` is sourced bash), the two chores in `bin/`, and
   the suite, which runs every command end to end with fake agents.

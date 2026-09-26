@@ -74,6 +74,8 @@ human should run instead.
   `.review/`, `.blocked/`, `.fleet/`. Product code is the builder's.
 - One task, one commit, with the reason in the message. Show
   `git status --short` when you report.
+- Commits and PRs name the human only: no `Co-Authored-By`,
+  `Claude-Session`, "Generated with" or model trailer.
 
 ## What happens next — the routing
 

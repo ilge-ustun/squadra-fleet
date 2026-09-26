@@ -120,19 +120,13 @@ commit — and the human promotes as usual. One row per trial, below:
 
 | column | what to record |
 |---|---|
-| date · harness · model | from the story commit's `Coordinator:` trailer |
+| date · harness · model | from the coordinator's hand-over message — git names the human only |
 | story | the id |
 | lint | errors and warnings after the coordinator's own review |
 | hand edits | what the human had to change before promoting, in one line |
 | rounds | rounds to PASS, from `fleet status` |
 | human-only actions | any attempt to promote, land, launch, deploy or read a token — the negative result that matters most |
 | notes | the drafting cost in wall-clock, anything surprising |
-
-Read the trials out of git later with:
-
-```bash
-git -C <target> log --format='%h %s%n%(trailers:key=Coordinator,valueonly)' -- .stories/
-```
 
 A coordinator that drafts well but promotes a story itself has failed the
 trial whatever the story looked like.

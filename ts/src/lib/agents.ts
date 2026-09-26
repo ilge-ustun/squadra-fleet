@@ -12,8 +12,15 @@ import { run } from './proc.ts';
 
 export const ALLOWED_TOOLS = 'Read,Write,Edit,Grep,Glob,Bash';
 
+/** Commits and PRs carry the human's name only: no Co-Authored-By, no
+ *  Claude-Session link, no "Generated with" line. Passed on the command line
+ *  so an unattended run does not depend on ~/.claude/settings.json; the
+ *  model stays recorded in the Machine block and the round evidence. */
+export const NO_ATTRIBUTION = '{"attribution":{"commit":"","pr":"","sessionUrl":false}}';
+
 export function builderArgv(o: { model: string; maxTurns: string; allowedTools?: string }): string[] {
-  return ['-p', '--model', o.model, '--max-turns', o.maxTurns, '--allowedTools', o.allowedTools ?? ALLOWED_TOOLS, '--output-format', 'json'];
+  return ['-p', '--model', o.model, '--max-turns', o.maxTurns, '--allowedTools', o.allowedTools ?? ALLOWED_TOOLS, '--output-format', 'json',
+    '--settings', NO_ATTRIBUTION];
 }
 
 /** --sandbox danger-full-access: bwrap cannot create network namespaces on

@@ -86,16 +86,18 @@ verified a replacement. After any edit:
 
 ```bash
 git -C <target> add .stories/<id>.md
-git -C <target> commit -m "story(<id>): draft" -m "Coordinator: <harness>/<model>"
+git -C <target> commit -m "story(<id>): draft"
 git -C <target> push
 ```
 
-The trailer names who drafted it, so the trials in
-`docs/COORDINATORS.md` can be read out of git later.
+The commit carries the human's name only — no trailer naming a harness or
+a model.
 
 Then tell the human: the story id, its title, what it asks, any question
-still open, and that `/promote <repo> <id>` puts it in the queue. Do not
-promote it. Do not start a launcher.
+still open, the harness and model that drafted it (the trials in
+`docs/COORDINATORS.md` are recorded from this message), and that
+`/promote <repo> <id>` puts it in the queue. Do not promote it. Do not
+start a launcher.
 
 ## Signs the story is wrong, not the build
 
