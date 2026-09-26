@@ -251,6 +251,7 @@ field() {                             # field <key> → frontmatter value of the
 }
 review_line() { sed -n "${1}p" "$REPO/.review/$STORY.md" 2>/dev/null; }
 calls()       { grep -c "^$1\$" "$TRACE/calls"; }
+arg_after()   { sed -n "/^$1\$/{n;p;q}" "$2"; }   # arg_after <flag> <args-trace> → the value given after it
 set_ready()   { sed -i '0,/^status:.*/s//status: ready/' "$REPO/.stories/$STORY.md"; }
 
 # A launcher in the background, for the cases about two at once. The same
@@ -3442,7 +3443,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_143_queue_pauses_on_a_refused_review
        case_144_bot_wait_and_fallback
        case_145_builder_refused_by_claude
-       case_146_fallback_reviewer_is_claude)
+       case_146_fallback_reviewer_is_claude case_147_no_attribution)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3991,6 +3992,27 @@ case_146_fallback_reviewer_is_claude() {
   assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3"
   assert_contains "$(cat "$TRACE/notified")" "t/$STORY — Claude refused the review" "the message names Claude"
   assert_eq "$(grep -c '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md")" 1 "still one UNAVAILABLE section"
+}
+
+# Commits and PRs carry the human's name only: no Co-Authored-By, no
+# Claude-Session link, no "Generated with". Claude Code adds them unless its
+# `attribution` setting says otherwise, so every claude the fleet starts gets
+# that setting on the command line: an unattended run must not depend on
+# ~/.claude/settings.json, which `claude doctor` has rewritten before. The
+# models stay recorded where they were: the Machine block and the round
+# evidence. Red while builderArgv passes no --settings.
+NO_ATTRIBUTION='{"attribution":{"commit":"","pr":"","sessionUrl":false}}'
+case_147_no_attribution() {
+  CASE="147a the builder starts with attribution off"; fixture c147a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(arg_after --settings "$TRACE/claude-args-1")" "$NO_ATTRIBUTION" "the builder's --settings"
+
+  CASE="147b so does the story writer"; fixture c147b
+  git -C "$REPO" push -q origin base:epic/test
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=951 FAKE_BUILDER=story \
+      bash "$FLEET/fleet" write-story t 951 "the moon toggle should show a moon" --base epic/test >/dev/null 2>&1 )
+  assert_eq "$(calls claude)" 1 "the writer ran"
+  assert_eq "$(arg_after --settings "$TRACE/claude-args-1")" "$NO_ATTRIBUTION" "the writer's --settings"
 }
 
 for c in "${CASES[@]}"; do

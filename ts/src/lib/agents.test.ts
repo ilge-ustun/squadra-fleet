@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, builderArgv, builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
+  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -19,11 +19,13 @@ function shadowed(env: NodeJS.ProcessEnv, name: string): NodeJS.ProcessEnv {
 }
 
 describe('the argv the CLIs get', () => {
-  it('builder: claude -p, the model, the turn ceiling, the tools, JSON out', () => {
+  it('builder: claude -p, the model, the turn ceiling, the tools, JSON out, attribution off (case 147)', () => {
     expect(builderArgv({ model: 'claude-sonnet-4-6', maxTurns: '60' })).toEqual([
       '-p', '--model', 'claude-sonnet-4-6', '--max-turns', '60', '--allowedTools', ALLOWED_TOOLS, '--output-format', 'json',
+      '--settings', NO_ATTRIBUTION,
     ]);
     expect(ALLOWED_TOOLS).toBe('Read,Write,Edit,Grep,Glob,Bash');
+    expect(JSON.parse(NO_ATTRIBUTION)).toEqual({ attribution: { commit: '', pr: '', sessionUrl: false } });
   });
 
   it('reviewer: codex exec --json, no sandbox, -m only when a model is named (cases 103, 103b)', () => {
