@@ -42,6 +42,10 @@ re-executed under `env -i`. No network, no model.
   `CLAUDE.md`.
 - **One task, one commit**, the reason in the message, `git status --short`
   shown. A commit carrying three concerns cannot be extracted later (L-10).
+- **Commits and PRs name the human only** — no `Co-Authored-By`,
+  `Claude-Session`, "Generated with" or model trailer, in the message or the
+  PR body (the human's decision, 26 Sep). The author is the repo's
+  `.git/config` `[user]`.
 - **Show the `ts/src/launch.ts` diff before applying it.** `fleet launch`
   execs node, which loads the whole program before it starts, so a running
   launcher keeps the code it loaded and the change reaches the next launch.
