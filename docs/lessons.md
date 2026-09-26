@@ -571,3 +571,28 @@ launcher before: UNPARSEABLE, a second builder round, the generic message),
 `case_142_refused_story_resumes_at_its_review`,
 `case_143_queue_pauses_on_a_refused_review`, `case_144_bot_wait_and_fallback`,
 `case_145_builder_refused_by_claude`, `case_146_fallback_reviewer_is_claude`.
+### L-33 — a job must not wait on a job that can outlive its own timeout
+
+`/run` started the queue with `systemctl --user start fleet-queue.service`.
+For a oneshot, `start` returns when the unit *finishes*: the poll sat
+inside the whole drain. The poll is a oneshot too, with a two-minute start
+timeout, so systemd killed it — three times in two days (24 Sep 15:15 and
+18:20, 25 Sep 11:27) — with the reply "queue started" unsent, and the bot
+deaf for those two minutes, since a running poll skips the timer's next
+firings. The drain itself was never harmed; the harm was silence.
+
+**Lesson:** when one unit starts another, ask what "start" waits for. A
+oneshot's start is its whole run. A caller with a shorter life than the
+callee's must enqueue and return, or it dies holding the callee's hand —
+and takes with it whatever it still had to say.
+
+**Prevention:** the default `QUEUE_START_CMD` is `systemctl --user start
+--no-block fleet-queue.service`: exit 0 means the job was queued, which is
+all "queue started" claims. The knob's doc comment and `systemd/README.md`
+say why, so a hand-set command keeps the property.
+
+**Enforced by:** `ts/src/telegram.test.ts` — the row pinning
+`readBotKnobs({}).queueStartCmd` (red before the fix). Nothing in the suite
+can observe it: its bot sets `QUEUE_START_CMD=true`; the proof is a `/run`
+from the phone answered within seconds.
+

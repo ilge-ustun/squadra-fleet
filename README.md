@@ -406,7 +406,8 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
 | `PUSH_STATUS` | 1 | 0 to work offline |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
-| `FLEET_LOCK_WAIT` `QUEUE_START_CMD` `FLEET_REGISTRY_DIR` | | the lock, how the bot starts a drain, where the registry is |
+| `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 
 Worktrees are siblings of the target: `../wt-<id>` for a builder,

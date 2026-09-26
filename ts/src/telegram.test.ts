@@ -162,7 +162,7 @@ describe('configuredFrom', () => {
 
 describe('readBotKnobs', () => {
   it('defaults', () => {
-    expect(readBotKnobs({})).toEqual({ base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start fleet-queue.service' });
+    expect(readBotKnobs({})).toEqual({ base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue.service' });
   });
   it('from the environment', () => {
     expect(readBotKnobs({ TELEGRAM_API_BASE: 'http://h', TELEGRAM_TIMEOUT: '5', SEND_MAX: '10', FLEET_LOCK_WAIT: '1', QUEUE_START_CMD: 'true' }))

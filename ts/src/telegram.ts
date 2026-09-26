@@ -81,7 +81,11 @@ export interface BotKnobs {
   sendMax: number;
   /** FLEET_LOCK_WAIT (120). */
   lockWait: number;
-  /** QUEUE_START_CMD: how /run starts a drain. */
+  /** QUEUE_START_CMD: how /run starts a drain. It must return once the
+   *  drain is started, never when it ends: fleet-queue is a oneshot, so a
+   *  plain `systemctl start` waits for the whole drain, and the poll — a
+   *  oneshot of its own with a two-minute start timeout — is killed before
+   *  it can answer, and the bot is deaf meanwhile (24–25 Sep, L-33). */
   queueStartCmd: string;
 }
 
@@ -94,7 +98,7 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
     timeoutSec: num(env['TELEGRAM_TIMEOUT'], 20),
     sendMax: num(env['SEND_MAX'], 3800),
     lockWait: num(env['FLEET_LOCK_WAIT'], 120),
-    queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start fleet-queue.service',
+    queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue.service',
   };
 }
 
