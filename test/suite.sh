@@ -223,14 +223,14 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
   LOG="$FX/launch.log"
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" launch t "$id" ) > "$LOG" 2>&1
   RC=$?
 }
 queue() {                             # queue [VAR=value …] → $FX/queue.log QRC   (QUEUE_TARGET=--all for every repo)
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" run-queue "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
   QRC=$?
 }
@@ -260,7 +260,7 @@ launch_bg() {                         # launch_bg <tag> <story-id|--reap> [VAR=v
   local tag="$1" id="$2"; shift 2
   ( cd "$FX" && exec env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
       bash "$FLEET/fleet" launch t "$id" ) > "$FX/bg-$tag.log" 2>&1 &
   BG_PID=$!
 }
@@ -3437,7 +3437,12 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_132_write_story_end_to_end case_133_telegram_api_fake case_134_bot_api_unreachable case_135_bot_pre_escapes_html
        case_136_fleet_entry_point case_137_one_launch_per_repo
        case_138_reap_sees_a_storys_trees case_139_bot_leaves_in_progress_alone
-       case_140_queue_leaves_a_busy_repo)
+       case_140_queue_leaves_a_busy_repo case_141_refused_reviewer_costs_no_round
+       case_142_refused_story_resumes_at_its_review
+       case_143_queue_pauses_on_a_refused_review
+       case_144_bot_wait_and_fallback
+       case_145_builder_refused_by_claude
+       case_146_fallback_reviewer_is_claude)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3691,6 +3696,301 @@ case_140_queue_leaves_a_busy_repo() {
   assert_eq "$(grep -c 'is ready again without having finished' "$FX/queue.log")" 0 "not mistaken for a story that never finished"
   assert_eq "$(field status)" ready "the story waits"
   assert_no_file "$TRACE/notified" "nobody was told"
+}
+
+# A reviewer its provider refused costs no round and pauses the story. On
+# 21 Sep (khaita 015 round 3) codex answered "You've hit your usage limit
+# … try again at 2:17 PM"; the launcher read the empty review as
+# UNPARSEABLE, burned the round, ran the builder again on a placeholder, and
+# the phone got "015 needs_human — " with no reason. Now: the round is not
+# counted, the builder's work stays on its branch, line 3 says UNAVAILABLE,
+# `not_before` holds codex's reset, the story waits at needs_human for a
+# human's choice, and one message offers it — /wait or /fallback. Red while
+# ts/src/launch.ts reads the refusal as the reviewer's verdict.
+case_141_refused_reviewer_costs_no_round() {
+  local resets msgs
+  notifier() { printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"; }
+  for exitcode in 1 0; do
+    CASE="141 codex refuses the round-1 review (codex exits $exitcode)"; fixture "c141-$exitcode"; notifier
+    resets=$(( $(date +%s) + 3600 ))
+    run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_REVIEWER_EXIT="$exitcode" FAKE_CODEX_RESETS_AT="$resets" FLEET_NOTIFY_CMD="$FX/notify"
+    assert_eq "$RC" 69 "refused is its own exit code"
+    assert_eq "$(field status)" needs_human "the story waits for a human's choice"
+    assert_eq "$(field round)" 0 "the round is not counted"
+    assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3 names the outcome"
+    assert_eq "$(field not_before)" "$(date -d "@$resets" -Iseconds)" "not before codex's reset, from its sessions"
+    assert_grep '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md" "the round's section"
+    assert_grep "^computed: UNAVAILABLE — reviewer unavailable: You've hit your usage limit" "$REPO/.review/$STORY.md" "…with codex's own words"
+    assert_eq "$(calls claude)" 1 "the builder ran once"
+    assert_eq "$(calls codex)" 1 "the reviewer was asked once"
+    assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 1 "the builder's commit is kept on its branch"
+    assert_contains "$(tracked)" ".review/$STORY/round-1/reviewer.unavailable.jsonl" "the refusal is evidence, committed"
+    assert_grep 'turn.failed' "$REPO/.review/$STORY/round-1/reviewer.unavailable.jsonl" "…the stream as codex sent it"
+    msgs="$(cat "$TRACE/notified" 2>/dev/null)"
+    assert_eq "$(grep -c '^---$' <<< "$msgs")" 1 "one message"
+    assert_contains "$msgs" "t/$STORY — Codex refused the review" "it names the repo, the story and who refused"
+    assert_contains "$msgs" "try again at 2:17 PM" "codex's words"
+    assert_contains "$msgs" "/wait t $STORY" "the first choice"
+    assert_contains "$msgs" "/fallback t $STORY" "the second"
+    assert_not_contains "$msgs" "needs_human —" "not the generic needs_human message"
+  done
+
+  CASE="141c a refusal in round 2 keeps round 1"; fixture c141c; notifier
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(field round)" 1 "round 1 stands, round 2 is not counted"
+  assert_grep '^## Round 1 — FAIL' "$REPO/.review/$STORY.md" "round 1's section is kept"
+  assert_grep '^## Round 2 — UNAVAILABLE' "$REPO/.review/$STORY.md" "round 2 says what happened"
+  assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3"
+  assert_eq "$(review_line 4)" "rounds: 1 of 3" "rounds counts what was judged, of this launch's ceiling"
+  assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 2 "both rounds' commits are kept"
+  assert_contains "$(cat "$TRACE/notified")" "resume this story automatically after" "no reset known from sessions: the message's own time"
+}
+
+# A story the reviewer could not judge resumes at its review. Its builder
+# finished before the refusal, so the next launch — after /wait's reset, or
+# a /fallback — runs no builder round: the first round reviews the head as
+# it stands, the refused round's section stays as history, and the builder's
+# own TDD handover (round-N/mutations) is judged as it would have been. The
+# resume still goes through computeVerdict — it can never grant a PASS. A
+# second refusal replaces the trailing UNAVAILABLE section rather than
+# adding one per retry. Red after case 141's change alone: the second launch
+# calls the builder, and its round-2 prompt is built on a refusal.
+case_142_refused_story_resumes_at_its_review() {
+  CASE="142a refused, then reviewed"; fixture c142a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the resumed launch ends normally"
+  assert_eq "$(field status)" done "…done"
+  assert_eq "$(calls claude)" 1 "no second builder round"
+  assert_eq "$(calls codex)" 2 "the reviewer, asked again"
+  assert_eq "$(field round)" 1 "one round judged"
+  assert_eq "$(review_line 3)" "verdict: PASS" "line 3"
+  assert_eq "$(grep -c '^## Round 1 — ' "$REPO/.review/$STORY.md")" 2 "the refused round's section stays, then the judged one"
+  assert_grep '^## Round 1 — PASS' "$REPO/.review/$STORY.md" "…ending in PASS"
+  assert_eq "$(field not_before)" "" "not_before is gone once the story is claimed"
+  assert_grep 'reviewing the existing head, no builder round' "$LOG" "the log says why no builder ran"
+
+  CASE="142b refused twice"; fixture c142b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  assert_eq "$RC" 69 "refused again"
+  assert_eq "$(calls claude)" 1 "still one builder round"
+  assert_eq "$(grep -c '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md")" 1 "one UNAVAILABLE section, not one per retry"
+  assert_eq "$(field round)" 0 "the round still not counted"
+
+  CASE="142c a resumed review cannot be granted a PASS the machine refuses"; fixture c142c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the reviewer said PASS; the surviving mutation vetoes it"
+  assert_eq "$(field status)" needs_human "…and the story stops"
+
+  CASE="142d the builder's own handover is judged after the resume"; fixture c142d
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=red FAKE_MUTATIONS=none FAKE_REVIEWER=limit
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_MUTATIONS=none FAKE_REVIEWER=PASS
+  assert_eq "$(review_line 3)" "verdict: PASS" "AC1's only instrument is the builder's, from before the pause"
+  assert_grep 'AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "…and it is in the table"
+
+  CASE="142e a refused REVIEW_ONLY run resumes without the variable"; fixture c142e
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=none
+  set_ready
+  run "$STORY" REVIEW_ONLY=1 FAKE_REVIEWER=limit
+  assert_eq "$RC" 69 "refused"
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$(calls claude)" 1 "only the first launch's builder ever ran"
+  assert_eq "$(field status)" done "reviewed and done"
+}
+
+# The queue pauses on a refused review, waits for the story, then runs it
+# first. A launch that exits 69 stops the drain — every story after it
+# would be refused too — and the queue says nothing of its own: the
+# launcher has sent the one message. While the refused story waits for a
+# human's choice nothing starts; after /wait it holds until not_before; then
+# that story runs first, ahead of lower ids, as a review-only round. Red
+# while ts/src/run-queue.ts reads 69 as an ordinary needs_human and starts
+# the next story.
+case_143_queue_pauses_on_a_refused_review() {
+  CASE="143a a refused review stops the drain"; fixture c143 draft
+  sed "s/Story $STORY/Story 901/; s/^status: draft/status: ready/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  sent_count() { grep -c '^---$' "$TRACE/notified" 2>/dev/null || echo 0; }
+  s901() { frontmatter "$REPO/.stories/901.md" "$1"; }
+
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_eq "$(s901 status)" needs_human "901 waits for a choice"
+  assert_grep "901: an agent's provider refused the call — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
+  assert_eq "$(sent_count)" 1 "one message, the launcher's"
+  assert_contains "$(cat "$TRACE/notified")" "/wait t 901" "…the one with the choices"
+
+  CASE="143b no answer yet: nothing starts"
+  sed -i 's/^status: draft/status: ready/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "900 promoted meanwhile"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_grep 'paused: 901 waits for /wait or /fallback' "$FX/queue.log" "the pause is named"
+  assert_eq "$(field status)" ready "900 does not jump the pause"
+  assert_eq "$(calls claude)" 1 "no builder ran"
+  assert_eq "$(sent_count)" 1 "nothing new was sent"
+
+  CASE="143c /wait: held until not_before"
+  sed -i '0,/^status:.*/s//status: ready/' "$REPO/.stories/901.md"
+  git -C "$REPO" commit -qam "/wait 901"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_contains "$(cat "$FX/queue.log")" "holding for 901 until $(s901 not_before)" "the hold names the story and the time"
+  assert_eq "$(field status)" ready "900 still waits"
+  assert_eq "$(calls claude)" 1 "no builder ran"
+
+  CASE="143d the reset has passed: the paused story first, then the rest"
+  sed -i "s/^not_before:.*/not_before: $(date -d '-1 minute' -Iseconds)/" "$REPO/.stories/901.md"
+  git -C "$REPO" commit -qam "the reset passed"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$(s901 status)" done "901 reviewed and done"
+  assert_eq "$(field status)" done "then 900"
+  assert_eq "$(grep -oE 'story (900|901) \(' "$FX/queue.log" | head -1)" "story 901 (" "901 went first, ahead of the lower id"
+  assert_eq "$(calls claude)" 2 "901's resumed round built nothing; 900's did"
+}
+
+# /wait and /fallback: the human's two answers to a refused review, from the
+# phone. Both only for a story paused on one (needs_human, line 3
+# UNAVAILABLE). /wait makes it ready and keeps not_before, which the queue
+# holds for; /fallback makes it ready with `reviewer: claude` and no
+# not_before, for the next drain. Red while ts/src/telegram.ts does not know
+# the verbs: the bot answers with its help.
+case_144_bot_wait_and_fallback() {
+  CASE="144a /wait on a story that is not paused"; fixture c144a
+  update 144 42 "/wait t $STORY"
+  bot poll
+  assert_contains "$(sent_text)" "$STORY is not waiting for a reviewer choice" "refused, and said why"
+  assert_eq "$(field status)" ready "untouched"
+
+  CASE="144b /wait on a paused story"; fixture c144b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  local nb head; nb="$(field not_before)"
+  update 145 42 "/wait t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "ready again"
+  assert_eq "$(field not_before)" "$nb" "the reset it waits for is kept"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "wait for the reviewer" "committed, which is what the queue reads"
+  assert_contains "$(sent_text)" "then is reviewed first" "the human is told what happens next"
+
+  CASE="144c /fallback on a paused story"; fixture c144c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 146 42 "/fallback t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "ready again"
+  assert_eq "$(field reviewer)" claude "Claude reviews it"
+  assert_eq "$(field not_before)" "" "nothing to wait for"
+  assert_contains "$(git -C "$REPO" log -1 --format=%s)" "reviewed by Claude instead" "committed"
+  assert_contains "$(sent_text)" "weaker check" "the reply says what the choice costs"
+  head="$(git -C "$REPO" rev-parse HEAD)"
+  update 147 42 "/fallback t $STORY"
+  bot poll
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head" "a second /fallback changes nothing"
+}
+
+# The builder refused by Claude (a usage limit): one message, then nothing.
+# The human decided (25 Sep): no retry, no fallback, no hold. The round is
+# not counted, whatever the builder committed before the refusal stays on
+# its branch and is not reviewed, the story stops at needs_human, and the
+# launcher exits 69 so the drain stops. Red while ts/src/launch.ts reads the
+# refusal as a round that "produced no commits" — or, with a commit, sends
+# a half-built round to the reviewer.
+case_145_builder_refused_by_claude() {
+  notifier() { printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"; }
+  local msgs
+  CASE="145a the builder refused"; fixture c145a; notifier
+  run "$STORY" FAKE_BUILDER=limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused is its own exit code"
+  assert_eq "$(field status)" needs_human "the story stops"
+  assert_eq "$(field round)" 0 "the round is not counted"
+  assert_eq "$(calls codex)" 0 "nothing was reviewed"
+  assert_no_file "$REPO/.review/$STORY.md" "no review: nothing was judged"
+  msgs="$(cat "$TRACE/notified" 2>/dev/null)"
+  assert_eq "$(grep -c '^---$' <<< "$msgs")" 1 "one message"
+  assert_contains "$msgs" "t/$STORY — Claude refused the builder" "who refused"
+  assert_contains "$msgs" "resets 3pm" "…in Claude's words"
+  assert_contains "$msgs" "Nothing else will happen" "…and that nothing follows"
+  assert_contains "$msgs" "/promote t $STORY" "…and how to go on"
+  assert_not_contains "$msgs" "/wait" "no choices offered: the human decided on none"
+
+  CASE="145b refused after a commit"; fixture c145b; notifier
+  run "$STORY" FAKE_BUILDER=commit-then-limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(git -C "$REPO" rev-list --count "base..story/$STORY")" 1 "the commit stays on the branch"
+  assert_eq "$(calls codex)" 0 "a half-built round is not reviewed"
+
+  CASE="145c the drain stops at it"; fixture c145c; notifier
+  sed "s/Story $STORY/Story 901/" "$REPO/.stories/$STORY.md" > "$REPO/.stories/901.md"
+  git -C "$REPO" add .stories/901.md && git -C "$REPO" commit -qm "fixture: story 901" && git -C "$REPO" push -q
+  queue FAKE_BUILDER=limit FAKE_REVIEWER=PASS FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_eq "$(frontmatter "$REPO/.stories/901.md" status)" ready "901 was not started"
+  assert_eq "$(calls claude)" 1 "one builder call"
+  assert_eq "$(grep -c '^---$' "$TRACE/notified")" 1 "one message, the launcher's"
+  assert_grep "$STORY: an agent's provider refused the call — the drain stops here" "$FX/queue.log" "the drain says why it stopped"
+
+  CASE="145d the story writer refused: said plainly"; fixture c145d
+  git -C "$REPO" push -q origin base:epic/test
+  local out rc
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=950 FAKE_BUILDER=limit \
+          bash "$FLEET/fleet" write-story t 950 "an intent" --base epic/test 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "a die"
+  assert_contains "$out" "Claude refused the story writer: You've hit your limit" "…saying who refused, in its words"
+}
+
+# The fallback reviewer: after a human's /fallback on a refused review,
+# Claude reviews the story — every round of that launch — with the same
+# prompt, the same output contract (.review-out/, a clean tree) and the same
+# computed verdict: the machine still vetoes, never grants. The Machine
+# block says who reviewed. The launch removes `reviewer: claude` when it
+# claims the story, so the choice covers that launch alone. If Claude
+# refuses the review too, the story pauses as with codex. Red while
+# ts/src/launch.ts ignores the key: codex is asked again, and refuses again.
+case_146_fallback_reviewer_is_claude() {
+  fallback() {                        # what /fallback commits, done by hand
+    sed -i '0,/^status:.*/s//status: ready/; /^not_before:/d' "$REPO/.stories/$STORY.md"
+    sed -i '0,/^---$/!{0,/^---$/s/^---$/reviewer: claude\n---/}' "$REPO/.stories/$STORY.md"
+    git -C "$REPO" commit -qam "story($STORY): reviewed by Claude instead"
+  }
+  CASE="146a /fallback, then Claude reviews"; fixture c146a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  assert_eq "$(field reviewer)" claude "the fixture stands in for /fallback"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_CLAUDE_REVIEWER=PASS
+  assert_eq "$RC" 0 "the launch ends normally"
+  assert_eq "$(field status)" done "reviewed and done"
+  assert_eq "$(calls codex)" 1 "codex was not asked again"
+  assert_eq "$(calls claude-review)" 1 "Claude reviewed"
+  assert_eq "$(calls claude)" 1 "no builder round: the story resumed at its review"
+  assert_grep '^reviewer: claude opus \(fallback\) → claude-opus-fake$' "$REPO/.review/$STORY.md" "the Machine block says who reviewed"
+  assert_grep '^--model$' "$TRACE/claude-review-args-1" "claude was given a model…"
+  assert_grep '^opus$' "$TRACE/claude-review-args-1" "…opus"
+  assert_eq "$(field reviewer)" "" "the choice was for that launch: the key is gone"
+
+  CASE="146b Claude's PASS is still the machine's to veto"; fixture c146b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  run "$STORY" FAKE_BUILDER=commit FAKE_CLAUDE_REVIEWER=PASS FAKE_VITEST=pass MAX_ROUNDS=1
+  assert_eq "$(review_line 3)" "verdict: FAIL" "a mutation that survives vetoes Claude's PASS"
+
+  CASE="146c Claude refuses the fallback review too"; fixture c146c
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n---\\n" "$*" >> "%s/notified"\n' "$TRACE" > "$FX/notify"; chmod +x "$FX/notify"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  fallback
+  run "$STORY" FAKE_BUILDER=commit FAKE_CLAUDE_REVIEWER=limit FLEET_NOTIFY_CMD="$FX/notify"
+  assert_eq "$RC" 69 "refused"
+  assert_eq "$(field status)" needs_human "paused again"
+  assert_eq "$(review_line 3)" "verdict: UNAVAILABLE" "line 3"
+  assert_contains "$(cat "$TRACE/notified")" "t/$STORY — Claude refused the review" "the message names Claude"
+  assert_eq "$(grep -c '^## Round 1 — UNAVAILABLE' "$REPO/.review/$STORY.md")" 1 "still one UNAVAILABLE section"
 }
 
 for c in "${CASES[@]}"; do

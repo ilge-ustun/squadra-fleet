@@ -42,23 +42,24 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { builderModelUsed, parseBuilderOutput, reviewerMessages, reviewerModelUsed, runBuilder, runReviewer } from './lib/agents.ts';
+import { builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
+import { reviewerResetAt } from './lib/codex-limits.ts';
 import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
-import { setStoryField, storyField } from './lib/frontmatter.ts';
+import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushQuiet, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { Die } from './lib/die.ts';
 import { withFleetLock } from './lib/lock.ts';
 import { dieMessage, log, out, warn } from './lib/log.ts';
-import { REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
+import { COMPUTED_SEP, REASON_END, formatIsoSeconds, renderRoundSection } from './lib/machine-block.ts';
 import { runBashTo } from './lib/proc.ts';
 import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.ts';
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
 import { computeVerdict } from './lib/verdict.ts';
-import { byCodePoint, nextReady } from './status.ts';
+import { byCodePoint, nextToRun } from './status.ts';
 
 /** lib.sh's `die`, from lib/die.ts; still exported here for launch.test.ts. */
 export { Die };
@@ -114,6 +115,20 @@ export function keepEarlierRounds(text: string): string {
   return i === -1 ? '' : `${lines.slice(i).join('\n')}\n`;
 }
 
+/** A refused round retried and refused again: its trailing section goes, so
+ *  an outage of hours leaves one UNAVAILABLE section, not one per retry. The
+ *  section's leading blank line goes with it; anything else stays. */
+export function dropTrailingUnavailable(text: string, round: number): string {
+  const lines = text.split('\n');
+  let i = -1;
+  for (let k = lines.length - 1; k >= 0; k--) {
+    if ((lines[k] ?? '').startsWith('## Round ')) { i = k; break; }
+  }
+  if (i === -1 || lines[i] !== `## Round ${round}${COMPUTED_SEP}UNAVAILABLE`) return text;
+  const cut = i > 0 && lines[i - 1] === '' ? i - 1 : i;
+  return cut === 0 ? '' : `${lines.slice(0, cut).join('\n')}\n`;
+}
+
 export function finalReviewHeader(o: { storyId: string; verdict: string; round: number; ceiling: number; baseSha: string }): string {
   return `# Review: ${o.storyId}\n\nverdict: ${o.verdict}\nrounds: ${o.round} of ${o.ceiling}\nbase: ${o.baseSha}\n`;
 }
@@ -130,6 +145,43 @@ export const head20 = (text: string): string => `${text.split('\n').slice(0, 20)
 /** An unquoted `$FLEET_NOTIFY_CMD "$1"`: the command word-split. */
 export const splitCommand = (cmd: string): string[] => cmd.split(/[ \t\n]+/).filter((w) => w !== '');
 
+/** EX_UNAVAILABLE: an agent's provider refused the call (a usage limit);
+ *  the story is parked and a human was told. The queue stops its drain on
+ *  it — every story after this one would be refused too. */
+export const EXIT_AGENT_REFUSED = 69;
+
+/** A time as the phone shows it: HH:MM today, with the date otherwise. */
+export function clockTime(d: Date, now: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? hm : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+}
+
+/** The one message a refused review sends: who refused and in their words,
+ *  that nothing is lost, and the human's two ways on — wait for the reset
+ *  (the queue holds for this story, then reviews it) or have Claude review
+ *  it now, a weaker check since Claude built it. */
+export function pausedMessage(o: { repo: string; id: string; who: string; refusal: string; resumeAt: Date; known: boolean; now: Date }): string {
+  const when = `${clockTime(o.resumeAt, o.now)}${o.known ? '' : ' (no reset time was given: a retry, not a promise)'}`;
+  return [
+    `${o.repo}/${o.id} — ${o.who} refused the review: "${o.refusal}"`,
+    `Nothing is lost: the builder's work is on story/${o.id} and the round is not counted. The queue is paused until you choose:`,
+    `/wait ${o.repo} ${o.id} — resume this story automatically after ${when}`,
+    `/fallback ${o.repo} ${o.id} — review it now with Claude (opus); a weaker check: the same vendor as its builder`,
+  ].join('\n');
+}
+
+/** The one message a builder refused by Claude sends. The human decided
+ *  (25 Sep) that nothing follows it: no retry, no fallback, no hold. */
+export function builderRefusedMessage(o: { repo: string; id: string; refusal: string }): string {
+  return [
+    `${o.repo}/${o.id} — Claude refused the builder: "${o.refusal}"`,
+    `Nothing else will happen: the story is stopped, the round is not counted, and anything the builder committed stays on story/${o.id} unreviewed.`,
+    `/promote ${o.repo} ${o.id} when you want it to run again.`,
+  ].join('\n');
+}
+
 export interface Knobs {
   builderModel: string;
   reviewerModel: string;
@@ -142,6 +194,11 @@ export interface Knobs {
   reviewOnly: string;
   lockWait: number;
   notifyCmd: string;
+  /** Minutes until a refused review is tried again when neither codex's
+   *  sessions nor its message name a reset time. */
+  reviewerRetryMin: number;
+  /** The model Claude reviews with after a human's /fallback. */
+  fallbackReviewerModel: string;
 }
 
 /** `${X:-default}`: unset or empty means the default. The three numbers
@@ -167,6 +224,8 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
     reviewOnly: v('REVIEW_ONLY', '0'),
     lockWait: num('FLEET_LOCK_WAIT', lockWaitRaw, /^[0-9]+(\.[0-9]+)?$/),
     notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/fleet telegram send`),
+    reviewerRetryMin: num('REVIEWER_RETRY_MIN', v('REVIEWER_RETRY_MIN', '60'), /^[0-9]+$/),
+    fallbackReviewerModel: v('FALLBACK_REVIEWER_MODEL', 'opus'),
   };
 }
 
@@ -232,11 +291,15 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   };
 
   /** Write, commit, and say so for the two states that need a human.
-   *  `done` is not announced: merging is the queue's news. */
-  const setStatus = (id: string, st: string): void => {
+   *  `done` is not announced: merging is the queue's news. A stop with more
+   *  to say than the review's reasons — a refused reviewer — brings its own
+   *  message. */
+  const setStatus = (id: string, st: string, message?: string): void => {
     setStoryField(root, id, 'status', st);
     commitStatus(id, st);
-    if (st === 'needs_human') {
+    if (message !== undefined) {
+      notify(message);
+    } else if (st === 'needs_human') {
       const review = isFile(`${root}/.review/${id}.md`) ? readReview(readFileSync(`${root}/.review/${id}.md`, 'utf8')).reasons : '';
       notify(`${id} needs_human — ${review}\nwhy: /why ${id}`);
     } else if (st === 'blocked') {
@@ -280,7 +343,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   reapOrphans();
   if (o.argv[0] === '--reap') return 0;
 
-  const storyId = o.argv[0] || nextReady(root);
+  const storyId = o.argv[0] || nextToRun(root);
   if (storyId === '') {
     log('queue empty — nothing ready');
     return 0;
@@ -326,6 +389,15 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   const reviewerWt = `${root}/../wt-${storyId}-review`;
   const branch = `story/${storyId}`;
   const reviewFile = `${root}/.review/${storyId}.md`;
+  // A story whose last review its provider refused resumes at that review:
+  // the builder had finished, and nobody has judged its work yet (L-32).
+  const resumeAtReview = isFile(reviewFile) && readReview(readFileSync(reviewFile, 'utf8')).verdict === 'UNAVAILABLE';
+  // A human's /fallback on a refused review: Claude reviews every round of
+  // this launch, with codex's prompt and contract. The key is removed at the
+  // claim, so the choice is this launch's alone.
+  const reviewerKey = storyField(root, storyId, 'reviewer');
+  const fallbackReviewer = reviewerKey === 'claude';
+  if (reviewerKey !== '' && !fallbackReviewer) warn(`reviewer: '${reviewerKey}' is not a reviewer the fleet knows — codex reviews`);
   // Findings live in .review/<id>.md, not only in this process (L-05).
   let reviewText = '';
   if (isFile(reviewFile) && priorFailingReview(readFileSync(reviewFile, 'utf8'))) {
@@ -346,6 +418,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
   try {
     log(`story ${storyId}`);
+    // not_before was the wait for a refused reviewer; claimed, it is over.
+    deleteFrontmatterField(storyFile, 'not_before');
+    deleteFrontmatterField(storyFile, 'reviewer');
     setStatus(storyId, 'in_progress');
     writeFileSync(runFile, runFileStart(storyId, process.pid, formatIsoSeconds(new Date())));
 
@@ -409,7 +484,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     // ── review rounds ────────────────────────────────────────────────────
 
     const newFile = `${reviewFile}.new`;
-    writeFileSync(newFile, roundStart > 0 && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
+    writeFileSync(newFile, (roundStart > 0 || resumeAtReview) && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
     let verdict = '';
     let round = roundStart;
 
@@ -437,7 +512,17 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let buildErr: string;
       let builderUsed = '';
       let buildMsg: string;
-      if (knobs.reviewOnly === '1') {
+      // The first round of a resumed story reviews what its builder left
+      // before the refusal; what that builder said is in this round's
+      // evidence already, and so is its TDD handover.
+      const resumedRound = resumeAtReview && round === roundStart + 1;
+      const reviewOnlyRound = knobs.reviewOnly === '1' || resumedRound;
+      if (resumedRound) {
+        buildErr = 'skipped';
+        buildMsg = isFile(`${evidenceDir}/builder.md`) ? capture(readFileSync(`${evidenceDir}/builder.md`, 'utf8')) : '(resumed: no builder ran this launch)';
+        if (isFile(`${evidenceDir}/builder.json`)) builderUsed = builderModelUsed(readFileSync(`${evidenceDir}/builder.json`, 'utf8'));
+        log('the reviewer was unavailable last time — reviewing the existing head, no builder round');
+      } else if (knobs.reviewOnly === '1') {
         // REVIEW_ONLY re-reviews the branch head with no builder round.
         buildErr = 'skipped';
         buildMsg = '(REVIEW_ONLY: no builder ran this round; reviewing the existing head)';
@@ -460,6 +545,20 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         // The whole object, not just the two fields read here: what the CLI
         // reports about cost and duration is in there.
         writeFileSync(`${evidenceDir}/builder.json`, `${parsed.evidence}\n`);
+
+        // Claude refused the call (a usage limit): the human decided that a
+        // message is all that follows. The round is not counted; anything
+        // committed before the refusal stays on the branch, unreviewed — a
+        // half-built round is not a round. The review file is untouched.
+        const refused = claudeRefusal(buildOut);
+        if (refused !== undefined) {
+          warn(`round ${round}: Claude refused the builder — ${refused}`);
+          rmSync(newFile, { force: true });
+          setStoryField(root, storyId, 'round', String(round - 1));
+          setStatus(storyId, 'needs_human', builderRefusedMessage({ repo: cfg.name, id: storyId, refusal: refused }));
+          writeFileSync(runFile, runFileEnd(storyId, 'BUILDER_REFUSED', round - 1));
+          return EXIT_AGENT_REFUSED;
+        }
         if (buildErr === 'parse-failed') {
           warn('builder output was not JSON — first 20 lines of raw output:');
           out(head20(buildOut));
@@ -493,7 +592,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
       // Postcondition, not self-report: a round is productive if it produced
       // anything the harness can judge (L-23). Nothing at all is a die.
-      if (roundCommits === 0 && knobs.reviewOnly !== '1' && !builderHandedOver) {
+      if (roundCommits === 0 && !reviewOnlyRound && !builderHandedOver) {
         setStatus(storyId, 'needs_human');
         throw new Die(`round ${round} produced no commits (is_error=${buildErr}). Said: ${buildMsg}`);
       }
@@ -526,25 +625,92 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       state.headSha = headSha;
       const reviewPrompt = render('review.md');
 
-      log(`reviewer: codex${knobs.reviewerModel !== '' ? ` ${knobs.reviewerModel}` : ''}`);
+      // Who reviews: codex, or Claude after a human's /fallback. Each yields
+      // what it said, what it ran on, and whether its provider refused.
+      const reviewerCli = fallbackReviewer ? 'claude' : 'codex';
+      const reviewerModelAsked = fallbackReviewer ? knobs.fallbackReviewerModel : knobs.reviewerModel;
+      const codexHome = process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex');
+      log(fallbackReviewer ? `reviewer: claude ${reviewerModelAsked} (fallback)` : `reviewer: codex${reviewerModelAsked !== '' ? ` ${reviewerModelAsked}` : ''}`);
       t0 = secs();
-      const reviewerStartMs = Date.now();
-      const rv = await runReviewer({
-        wt: reviewerWt, prompt: reviewPrompt, model: knobs.reviewerModel, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
-      });
-      tReview = secs() - t0;
-      const reviewerUsed = reviewerModelUsed({
-        codexHome: process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex'), cwd: resolve(reviewerWt), sinceMs: reviewerStartMs,
-      });
-      if (rv.timedOut) {
-        setStatus(storyId, 'needs_human');
-        throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
+      let reviewerUsed: string;
+      let refusal: string | undefined;
+      let refusalNote: string;
+      let reviewerSaid: string;
+      let reviewRaw: string;
+      if (fallbackReviewer) {
+        const cr = await runBuilder({ wt: reviewerWt, prompt: reviewPrompt, model: reviewerModelAsked, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
+        tReview = secs() - t0;
+        if (cr.timedOut) {
+          setStatus(storyId, 'needs_human');
+          throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
+        }
+        reviewRaw = capture(cr.output);
+        const parsed = parseBuilderOutput(reviewRaw);
+        writeFileSync(`${evidenceDir}/reviewer.json`, `${parsed.evidence}\n`);
+        reviewerUsed = builderModelUsed(reviewRaw);
+        refusal = claudeRefusal(reviewRaw);
+        refusalNote = '(reviewer unavailable: Claude refused the call)';
+        reviewerSaid = parsed.isError === '' || parsed.message === 'no result field' ? '' : parsed.message;
+      } else {
+        const reviewerStartMs = Date.now();
+        const rv = await runReviewer({
+          wt: reviewerWt, prompt: reviewPrompt, model: reviewerModelAsked, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
+        });
+        tReview = secs() - t0;
+        reviewerUsed = reviewerModelUsed({ codexHome, cwd: resolve(reviewerWt), sinceMs: reviewerStartMs });
+        if (rv.timedOut) {
+          setStatus(storyId, 'needs_human');
+          throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
+        }
+        reviewRaw = capture(rv.stdout);
+        refusal = reviewerRefusal(reviewRaw);
+        refusalNote = `(reviewer unavailable, codex exit ${rv.status ?? 'by signal'})`;
+        if (refusal !== undefined) writeFileSync(`${evidenceDir}/reviewer.unavailable.jsonl`, `${reviewRaw}\n`);
+        const msgs = reviewerMessages(reviewRaw);
+        if (refusal === undefined) for (const n of msgs.noise) writeSync(2, `${n}\n`);
+        reviewerSaid = msgs.text;
       }
-      const reviewRaw = capture(rv.stdout);
-      const msgs = reviewerMessages(reviewRaw);
-      for (const n of msgs.noise) writeSync(2, `${n}\n`);
-      reviewText = msgs.text;
-      if (reviewText === '') {
+
+      // The provider refused the call (21 Sep: a codex usage limit). Nobody
+      // reviewed, so there is no verdict to compute and the round is not
+      // counted: the builder's work stays on its branch, line 3 says
+      // UNAVAILABLE, not_before holds when codex will answer again, and the
+      // story waits at needs_human for a human to choose — wait for that, or
+      // a Claude review now. Checked before the tree: a refusal mid-turn may
+      // leave it dirty, and it is thrown away.
+      if (refusal !== undefined) {
+        warn(`round ${round}: the reviewer's provider refused the call — ${refusal}`);
+        writeFileSync(`${evidenceDir}/builder.md`, `${buildMsg}\n`);
+        writeFileSync(`${evidenceDir}/reviewer.md`, `${refusalNote} ${refusal}\n`);
+        const now = new Date();
+        // Only codex's reset can be read; Claude's is tried again after
+        // REVIEWER_RETRY_MIN, and the message says it is a guess.
+        const resetAt = fallbackReviewer ? undefined : reviewerResetAt({ codexHome, message: refusal, now });
+        const resumeAt = resetAt ?? new Date(now.getTime() + knobs.reviewerRetryMin * 60_000);
+        writeFileSync(newFile, dropTrailingUnavailable(readFileSync(newFile, 'utf8'), round));
+        appendFileSync(newFile, renderRoundSection({
+          round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(now),
+          baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: '0', total: String(secs() - tRound) },
+          builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+          model: 'UNAVAILABLE', computed: 'UNAVAILABLE', reasons: [`reviewer unavailable: ${refusal}`], mutRows: [], probeRows: [],
+          builderText: readFileSync(`${evidenceDir}/builder.md`), reviewerText: readFileSync(`${evidenceDir}/reviewer.md`),
+        }));
+        writeFileSync(reviewFile, Buffer.concat([
+          Buffer.from(finalReviewHeader({ storyId, verdict: 'UNAVAILABLE', round: round - 1, ceiling: roundCeiling, baseSha })), readFileSync(newFile),
+        ]));
+        rmSync(newFile, { force: true });
+        setStoryField(root, storyId, 'round', String(round - 1));
+        setStoryField(root, storyId, 'not_before', formatIsoSeconds(resumeAt));
+        setStatus(storyId, 'needs_human', pausedMessage({ repo: cfg.name, id: storyId, who: fallbackReviewer ? 'Claude' : 'Codex', refusal, resumeAt, known: resetAt !== undefined, now }));
+        writeFileSync(runFile, runFileEnd(storyId, 'UNAVAILABLE', round - 1));
+        return EXIT_AGENT_REFUSED;
+      }
+
+      reviewText = reviewerSaid;
+      if (reviewText === '' && fallbackReviewer) {
+        warn('the fallback reviewer said nothing — its output is kept as reviewer.json');
+        reviewText = '(no reviewer message — see reviewer.json)';
+      } else if (reviewText === '') {
         writeFileSync(`${evidenceDir}/reviewer.raw.jsonl`, `${reviewRaw}\n`);
         warn('reviewer produced no agent_message — raw stream kept as reviewer.raw.jsonl');
         reviewText = '(no reviewer message — see reviewer.raw.jsonl and reviewer.stderr)';
@@ -594,7 +760,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       appendFileSync(newFile, renderRoundSection({
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-        builderModel: roundModel, builderModelUsed: builderUsed, reviewerModel: knobs.reviewerModel, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;

@@ -123,6 +123,42 @@ export function nextReady(root: string): string {
   return storyIds(root).find((id) => storyField(root, id, 'status') === 'ready') ?? '';
 }
 
+/** Line 3 of the story's review — the launcher's word for how it ended —
+ *  or undefined when there is no review. */
+function reviewVerdict(root: string, id: string): string | undefined {
+  try {
+    return readReview(readFileSync(`${root}/.review/${id}.md`, 'utf8')).verdict;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why the queue must start nothing now, '' when it may. A story whose
+ *  review its provider refused waits at needs_human for a human to choose
+ *  (/wait or /fallback); after /wait it is ready with a not_before, and the
+ *  human chose to wait for it — everything behind it holds too, since the
+ *  next story would meet the same refusal (L-32). A not_before that is not a
+ *  time holds nothing: a typo must not stop the fleet. */
+export function queueHold(root: string, now: Date): string {
+  for (const id of storyIds(root)) {
+    const status = storyField(root, id, 'status');
+    if (status === 'needs_human' && reviewVerdict(root, id) === 'UNAVAILABLE') return `paused: ${id} waits for /wait or /fallback`;
+    if (status === 'ready') {
+      const nb = storyField(root, id, 'not_before');
+      const t = nb === '' ? NaN : Date.parse(nb);
+      if (!Number.isNaN(t) && t > now.getTime()) return `holding for ${id} until ${nb}`;
+    }
+  }
+  return '';
+}
+
+/** The story to run next: one that resumes at its refused review goes
+ *  first — the queue waited for it — then nextReady's order. The queue and
+ *  a bare launch both choose through this (L-30). */
+export function nextToRun(root: string): string {
+  return storyIds(root).find((id) => storyField(root, id, 'status') === 'ready' && reviewVerdict(root, id) === 'UNAVAILABLE') ?? nextReady(root);
+}
+
 /** `ls -1 <dir>`: no dotfiles, code-point order; undefined when not a directory. */
 export function listDir(dir: string): string[] | undefined {
   try {

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
-import { DASH, byCodePoint, landingOf, listDir, nextReady, storyIds, titleOf } from './status.ts';
+import { DASH, byCodePoint, landingOf, listDir, nextReady, nextToRun, queueHold, storyIds, titleOf } from './status.ts';
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
@@ -89,6 +89,52 @@ describe('nextReady — the one choice a bare launch and the queue both make', (
 
   it('no .stories directory: empty string, not a throw', () => {
     expect(nextReady(join(dir, 'nextready-missing'))).toBe('');
+  });
+});
+
+// A story whose review its provider refused (line 3 `verdict: UNAVAILABLE`)
+// pauses the queue until a human chooses; /wait leaves it ready with a
+// not_before the queue holds for; then it runs first (L-32).
+describe('queueHold and nextToRun — a refused review pauses, holds, then goes first', () => {
+  const now = new Date(2026, 8, 21, 13, 3, 14);
+  const story = (root: string, id: string, fm: string, line3?: string): void => {
+    mkdirSync(join(root, '.stories'), { recursive: true });
+    mkdirSync(join(root, '.review'), { recursive: true });
+    writeFileSync(join(root, '.stories', `${id}.md`), `---\n${fm}\n---\n`);
+    if (line3 !== undefined) writeFileSync(join(root, '.review', `${id}.md`), `# Review: ${id}\n\n${line3}\nrounds: 0 of 2\n`);
+  };
+
+  it('a story at needs_human whose review was refused: paused until a human chooses', () => {
+    const root = join(dir, 'hold-paused');
+    story(root, '900', 'status: ready');
+    story(root, '901', 'status: needs_human\nnot_before: 2026-09-21T14:17:47+02:00', 'verdict: UNAVAILABLE');
+    expect(queueHold(root, now)).toBe('paused: 901 waits for /wait or /fallback');
+  });
+  it('a ready story with a not_before ahead: everything holds for it', () => {
+    const root = join(dir, 'hold-wait');
+    story(root, '900', 'status: ready');
+    story(root, '901', 'status: ready\nnot_before: 2026-09-21T14:17:47+02:00', 'verdict: UNAVAILABLE');
+    expect(queueHold(root, now)).toBe('holding for 901 until 2026-09-21T14:17:47+02:00');
+  });
+  it('a not_before passed, a needs_human with any other verdict, nothing at all: no hold', () => {
+    const root = join(dir, 'hold-none');
+    story(root, '900', 'status: needs_human', 'verdict: FAIL');
+    story(root, '901', 'status: ready\nnot_before: 2026-09-21T12:00:00+02:00', 'verdict: UNAVAILABLE');
+    expect(queueHold(root, now)).toBe('');
+    expect(queueHold(join(dir, 'hold-missing'), now)).toBe('');
+  });
+  it('a not_before that is not a time holds nothing — a typo must not stop the fleet', () => {
+    const root = join(dir, 'hold-garbage');
+    story(root, '901', 'status: ready\nnot_before: soon');
+    expect(queueHold(root, now)).toBe('');
+  });
+  it('nextToRun: a ready story that resumes at its review first, then nextReady', () => {
+    const root = join(dir, 'next-resume');
+    story(root, '900', 'status: ready');
+    story(root, '901', 'status: ready', 'verdict: UNAVAILABLE');
+    expect(nextToRun(root)).toBe('901');
+    story(root, '901', 'status: done', 'verdict: PASS');
+    expect(nextToRun(root)).toBe('900');
   });
 });
 

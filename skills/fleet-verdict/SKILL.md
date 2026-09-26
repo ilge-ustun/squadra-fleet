@@ -74,6 +74,16 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   `reviewer.md`; if the prose is a review, the round was wasted, not wrong.
   Twice on one story: try `REVIEWER_MODEL=<other model>` (a launcher
   environment variable; recorded as `reviewer:` in the block).
+- **`UNAVAILABLE`** (line 3, the story at `needs_human`). Nobody reviewed:
+  the reviewer's provider refused the call — `/why` shows its words and
+  `not_before` when it lifts. Nothing was lost and the round was not
+  counted. The choice is the human's, and the phone message already gave it:
+  `/wait <repo> <id>` (the queue holds, then reviews this story first) or
+  `/fallback <repo> <id>` (Claude reviews it — a weaker check). Say which
+  you would pick and why; do not send either.
+- **`needs_human` after "Claude refused the builder".** A usage limit; the
+  review file is unchanged and the round not counted. Nothing follows by
+  design. The human sends `/promote <repo> <id>` once the limit has reset.
 - **`blocked`.** `.blocked/<id>.md` holds the question, the options and the
   builder's recommendation. Draft the answer; the human sends `/answer
   <repo> <id> <text>`. A product question is theirs; a technical one you

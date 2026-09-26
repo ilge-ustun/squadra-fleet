@@ -30,7 +30,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 import { loadRepo as loadRepoThroughBash, type RepoConfig } from './lib/config.ts';
 import { readEnvFile } from './lib/env-file.ts';
-import { replaceFrontmatterField, storyField } from './lib/frontmatter.ts';
+import { deleteFrontmatterField, replaceFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, commit, pushQuiet, stagedIsEmpty } from './lib/git.ts';
 import { lockPath, withFleetLock } from './lib/lock.ts';
 import { log as logLine, warn as warnLine } from './lib/log.ts';
@@ -292,6 +292,8 @@ const HELP = [
   'Move a story on',
   '/promote <repo> <id> — draft to ready; the next drain takes it',
   '/answer <repo> <id> <text> — answer a blocked story and requeue it',
+  '/wait <repo> <id> — a refused review: resume it after the reset; the queue holds for it',
+  '/fallback <repo> <id> — a refused review: Claude reviews it at the next drain (a weaker check)',
   '',
   'Land it, or take it back',
   '/merge <repo> <id> — land a story on the integration branch',
@@ -360,6 +362,53 @@ function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): st
   return `answered — ${id} is ready again`;
 }
 
+/** A story its reviewer's provider refused waits at needs_human with
+ *  `verdict: UNAVAILABLE` on its review's line 3 for one of two answers
+ *  (L-32). Anything else is not waiting for one. */
+function pausedOnReviewer(root: string, id: string): boolean {
+  if (storyField(root, id, 'status') !== 'needs_human') return false;
+  try {
+    return readReview(readFileSync(join(root, '.review', `${id}.md`), 'utf8')).verdict === 'UNAVAILABLE';
+  } catch {
+    return false;
+  }
+}
+
+/** Commit one story's frontmatter change and push it; the reply on
+ *  success, or the failure's. */
+function commitStory(cfg: RepoConfig, id: string, subject: string, reply: string): string {
+  add(cfg.root, `.stories/${id}.md`);
+  if (commit(cfg.root, `story(${id}): ${subject} (telegram)`) !== 0) return `${id} could not be committed`;
+  pushQuiet(cfg.root);
+  return reply;
+}
+
+/** Wait for the reset: ready again with its not_before, which the queue
+ *  holds for; then the story is reviewed first, with no builder round. */
+function cmdWait(cfg: RepoConfig, id: string): string {
+  if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
+  if (!pausedOnReviewer(cfg.root, id)) return `${id} is not waiting for a reviewer choice`;
+  replaceFrontmatterField(join(cfg.root, '.stories', `${id}.md`), 'status', 'ready');
+  const nb = storyField(cfg.root, id, 'not_before');
+  return commitStory(cfg, id, 'wait for the reviewer, then review',
+    `${id} waits${nb === '' ? '' : ` until ${nb}`}, then is reviewed first; the queue holds until then`);
+}
+
+/** Claude reviews it instead, at the next drain — for the rest of that
+ *  launch, which removes the key when it claims the story. Not started from
+ *  here: a drain started by the bot would hold its poll, and the fleet lock
+ *  with it, for as long as the drain runs. */
+function cmdFallback(cfg: RepoConfig, id: string): string {
+  if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
+  if (!pausedOnReviewer(cfg.root, id)) return `${id} is not waiting for a reviewer choice`;
+  const file = join(cfg.root, '.stories', `${id}.md`);
+  replaceFrontmatterField(file, 'status', 'ready');
+  deleteFrontmatterField(file, 'not_before');
+  setStoryField(cfg.root, id, 'reviewer', 'claude');
+  return commitStory(cfg, id, 'reviewed by Claude instead',
+    `${id} will be reviewed by Claude (opus) at the next drain — /run to start one now. A weaker check: the same vendor as its builder.`);
+}
+
 // The script owns every refusal; this only reports what it said.
 function cmdRevert(c: BotContext, cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
@@ -417,7 +466,7 @@ function dispatchRaw(c: BotContext, text: string): string {
     case '/run': return cmdRun(c);
     case '/help': case '/start': return cmdHelp(c);
     case '/repo': case '/repos': return cmdRepo(c);
-    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/revert': case '/merge': break;
+    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': break;
     default: return cmdHelp(c);
   }
   const r = resolveRepo(c, cmd);
@@ -437,6 +486,8 @@ function dispatchRaw(c: BotContext, text: string): string {
       case '/why': return cmdWhy(cfg, r.arg);
       case '/promote': return locked(() => cmdPromote(cfg, r.arg));
       case '/answer': return r.rest !== '' ? locked(() => cmdAnswer(c, cfg, r.arg, r.rest)) : 'usage: /answer <repo> <id> <text>';
+      case '/wait': return locked(() => cmdWait(cfg, r.arg));
+      case '/fallback': return locked(() => cmdFallback(cfg, r.arg));
       case '/revert': return locked(() => cmdRevert(c, cfg, r.arg));
       case '/merge': return locked(() => cmdMerge(c, cfg, r.arg));
       default: return '';

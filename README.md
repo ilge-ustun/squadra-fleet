@@ -84,6 +84,8 @@ The frontmatter:
 | `scope_deny` | the writer | space-separated globs the builder must not touch; deny-only; `.fleet/*` always |
 | `model` | the coordinator | the builder's model for this story alone, an alias (`sonnet`, `opus`, `fable`) |
 | `merged` | `fleet merge` | the merge commit's sha, for `fleet revert` and `fleet status` |
+| `not_before` | the launcher, when a reviewer's provider refused | when the refusal lifts (codex's own reset, else a guess); the queue holds for a `ready` story until then; removed at the claim |
+| `reviewer` | `/fallback` | `claude`: Claude reviews every round of the next launch instead of codex; removed at the claim |
 
 The body follows `.stories/TEMPLATE.md`: Symptom, Evidence, Acceptance
 criteria, Known weakness of the instrument, Human verification, Out of
@@ -173,6 +175,19 @@ committed so it can become the next round's instrument.
 veto, ends the rounds, and goes to a human. `UNPARSEABLE` is the launcher's
 word for a reviewer that ended without a verdict line; it is not-PASS.
 
+`UNAVAILABLE` is the launcher's word for a round nobody reviewed: the
+reviewer's provider refused the call (21 Sep: a codex usage limit — an
+`error` or `turn.failed` event and no `turn.completed`). It is never a
+verdict and never PASS: the round is not counted, the builder's work stays
+on its branch, the story waits at `needs_human` with `not_before` set, the
+queue starts nothing, and one message offers the human two ways on —
+`/wait` (the queue holds until the reset, then reviews this story first,
+with no builder round) or `/fallback` (Claude reviews it at the next drain;
+a weaker check, since Claude built it). The launcher exits 69. When
+Claude's usage limit refuses the *builder*, a message is all that follows:
+the story stops at `needs_human`, unreviewed, until the human sends
+`/promote`.
+
 **`fleet check-mutation <repo> <patch…> [--wt <dir>]`** runs the same
 classifier on a tree someone is still working in — the builder's worktree,
 or a human's checkout. It refuses an uncommitted tree, applies each patch,
@@ -225,6 +240,8 @@ it from anywhere; it finds its tree through the link.
 | `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
 | `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
 | `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
+| set `status: ready`, keep `not_before` | `/wait <repo> <id>` | a refused review: resume after the reset; the queue holds for it |
+| set `status: ready` and `reviewer: claude`, drop `not_before` | `/fallback <repo> <id>` | a refused review: Claude reviews it at the next drain |
 | answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
 | `fleet check-mutation <repo> <patch…> [--wt <dir>]` | | the verdict's classifier on a working tree |
 | `fleet merge <repo> <id> --land` | `/merge <repo> <id>` | an integration-branch story → the integration branch |
@@ -251,7 +268,9 @@ from before it reads anything until it exits, however it exits. Another
 `fleet launch` — a drain's `--reap` included — prints who holds it (pid,
 story) and exits 75 having touched nothing, and the queue leaves the repo to
 its next drain. Exit codes: 0 a finished run, a blocked story, an empty
-queue, `--reap`; 1 a die; 75 another launch holds the repo.
+queue, `--reap`; 1 a die; 69 an agent's provider refused the call (the
+story is parked, the human told, the drain stops); 75 another launch holds
+the repo.
 
 ## What a target provides
 
@@ -382,6 +401,8 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
 | `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
+| `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
+| `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
 | `PUSH_STATUS` | 1 | 0 to work offline |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |

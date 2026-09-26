@@ -25,14 +25,14 @@ import { spawnSync } from 'node:child_process';
 import { Die } from './lib/die.ts';
 import { storyField } from './lib/frontmatter.ts';
 import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, upstreamBranch } from './lib/git.ts';
-import { readKnobs, splitCommand } from './launch.ts';
+import { EXIT_AGENT_REFUSED, readKnobs, splitCommand } from './launch.ts';
 import { EXIT_LAUNCH_BUSY, launchLockHolder } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
 import { formatIsoSeconds } from './lib/machine-block.ts';
 import { runInherit } from './lib/proc.ts';
 import { readReview } from './lib/review.ts';
 import type { RepoConfig } from './lib/config.ts';
-import { nextReady } from './status.ts';
+import { nextToRun, queueHold } from './status.ts';
 
 export const USAGE = 'usage: fleet run-queue <repo>|--all [--max N]';
 
@@ -177,10 +177,21 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   const ran: RanLine[] = [];
   let prev = '';
   let n = 0;
-  let busy = false;
+  /** Why the drain started nothing, when it did not: the summary says so
+   *  rather than "nothing was ready". */
+  let stopped = '';
 
   while (n < max) {
-    const id = nextReady(root);
+    // A refused review pauses the queue until a human chooses, then holds it
+    // until the story's not_before (L-32). Nothing is sent: the launcher
+    // told the human once, when the story stopped.
+    const hold = queueHold(root, new Date());
+    if (hold !== '') {
+      log(hold, TAG);
+      stopped = hold;
+      break;
+    }
+    const id = nextToRun(root);
     if (id === '') {
       log('queue empty', TAG);
       break;
@@ -199,7 +210,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     // nothing: not a story that ran, not news.
     if (rc === EXIT_LAUNCH_BUSY) {
       log(busyLine(launchLockHolder(root)), TAG);
-      busy = true;
+      stopped = 'another launch holds the repo';
       break;
     }
 
@@ -207,6 +218,15 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     const reviewPath = `${root}/.review/${id}.md`;
     const verdict = existsSync(reviewPath) ? (readReview(readFileSync(reviewPath, 'utf8')).verdict ?? '') : '';
     ran.push({ id, status, verdict, rc });
+
+    // An agent's provider refused the call (a usage limit) — the reviewer's
+    // or the builder's: the launcher parked the story and told the human.
+    // Every story after it would be refused as well, so the drain stops
+    // here, saying nothing more.
+    if (rc === EXIT_AGENT_REFUSED) {
+      warn(`${id}: an agent's provider refused the call — the drain stops here; the launcher has told the human`, TAG);
+      break;
+    }
 
     const base = storyField(root, id, 'base') || cfg.baseBranch;
 
@@ -247,7 +267,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   out('\n');
   out(`${DIM}─── queue finished, started ${started} ───${RST}\n`);
   if (ran.length === 0) {
-    out(busy ? 'nothing ran: another launch holds the repo\n' : 'nothing was ready to run\n');
+    out(stopped !== '' ? `nothing ran: ${stopped}\n` : 'nothing was ready to run\n');
   } else {
     for (const r of ran) out(`  ${formatRanLine(r)}\n`);
   }

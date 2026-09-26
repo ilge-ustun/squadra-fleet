@@ -36,6 +36,13 @@ export function isRestore(s: string): s is Restore {
 /** What a round concludes — the reviewer's word, and the machine's. */
 export type Verdict = 'PASS' | 'FAIL' | 'SPEC' | 'UNPARSEABLE';
 
+/** What a round's section and the review's line 3 can say: a verdict, or
+ *  UNAVAILABLE — the reviewer's provider refused the call, so nobody judged
+ *  the round. The launcher's word alone: parseReviewerVerdict and
+ *  computeVerdict return a Verdict, so the type checker keeps a refusal
+ *  from ever being computed, let alone as PASS. */
+export type RoundOutcome = Verdict | 'UNAVAILABLE';
+
 export type Colour = 'GREEN' | 'RED';
 
 /** The three baseline runs on the reviewer's tree. */

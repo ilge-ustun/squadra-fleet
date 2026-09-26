@@ -53,6 +53,10 @@ export interface ReviewerRun {
   timedOut: boolean;
   /** The JSON Lines stream. */
   stdout: string;
+  /** codex's exit status, for the record only: what a refusal exits with
+   *  is not documented, so nothing decides on it (reviewerRefusal reads the
+   *  stream). null when a signal ended it. */
+  status: number | null;
 }
 
 /** stderr goes to `stderrFile` (round-N/reviewer.stderr): codex prints
@@ -65,10 +69,76 @@ export async function runReviewer(o: AgentCall & { model: string; stderrFile: st
       cwd: o.wt, input: o.prompt, timeoutSec: o.timeoutSec, graceSec: o.graceSec ?? 30, stderr: fd,
       ...(o.env !== undefined ? { env: o.env } : {}),
     });
-    return { timedOut: r.timedOut, stdout: r.stdout };
+    return { timedOut: r.timedOut, stdout: r.stdout, status: r.status };
   } finally {
     closeSync(fd);
   }
+}
+
+/** One line, and no ` — `: the refusal becomes a reason on the Machine
+ *  block's `computed:` line, which review.ts splits on that separator. */
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim().replace(/ — /g, ' - ');
+
+/** Claude refused the call — a usage or rate limit. `claude -p
+ *  --output-format json` ends in one object; on an API error its is_error
+ *  is true and api_error_status is the HTTP status (the CLI's own schema).
+ *  A refusal is a 429, or a text naming a limit ("usage limit reached",
+ *  "You've hit your … limit", "You've reached your … limit"). No real one
+ *  has been seen on this machine (25 Sep): the shape is inferred, not
+ *  observed. Running out of turns, a server error or a success is not one.
+ *  The text on one line; undefined when there was no refusal. */
+export function claudeRefusal(output: string): string | undefined {
+  let v: unknown;
+  try {
+    v = JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  if (o['is_error'] !== true) return undefined;
+  const text = typeof o['result'] === 'string' ? oneLine(o['result']) : '';
+  const limitText = /usage limit reached|you've (hit|reached) your\b.*\blimit/i.test(text);
+  if (o['api_error_status'] !== 429 && !limitText) return undefined;
+  return text !== '' ? text : `Claude refused the call (HTTP ${String(o['api_error_status'])})`;
+}
+
+/** The provider refused the call: an `error` or `turn.failed` event, and
+ *  no `turn.completed` — the turn never finished, so nobody reviewed
+ *  anything and there is no verdict to read (21 Sep, khaita 015 round 3:
+ *  "You've hit your usage limit … try again at 2:17 PM."). An error the turn
+ *  got past (a reconnect notice) is not one; neither is a turn that
+ *  completed having said nothing — that is UNPARSEABLE, the reviewer's
+ *  failure, not the provider's. The message is the first error's, else the
+ *  turn.failed one's, on one line; undefined when there was no refusal. */
+export function reviewerRefusal(jsonl: string): string | undefined {
+  let failed = false;
+  let completed = false;
+  const messages: string[] = [];
+  for (const line of jsonl.split('\n')) {
+    let v: unknown;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) continue;
+    const o = v as Record<string, unknown>;
+    if (o['type'] === 'turn.completed') completed = true;
+    else if (o['type'] === 'error') {
+      failed = true;
+      if (typeof o['message'] === 'string') messages.push(o['message']);
+    } else if (o['type'] === 'turn.failed') {
+      failed = true;
+      const e = o['error'];
+      if (e !== null && typeof e === 'object' && typeof (e as Record<string, unknown>)['message'] === 'string') {
+        messages.push((e as Record<string, unknown>)['message'] as string);
+      }
+    }
+  }
+  if (!failed || completed) return undefined;
+  const m = messages.map(oneLine).find((x) => x !== '');
+  return m ?? 'the provider refused the call and gave no reason';
 }
 
 export interface BuilderOutput {
