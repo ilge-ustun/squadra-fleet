@@ -255,8 +255,9 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
 
     const start = cfg.startCmd ?? 'npm start';
     log(`start: ${start}, PORT=${o.knobs.port}, as ${UNIT}`);
+    // --expand-environment=no: START_CMD is bash, and its ${…} are bash's (L-35).
     const r = runSync('systemd-run', [
-      '--user', '--collect', '--quiet', `--unit=${UNIT}`, `--working-directory=${dir}`,
+      '--user', '--collect', '--quiet', '--expand-environment=no', `--unit=${UNIT}`, `--working-directory=${dir}`,
       '--setenv=PATH', '--setenv=HOME', `--setenv=PORT=${o.knobs.port}`,
       'bash', '-c', start,
     ]);

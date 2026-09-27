@@ -4052,6 +4052,7 @@ case_148_bot_job_is_its_own_unit() {
   assert_grep '^--collect$' "$args" "unloaded when it ends, failed or not"
   assert_grep '^--unit=fleet-merge-[0-9]+$' "$args" "named for what it is"
   assert_grep '^--setenv=PATH$' "$args" "with the poll's PATH — the manager's has no node"
+  assert_grep '^--expand-environment=no$' "$args" "and the job's dollar-braces left for bash (L-35)"
   assert_contains "$(sent_text)" "merged into base" "and its result still reaches the human"
 }
 
@@ -4106,6 +4107,7 @@ case_149_test_deploy() {
   assert_grep "^--working-directory=$FX/test-deploy\$" "$a" "from the tree"
   assert_grep "^--setenv=PORT=$TD_PORT\$" "$a" "on the test port"
   assert_grep '^--user$' "$a" "in the human's user manager"
+  assert_grep '^--expand-environment=no$' "$a" "START_CMD's dollar-braces left for bash (L-35)"
   td --status
   assert_eq "$TDRC" 0 "--status exit code"
   assert_contains "$(cat "$TDLOG")" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) at https://test.example — up since" "--status says what is served and that it is up"

@@ -166,7 +166,7 @@ describe('readBotKnobs', () => {
   it('defaults', () => {
     expect(readBotKnobs({})).toEqual({
       base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue.service',
-      detachCmd: 'systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME',
+      detachCmd: 'systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME',
     });
   });
   it('from the environment', () => {

@@ -93,7 +93,10 @@ export interface BotKnobs {
    *  the oneshot ends — the /merge job died seconds after its
    *  acknowledgement (L-34). As a transient unit of its own it lives until
    *  it is done; --collect unloads it then, failed or not, and the poll's
-   *  PATH (node) and HOME go with it, since the manager's have neither. */
+   *  PATH (node) and HOME go with it, since the manager's have neither.
+   *  --expand-environment=no, because systemd otherwise expands ${…} in the
+   *  job's bash with the unit's environment before bash sees it: the
+   *  /testdeploy link arrived as an empty message (L-35). */
   detachCmd: string;
 }
 
@@ -107,7 +110,7 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
     sendMax: num(env['SEND_MAX'], 3800),
     lockWait: num(env['FLEET_LOCK_WAIT'], 120),
     queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue.service',
-    detachCmd: env['DETACH_CMD'] ?? 'systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME',
+    detachCmd: env['DETACH_CMD'] ?? 'systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME',
   };
 }
 
