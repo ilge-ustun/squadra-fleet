@@ -7,12 +7,12 @@ import {
   add, branchExists, commit as gitCommit, diffNameOnly, fetch, isAncestor, mergeBase, pushQuiet, refExists, revListCount, revParse,
   stagedIsEmpty, worktreeAdd, worktreeRemoveForce,
   addAll, branchDelete, branchForce, logOneline, lsFilesTracked, mergeAbort, mergeNoFf, pushRef, revertAbort, revertMerge,
-  worktreeCheckedOutBranches, worktreePrune, currentBranch, mergeFfOnly,
+  worktreeCheckedOutBranches, worktreePaths, worktreePrune, currentBranch, mergeFfOnly,
   fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch,
   catFileExists, showLineCount,
   fetchRef, revParseShort,
 } from './git.ts';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 
 // One throwaway repo: base has two commits, story/1 branches from the first
 // and adds one, origin/base is a remote-tracking ref made without a remote.
@@ -265,6 +265,16 @@ describe('the operations landing makes', () => {
     expect(branchDelete(repo, 'feat')).toBe(0);
     expect(branchExists(repo, 'feat')).toBe(false);
     expect(branchDelete(repo, 'feat')).not.toBe(0);            // gone already
+  });
+
+  it('worktreePaths: every worktree by its real path, the main one first, a detached one too', () => {
+    const before = worktreePaths(repo);                        // the merge worktree above is one
+    expect(before[0]).toBe(realpathSync(repo));
+    const wt2 = join(d3, 'wt-paths');
+    expect(worktreeAdd(repo, wt2, { detach: base1 })).toBe(0);
+    expect(worktreePaths(repo)).toEqual([...before, realpathSync(wt2)]);
+    worktreeRemoveForce(repo, wt2);
+    expect(worktreePaths(repo)).toEqual(before);
   });
 
   it('lsFilesTracked and addAll on a deleted path', () => {

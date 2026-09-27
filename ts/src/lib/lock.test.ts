@@ -102,6 +102,29 @@ describe('takeLaunchLock', () => {
     expect(readFileSync(launchLockPath(root), 'utf8')).toBe(before);
   });
 
+  // fleet test-deploy waits for a launch rather than failing at once: a
+  // build beside a story's could run the machine out of memory, and a human
+  // who asked for a deploy would rather wait for it.
+  it('with waitSec, a busy lock is waited for and taken when its holder lets go', async () => {
+    holder = spawn('flock', [launchLockPath(root), 'sleep', '0.6'], { stdio: 'ignore' });
+    for (let i = 0; i < 100 && launchFree(); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(launchFree()).toBe(false);
+    const t0 = Date.now();
+    const l = takeLaunchLock(root, 'test-deploy epic/x', 10);
+    expect(l.held).toBe(true);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(200);
+    expect(launchLockHolder(root)).toBe(`${process.pid} test-deploy epic/x`);
+    if (l.held) l.release();
+  });
+
+  it('with waitSec, a lock still held when the wait runs out is busy', async () => {
+    holder = spawn('flock', [launchLockPath(root), 'sleep', '5'], { stdio: 'ignore' });
+    for (let i = 0; i < 100 && launchFree(); i++) await new Promise((r) => setTimeout(r, 20));
+    const t0 = Date.now();
+    expect(takeLaunchLock(root, 'test-deploy epic/x', 1).held).toBe(false);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+  });
+
   it('the lock goes with its process, even on SIGKILL', async () => {
     expect(await takeInChild('story 900')).toBe('held');
     expect(launchFree()).toBe(false);

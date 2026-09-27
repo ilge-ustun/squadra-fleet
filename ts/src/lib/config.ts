@@ -33,6 +33,9 @@ export interface RepoConfig {
   mergeMode: MergeMode;
   /** Required by lib.sh when mergeMode is 'pr'. */
   prCmd?: string;
+  /** How `fleet test-deploy` serves a built tree, PORT in its environment;
+   *  absent means `npm start`. */
+  startCmd?: string;
 }
 
 export class ConfigError extends Error {
@@ -91,6 +94,7 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
   if (mergeMode !== 'direct' && mergeMode !== 'pr') throw new ConfigError(`lib.sh handed back MERGE_MODE=${mergeMode}`, false);
   const repoRules = m.get('REPO_RULES');
   const prCmd = m.get('PR_CMD');
+  const startCmd = m.get('START_CMD');
   return {
     name: required(m, 'REPO_NAME'),
     root: required(m, 'REPO_ROOT'),
@@ -104,5 +108,6 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
     ...(repoRules !== undefined ? { repoRules } : {}),
     mergeMode,
     ...(prCmd !== undefined ? { prCmd } : {}),
+    ...(startCmd !== undefined ? { startCmd } : {}),
   };
 }

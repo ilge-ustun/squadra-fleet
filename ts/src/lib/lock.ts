@@ -54,11 +54,13 @@ export type LaunchLock =
 /** Take the launch lock, or say who has it. The file holds the holder's
  *  `<pid> <what>`; it is opened without truncating, so a failed attempt
  *  leaves that line for the next one to read. A flock that cannot run at
- *  all is a Die — "busy" is only ever flock's own answer. */
-export function takeLaunchLock(root: string, what: string): LaunchLock {
+ *  all is a Die — "busy" is only ever flock's own answer. A launch never
+ *  waits; `fleet test-deploy` waits up to waitSec for a launch to end. */
+export function takeLaunchLock(root: string, what: string, waitSec = 0): LaunchLock {
   const path = launchLockPath(root);
   const fd = openSync(path, constants.O_RDWR | constants.O_CREAT, 0o644);
-  const r = spawnSync('flock', ['-n', '-E', String(EXIT_LAUNCH_BUSY), '3'], { stdio: ['ignore', 'inherit', 'inherit', fd] });
+  const wait = waitSec > 0 ? ['-w', String(waitSec)] : ['-n'];
+  const r = spawnSync('flock', [...wait, '-E', String(EXIT_LAUNCH_BUSY), '3'], { stdio: ['ignore', 'inherit', 'inherit', fd] });
   if (r.status === EXIT_LAUNCH_BUSY) {
     closeSync(fd);
     return { held: false, holder: launchLockHolder(root) };

@@ -183,6 +183,17 @@ export function worktreeCheckedOutBranches(root: string): string[] {
     .map((l) => l.slice('branch '.length));
 }
 
+/** The `worktree <path>` lines of `git worktree list --porcelain`: every
+ *  worktree's real path, the main checkout's first. */
+export function worktreePaths(root: string): string[] {
+  const r = runSync('git', ['-C', root, 'worktree', 'list', '--porcelain']);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => l.slice('worktree '.length));
+}
+
 /** `git ls-files --error-unmatch -- <path> >/dev/null 2>&1`: does git know
  *  the path, so that `add -A` on it cannot fail (L-02). */
 export function lsFilesTracked(root: string, path: string): boolean {
