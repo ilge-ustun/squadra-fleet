@@ -55,6 +55,16 @@ cd ~/work/fleet && setsid nohup bash -c './fleet launch <repo> <id>; echo "exit=
 A coordinator on any harness starts no launcher at all: a human promotes,
 and the queue timer or `/run` does the rest.
 
+**The test URL.** `fleet test-deploy <repo> <branch>` and `/testdeploy`
+serve a branch as the user unit `fleet-test-deploy` on `127.0.0.1:4100`.
+Caddy publishes it at `https://179-237-101-204.sslip.io` and holds a Let's
+Encrypt certificate, which it renews on its own. sslip.io is a public DNS
+service that resolves a name to the IP written inside it, so no DNS record
+of ours is involved. `.env.fleet` names the URL:
+`TEST_DEPLOY_URL=https://179-237-101-204.sslip.io`. The site is open, with
+no password: it is the same app as production, reading the same Firestore.
+When nothing is deployed, Caddy answers 502.
+
 ## Unattended
 
 `systemd/` holds three timer/service pairs, installed as user units with
@@ -73,6 +83,25 @@ lingering on (`systemd/README.md`):
   codex never updates itself.
 
 ## What needs a human, fleet-wide
+
+- **The test URL's web server, once, as `ubuntu`.** The fleet user has no
+  sudo. Install Caddy, open 80 and 443 (Let's Encrypt checks port 80; the
+  site is on 443), and hand it the name:
+
+  ```bash
+  sudo apt install -y caddy
+  printf '179-237-101-204.sslip.io {\n\treverse_proxy 127.0.0.1:4100\n}\n' | sudo tee /etc/caddy/Caddyfile
+  sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+  sudo systemctl reload caddy
+  ```
+
+  Then `curl -sI https://179-237-101-204.sslip.io` from anywhere should show
+  a 502 (nothing deployed yet) with a valid certificate. If it times out, the
+  provider's firewall (the Infomaniak manager) may need 80 and 443 opened too.
+  sslip.io is not on the Public Suffix List, but Let's Encrypt has raised its
+  limit to 250,000 certificates (sslip.io, 27 Sep). If issuance is still
+  refused, the same Caddyfile with `179-237-101-204.nip.io`, and that URL in
+  `.env.fleet`, is the fallback.
 
 - **Log `glab` in** before a GitLab target switches to `MERGE_MODE=pr`:
   `glab auth login --hostname gitlab.com --token` with a project token
@@ -156,6 +185,15 @@ deploys — belongs to that target, not here.
   starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
   child forked inside the poll was killed with the poll's cgroup, seconds
   after the acknowledgement (L-34).
+- **One test slot on the machine, served by Caddy, without Cloudflare.** The
+  human chose HTTPS on the VPS itself (27 Sep): Caddy and Let's Encrypt under
+  the sslip.io name, with no tunnel and no third party in the path, and no
+  password. HTTPS matters here because the app's service worker, offline mode
+  and install run only in a secure context. There is one slot because a
+  second one needs a second name and port, and a 3.8 GB machine should not
+  hold two Next servers beside a story's build. The build takes the target's
+  launch lock and waits up to an hour for a running launch. The server is a
+  transient unit, gone after a reboot: `/testdeploy` brings it back.
 - **Commits and PRs name the human only.** No `Co-Authored-By`,
   `Claude-Session`, "Generated with" or model trailer, from the builder, a
   coordinator or an interactive session (the human's decision, 26 Sep). The
