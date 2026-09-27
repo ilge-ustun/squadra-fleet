@@ -421,7 +421,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
 | `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
-| `DETACH_CMD` | `systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34) |
+| `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |
 | `TEST_DEPLOY_PORT` | 4100 | the loopback port the test server listens on and the web server passes to; also read from `.env.fleet` |

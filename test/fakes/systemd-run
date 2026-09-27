@@ -16,11 +16,28 @@
 # --working-directory=<dir> is the child's cwd. Every other option is taken
 # and ignored.
 #
+# A tripwire, not an emulation (L-35): the real one expands ${…} in the
+# command's arguments with the unit's environment before bash sees them —
+# `${last#==> }` arrived as an empty string — unless it is given
+# --expand-environment=no. So an argument holding `${` without that flag is
+# refused here, loudly, and nothing starts.
+#
 trace="${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
 n=1
 while [[ -e "$trace/systemd-run-args-$n" ]]; do n=$((n + 1)); done
 printf '%s\n' "$@" > "$trace/systemd-run-args-$n"
 echo "systemd-run" >> "$trace/calls"
+
+noexpand=0
+for a in "$@"; do [[ "$a" == --expand-environment=no ]] && noexpand=1; done
+if (( ! noexpand )); then
+  for a in "$@"; do
+    if [[ "$a" == *'${'* ]]; then
+      echo 'fake systemd-run: an argument holds ${ and systemd would expand it — pass --expand-environment=no' >&2
+      exit 1
+    fi
+  done
+fi
 
 unit="" cwd=""
 envs=()

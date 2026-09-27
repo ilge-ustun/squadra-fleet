@@ -626,3 +626,32 @@ unit started from inside another unit outlives it.
 the `defaultDeps.spawnDetached` rows in `ts/src/telegram.test.ts`, red
 against the fork.
 
+### L-35 — systemd-run rewrites `${…}` in the command it is given
+
+L-34's fix put the bot's jobs under `systemd-run`, which hands the command to
+systemd as an `ExecStart`. systemd expands `${NAME}` in those arguments with
+the unit's environment before bash ever sees them, and it does this even
+inside a single `bash -c` argument. The first real test deploy after #21
+(27 Sep) showed it. The journal said `Invalid environment variable name
+evaluates to an empty string: l#==> `, and `${last#==> }`, the
+`/testdeploy` job's link, reached bash as an empty string. An empty message
+is not sent, so the build succeeded and the human was never told. `$1`, `$@`
+and `${out:-…}` came through, which is why `/merge`'s job looked fine. The
+suite's fake `systemd-run` passed arguments through untouched, so no case
+could see this.
+
+**Lesson:** a fake that stands in for a program has to stand in for the
+program's transformations too, or at least refuse the input they would
+mangle. Passing arguments through is a claim about the real program, and
+here it was false.
+
+**Prevention:** every `systemd-run` the fleet issues passes
+`--expand-environment=no` (DETACH_CMD's default, and the test server's
+start). The fake `systemd-run` refuses an argument that holds `${` unless
+that flag is given.
+
+**Enforced by:** the tripwire in `test/fakes/systemd-run` (cases 148 and 150
+go red without the flag), the `--expand-environment=no` assertions in cases
+148 and 149, and the `readBotKnobs` defaults row in
+`ts/src/telegram.test.ts`.
+
