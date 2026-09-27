@@ -191,6 +191,16 @@ describe('defaultDeps.spawnDetached', () => {
     const underscore = argv.indexOf('_');
     expect(argv.slice(underscore, underscore + 6)).toEqual(['_', fleetHome, '/l/fleet.lock', 't', '900', '--land']);
   });
+  it('the test-deploy job is the one build unit, with no fleet lock', () => {
+    const rec = join(tmp, 'rec');
+    writeFileSync(rec, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > ${join(tmp, 'argv')}\n`, { mode: 0o755 });
+    const deps = defaultDeps(fleetHome, { PATH: process.env['PATH'] ?? '' }, rec, () => { throw new Error('no lock for a test deploy'); });
+    expect(deps.spawnDetached('test-deploy', ['t', 'epic/x']).status).toBe(0);
+    const argv = readFileSync(join(tmp, 'argv'), 'utf8').split('\n');
+    expect(argv.slice(0, 3)).toEqual(['--unit=fleet-test-deploy-build', 'bash', '-c']);
+    const underscore = argv.indexOf('_');
+    expect(argv.slice(underscore, underscore + 5)).toEqual(['_', fleetHome, 't', 'epic/x', '']);
+  });
   it('a DETACH_CMD that fails is a status, not a throw', () => {
     const deps = defaultDeps(fleetHome, { PATH: process.env['PATH'] ?? '' }, 'false', () => '/l/fleet.lock');
     expect(deps.spawnDetached('merge', ['t', '900', '--land']).status).not.toBe(0);
@@ -227,10 +237,11 @@ describe('resolveRepo', () => {
   it('a registered name is used as given', () => {
     expect(resolveRepo(ctx(), { verb: '/why', repo: 't', arg: '007', rest: '' })).toEqual({ repo: 't', arg: '007', rest: '' });
   });
-  it('one repo: an absent repo, a story id or an epic in its slot shift right', () => {
+  it('one repo: an absent repo, a story id or a branch in its slot shift right', () => {
     expect(resolveRepo(ctx(), { verb: '/why', repo: '007', arg: '', rest: '' })).toEqual({ repo: 't', arg: '007', rest: '' });
     expect(resolveRepo(ctx(), { verb: '/status', repo: '', arg: '', rest: '' })).toEqual({ repo: 't', arg: '', rest: '' });
     expect(resolveRepo(ctx(), { verb: '/merge', repo: 'epic/x', arg: '', rest: '' })).toEqual({ repo: 't', arg: 'epic/x', rest: '' });
+    expect(resolveRepo(ctx(), { verb: '/testdeploy', repo: 'story/032', arg: '', rest: '' })).toEqual({ repo: 't', arg: 'story/032', rest: '' });
     expect(resolveRepo(ctx(), { verb: '/answer', repo: '007', arg: 'yes', rest: 'it is' })).toEqual({ repo: 't', arg: '007', rest: 'yes it is' });
   });
   it('one repo, a misspelt name: told so, not read as a story id', () => {
@@ -367,6 +378,22 @@ describe('dispatch', () => {
     expect(dispatch(ctx(), '/merge t')).toMatch(/^usage: \/merge/);
     expect(dispatch(ctx(), '/merge t 901')).toBe('no such story: 901');
     expect(detached).toHaveLength(2);
+  });
+  it('/testdeploy: a branch is a detached build, no branch is --status, stop is --stop', () => {
+    expect(dispatch(ctx(), '/testdeploy t epic/x')).toMatch(/^building epic\/x for the test URL/);
+    expect(detached).toEqual([['test-deploy', 't', 'epic/x']]);
+    expect(dispatch(ctx(), '/testdeploy t')).toBe('ran test-deploy t --status!');
+    expect(dispatch(ctx(), '/testdeploy t stop')).toBe('ran test-deploy t --stop!');
+    expect(ran).toEqual([['test-deploy', 't', '--status'], ['test-deploy', 't', '--stop']]);
+  });
+  it('/testdeploy refuses what is not a branch name before anything starts', () => {
+    expect(dispatch(ctx(), '/testdeploy t a..b')).toMatch(/^not a branch name: 'a\.\.b'\nusage: \/testdeploy/);
+    expect(dispatch(ctx(), '/testdeploy t --upload-pack=x')).toMatch(/^not a branch name/);
+    expect(detached).toEqual([]);
+  });
+  it('/testdeploy whose build could not be started says so', () => {
+    detachStatus = { status: 1, output: 'Unit fleet-test-deploy-build.service was already loaded\n' };
+    expect(dispatch(ctx(), '/testdeploy t epic/x')).toBe('could not start the test deploy of epic/x — is one still building? Unit fleet-test-deploy-build.service was already loaded');
   });
   it('/merge whose job could not be started says so, with what the starter said', () => {
     detachStatus = { status: 1, output: 'Failed to start transient service unit\n' };

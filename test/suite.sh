@@ -3461,7 +3461,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_144_bot_wait_and_fallback
        case_145_builder_refused_by_claude
        case_146_fallback_reviewer_is_claude case_147_no_attribution
-       case_148_bot_job_is_its_own_unit case_149_test_deploy)
+       case_148_bot_job_is_its_own_unit case_149_test_deploy
+       case_150_bot_testdeploy)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4194,6 +4195,52 @@ case_149_test_deploy() {
   assert_contains "$(cat "$TDLOG")" "waiting up to 20s for the launch lock" "and says it waits"
   assert_eq "$(served)" "epic content" "then deploys"
   wait "$holder" 2>/dev/null
+}
+
+# The phone half. /testdeploy <repo> <branch> answers at once and starts the
+# build as a unit of its own — it takes minutes and the poll has two (L-33,
+# L-34); the build sends the URL when the server answers. With no branch it
+# is --status, with `stop` --stop. With one repo registered a branch in the
+# repo slot is a branch: a repo name never holds a '/'.
+# Red while the verb is unknown; then without the detached job.
+case_150_bot_testdeploy() {
+  CASE="150a /testdeploy builds from the phone and sends the URL when it is up"; fixture c150; td_setup
+  update 130 42 "/testdeploy t epic/test"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" START_CMD="$TD_SERVE" bot poll
+  assert_eq "$(sent)" 1 "the acknowledgement first"
+  assert_contains "$(sent_text)" "building epic/test" "which says it builds"
+  wait_for_send 2
+  assert_contains "$(sent_text)" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) is up at https://test.example" "then the URL"
+  assert_eq "$(served)" "epic content" "and it is served"
+  assert_grep '^--unit=fleet-test-deploy-build$' "$TRACE/systemd-run-args-1" "the build is a unit of its own"
+
+  CASE="150b /testdeploy with no branch is the status, and a branch alone finds the one repo"
+  api_clear
+  update 131 42 "/testdeploy t"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_contains "$(sent_text)" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) at https://test.example — up since" "the status"
+  api_clear
+  update 132 42 "/testdeploy nosuch/branch"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" START_CMD="$TD_SERVE" bot poll
+  assert_contains "$(sent_text)" "building nosuch/branch" "a word with a / is a branch of the one repo"
+  wait_for_send 2
+  assert_contains "$(sent_text)" "no branch nosuch/branch" "whose failure is sent too"
+
+  CASE="150c /testdeploy stop, and a bad name is refused before anything starts"
+  api_clear
+  update 133 42 "/testdeploy t a..b"
+  bot poll
+  assert_contains "$(sent_text)" "not a branch name" "refused"
+  local n; n="$(ls "$TRACE"/systemd-run-args-* | wc -l)"
+  api_clear
+  update 134 42 "/testdeploy t stop"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_contains "$(sent_text)" "stopped t epic/test" "the failed deploy never touched what was served"
+  assert_eq "$(ls "$TRACE"/systemd-run-args-* | wc -l)" "$n" "and no job was started for either"
+  api_clear
+  update 135 42 "/help"
+  bot poll
+  assert_contains "$(sent_text)" "/testdeploy <repo> <branch>" "/help lists it"
 }
 
 for c in "${CASES[@]}"; do

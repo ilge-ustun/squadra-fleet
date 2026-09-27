@@ -38,6 +38,7 @@ import { readReview } from './lib/review.ts';
 import { byCodePoint } from './status.ts';
 import { getUpdates as apiGetUpdates, sendMessage as apiSendMessage } from './lib/telegram-api.ts';
 import { splitCommand } from './launch.ts';
+import { branchNameOk } from './test-deploy.ts';
 
 export const TAG = { tag: 'bot' };
 
@@ -118,10 +119,11 @@ export interface BotDeps {
   /** `bash $FLEET_HOME/fleet <command> <args…>` with both streams captured
    *  in order-of-arrival's nearest equivalent: stdout, then stderr. */
   runFleet: (command: string, args: readonly string[]) => { status: number; output: string };
-  /** The detached /merge job: `fleet merge <args…>` under the fleet lock,
-   *  its output sent back by `fleet telegram send --pre` — started as a unit
-   *  of its own through DETACH_CMD. The status and output are the
-   *  starter's: whether the job started, not how it ended. */
+  /** A job that outlives the poll, started as a unit of its own through
+   *  DETACH_CMD: `merge` is `fleet merge <args…>` under the fleet lock,
+   *  `test-deploy` is `fleet test-deploy <args…>`; each sends its own result.
+   *  The status and output are the starter's: whether the job started, not
+   *  how it ended. */
   spawnDetached: (command: string, args: readonly string[]) => { status: number; output: string };
   /** An argv, output discarded; the exit status. */
   runCommand: (argv: readonly string[]) => number;
@@ -157,6 +159,23 @@ const DETACHED_JOB = [
   'bash "$fleet/fleet" telegram send --pre "${out:-(no output)}"',
 ].join('\n');
 
+// The /testdeploy job: the build, then one message. When the build succeeds,
+// the message is the command's last line, the URL, as plain text so that the
+// phone shows it as a link. When it fails, the message is the tail of its
+// output as a code block. The whole output also goes to the unit's journal
+// (`journalctl --user -u fleet-test-deploy-build`). The unit's fixed name is
+// what stops a second /testdeploy while one is still building: systemd-run
+// refuses a unit that is already loaded. No fleet lock: a test deploy commits
+// nothing, and it takes the launch lock itself.
+const TEST_DEPLOY_JOB = [
+  'fleet="$1"; shift',
+  'log="$(mktemp)"',
+  'bash "$fleet/fleet" test-deploy "$@" 2>&1 | sed "s/\x1b\[[0-9;]*m//g" | tee "$log"',
+  'if (( PIPESTATUS[0] == 0 )); then last="$(tail -n 1 "$log")"; bash "$fleet/fleet" telegram send "${last#==> }"',
+  'else bash "$fleet/fleet" telegram send --pre "$(tail -n 25 "$log")"; fi',
+  'rm -f "$log"',
+].join('\n');
+
 export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, detachCmd: string, lockFile: () => string): BotDeps {
   return {
     io: { log: (m) => logLine(m, TAG), warn: (m) => warnLine(m, TAG) },
@@ -166,10 +185,13 @@ export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, detachCmd
       return { status: r.status, output: r.stdout + r.stderr };
     },
     spawnDetached: (command, args) => {
-      if (command !== 'merge') throw new Error(`telegram.ts: no detached job for ${command}`);
+      let job: string[];
+      if (command === 'merge') job = [`--unit=fleet-merge-${Date.now()}`, 'bash', '-c', DETACHED_JOB, '_', fleetHome, lockFile(), ...args];
+      else if (command === 'test-deploy') job = ['--unit=fleet-test-deploy-build', 'bash', '-c', TEST_DEPLOY_JOB, '_', fleetHome, ...args];
+      else throw new Error(`telegram.ts: no detached job for ${command}`);
       const [cmd, ...words] = splitCommand(detachCmd);
       if (cmd === undefined) return { status: 1, output: 'DETACH_CMD is empty' };
-      const r = runSync(cmd, [...words, `--unit=fleet-merge-${Date.now()}`, 'bash', '-c', DETACHED_JOB, '_', fleetHome, lockFile(), ...args], { env });
+      const r = runSync(cmd, [...words, ...job], { env });
       return { status: r.status, output: r.stdout + r.stderr };
     },
     runCommand: (argv) => {
@@ -320,6 +342,11 @@ const HELP = [
   '  both answer at once and send the result when the baseline is done',
   '/revert <repo> <id> — undo a story\'s merge into its epic',
   '',
+  'Try it before it lands',
+  '/testdeploy <repo> <branch> — build a branch and serve it at the test URL; the link follows when it is up',
+  '/testdeploy <repo> — what the test URL serves now',
+  '/testdeploy <repo> stop — stop serving it',
+  '',
   'Run it',
   '/run — drain the queue now instead of waiting for the timer',
   '/help — this',
@@ -455,20 +482,36 @@ function cmdMerge(c: BotContext, cfg: RepoConfig, what: string): string {
   return `merging ${what} — deps, suite, build and lint run first, so give it a few minutes. The result follows on its own.`;
 }
 
+// A test deploy is the machine's one slot, not a story: the script owns every
+// refusal and every result. The build runs detached, since it takes minutes,
+// and it sends the URL itself. The branch name is checked here first, so that
+// a typo is answered at once rather than a few seconds later.
+function cmdTestDeploy(c: BotContext, cfg: RepoConfig, what: string): string {
+  if (what === '' || what === 'stop') {
+    const r = c.deps.runFleet('test-deploy', [cfg.name, what === '' ? '--status' : '--stop']);
+    return stripAnsi(r.output).replace(/\n$/, '');
+  }
+  if (!branchNameOk(what)) return `not a branch name: '${what}'\nusage: /testdeploy <repo> <branch>  |  /testdeploy <repo>  |  /testdeploy <repo> stop`;
+  const started = c.deps.spawnDetached('test-deploy', [cfg.name, what]);
+  if (started.status !== 0) return `could not start the test deploy of ${what} — is one still building? ${started.output.trim()}`;
+  return `building ${what} for the test URL — install and build take a few minutes; the link follows when it answers.`;
+}
+
 export type Resolved = { repo: string; arg: string; rest: string } | { reply: string };
 
 /** The repo comes first, but with one repo registered naming it every time
  *  is ceremony, and forgetting it used to answer "unknown repo '012'" — a
  *  true statement about the registry, and no use to anyone. With exactly one
  *  repo the words shift right and that repo is used — only when the word in
- *  the repo slot is plainly not a repo name: absent, a story id, or an epic.
+ *  the repo slot is plainly not a repo name: absent, a story id, or a word
+ *  with a '/' in it (an epic, any branch), which no repo name has.
  *  A misspelt repo is told so rather than quietly read as a story id. With
  *  several, nothing is guessed: the reply names the ones that exist. */
 export function resolveRepo(c: BotContext, cmd: Command): Resolved {
   const { repo, arg, rest } = cmd;
   if (repo !== '' && existsSync(join(registryDir(c), `${repo}.env`))) return { repo, arg, rest };
   const only = repoNames(c);
-  if (only.length === 1 && (repo === '' || /^[0-9]{3,}$/.test(repo) || repo.startsWith('epic/'))) {
+  if (only.length === 1 && (repo === '' || /^[0-9]{3,}$/.test(repo) || repo.includes('/'))) {
     return { repo: only[0] ?? '', arg: repo, rest: arg !== '' ? `${arg} ${rest}` : rest };
   }
   return { reply: `unknown repo: ${repo === '' ? '(none given)' : repo}\nknown: ${only.join(' ')}\n/help lists the commands` };
@@ -486,7 +529,7 @@ function dispatchRaw(c: BotContext, text: string): string {
     case '/run': return cmdRun(c);
     case '/help': case '/start': return cmdHelp(c);
     case '/repo': case '/repos': return cmdRepo(c);
-    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': break;
+    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': case '/testdeploy': break;
     default: return cmdHelp(c);
   }
   const r = resolveRepo(c, cmd);
@@ -510,6 +553,7 @@ function dispatchRaw(c: BotContext, text: string): string {
       case '/fallback': return locked(() => cmdFallback(cfg, r.arg));
       case '/revert': return locked(() => cmdRevert(c, cfg, r.arg));
       case '/merge': return locked(() => cmdMerge(c, cfg, r.arg));
+      case '/testdeploy': return cmdTestDeploy(c, cfg, r.arg);
       default: return '';
     }
   } catch (e) {
