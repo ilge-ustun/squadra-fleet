@@ -30,6 +30,7 @@ usage: fleet <command> [args…]
   merge <repo> <id> [--land] | <repo> --epic epic/<name>   a story into its epic, or onto the integration branch
   revert <repo> <id>                                       undo a story's merge
   reset <repo> <id> [--force] [--draft]                    a story back to the queue
+  test-deploy <repo> <branch>|--status|--stop              a branch built and served at the test URL
   telegram send [--pre] <text> | poll                      the notifications and the phone commands
   install-skills                                           link skills/ into ~/.claude/skills
   update-agents                                            the claude and codex CLIs to their newest release
@@ -39,7 +40,7 @@ EOF
 cmd="${1:-}"
 (( $# )) && shift
 case "$cmd" in
-  status|write-story|lint-story|new-epic|launch|run-queue|merge|revert|reset|telegram)
+  status|write-story|lint-story|new-epic|launch|run-queue|merge|revert|reset|test-deploy|telegram)
     program=("$FLEET_HOME/ts/src/bin/$cmd.ts") ;;
   check-mutation)
     program=("$FLEET_HOME/ts/src/bin/mutation.ts" check) ;;

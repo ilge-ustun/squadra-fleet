@@ -25,7 +25,6 @@
 // Telegram was unreachable would be strictly worse than being told late.
 // Inside a command, a die (an unknown repo, a config the loader refuses) is
 // that command's reply.
-import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadRepo as loadRepoThroughBash, type RepoConfig } from './lib/config.ts';
@@ -39,6 +38,7 @@ import { readReview } from './lib/review.ts';
 import { byCodePoint } from './status.ts';
 import { getUpdates as apiGetUpdates, sendMessage as apiSendMessage } from './lib/telegram-api.ts';
 import { splitCommand } from './launch.ts';
+import { branchNameOk } from './test-deploy.ts';
 
 export const TAG = { tag: 'bot' };
 
@@ -87,6 +87,14 @@ export interface BotKnobs {
    *  oneshot of its own with a two-minute start timeout — is killed before
    *  it can answer, and the bot is deaf meanwhile (24–25 Sep, L-33). */
   queueStartCmd: string;
+  /** DETACH_CMD: the words a job that must outlive the poll runs under,
+   *  before its --unit=<name>. A child the poll forks itself is still in
+   *  fleet-bot.service's cgroup, and systemd kills what is left there when
+   *  the oneshot ends — the /merge job died seconds after its
+   *  acknowledgement (L-34). As a transient unit of its own it lives until
+   *  it is done; --collect unloads it then, failed or not, and the poll's
+   *  PATH (node) and HOME go with it, since the manager's have neither. */
+  detachCmd: string;
 }
 
 const num = (v: string | undefined, d: number): number => (v !== undefined && v !== '' && /^[0-9]+(\.[0-9]+)?$/.test(v) ? Number(v) : d);
@@ -99,6 +107,7 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
     sendMax: num(env['SEND_MAX'], 3800),
     lockWait: num(env['FLEET_LOCK_WAIT'], 120),
     queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue.service',
+    detachCmd: env['DETACH_CMD'] ?? 'systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME',
   };
 }
 
@@ -110,9 +119,12 @@ export interface BotDeps {
   /** `bash $FLEET_HOME/fleet <command> <args…>` with both streams captured
    *  in order-of-arrival's nearest equivalent: stdout, then stderr. */
   runFleet: (command: string, args: readonly string[]) => { status: number; output: string };
-  /** The detached /merge job: `fleet merge <args…>` under the fleet lock,
-   *  its output sent back by `fleet telegram send --pre`. */
-  spawnDetached: (command: string, args: readonly string[]) => void;
+  /** A job that outlives the poll, started as a unit of its own through
+   *  DETACH_CMD: `merge` is `fleet merge <args…>` under the fleet lock,
+   *  `test-deploy` is `fleet test-deploy <args…>`; each sends its own result.
+   *  The status and output are the starter's: whether the job started, not
+   *  how it ended. */
+  spawnDetached: (command: string, args: readonly string[]) => { status: number; output: string };
   /** An argv, output discarded; the exit status. */
   runCommand: (argv: readonly string[]) => number;
   /** lib.sh's load_repo, its die text captured so it can be the reply. */
@@ -129,23 +141,42 @@ export interface BotContext {
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-// The /merge job, run detached: its own session, stdio to /dev/null. A
-// merge installs deps and runs the whole post-merge baseline — minutes of
-// work — and the poll is a systemd oneshot with TimeoutStartSec=2min, so a
-// merge run inside it hands systemd the power to kill it (khaita's epic/pwa
-// merge died at exactly two minutes on 22 Sep 2026: worktree left behind,
-// nothing landed, no reply at all). So: detach, acknowledge now, let the
-// merge send its own result. It takes the fleet lock itself, because the
-// poll's lock goes the moment the command returns. (The job inherits no
-// descriptor of the poll's lock — Node hands a child only the stdio it
-// names — so it cannot wait on a lock it already holds a handle to.)
+// The /merge job, run detached: a unit of its own (DETACH_CMD). A merge
+// installs deps and runs the whole post-merge baseline — minutes of work —
+// and the poll is a systemd oneshot with TimeoutStartSec=2min, so a merge
+// run inside it hands systemd the power to kill it (khaita's epic/pwa merge
+// died at exactly two minutes on 22 Sep 2026: worktree left behind, nothing
+// landed, no reply at all). A child forked into the poll's own cgroup fares
+// no better: it is killed when the poll ends (L-34). So: start a unit,
+// acknowledge now, let the merge send its own result. It takes the fleet
+// lock itself, because the poll's lock goes the moment the command returns.
+// (The job inherits no descriptor of the poll's lock — Node hands a child
+// only the stdio it names — so it cannot wait on a lock it already holds a
+// handle to.)
 const DETACHED_JOB = [
   'fleet="$1"; lock="$2"; shift 2',
   'out="$(flock -w 900 "$lock" bash "$fleet/fleet" merge "$@" 2>&1 | sed "s/\\x1b\\[[0-9;]*m//g")"',
   'bash "$fleet/fleet" telegram send --pre "${out:-(no output)}"',
 ].join('\n');
 
-export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile: () => string): BotDeps {
+// The /testdeploy job: the build, then one message. When the build succeeds,
+// the message is the command's last line, the URL, as plain text so that the
+// phone shows it as a link. When it fails, the message is the tail of its
+// output as a code block. The whole output also goes to the unit's journal
+// (`journalctl --user -u fleet-test-deploy-build`). The unit's fixed name is
+// what stops a second /testdeploy while one is still building: systemd-run
+// refuses a unit that is already loaded. No fleet lock: a test deploy commits
+// nothing, and it takes the launch lock itself.
+const TEST_DEPLOY_JOB = [
+  'fleet="$1"; shift',
+  'log="$(mktemp)"',
+  'bash "$fleet/fleet" test-deploy "$@" 2>&1 | sed "s/\x1b\[[0-9;]*m//g" | tee "$log"',
+  'if (( PIPESTATUS[0] == 0 )); then last="$(tail -n 1 "$log")"; bash "$fleet/fleet" telegram send "${last#==> }"',
+  'else bash "$fleet/fleet" telegram send --pre "$(tail -n 25 "$log")"; fi',
+  'rm -f "$log"',
+].join('\n');
+
+export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, detachCmd: string, lockFile: () => string): BotDeps {
   return {
     io: { log: (m) => logLine(m, TAG), warn: (m) => warnLine(m, TAG) },
     api: { sendMessage: apiSendMessage, getUpdates: apiGetUpdates },
@@ -154,8 +185,14 @@ export function defaultDeps(fleetHome: string, env: NodeJS.ProcessEnv, lockFile:
       return { status: r.status, output: r.stdout + r.stderr };
     },
     spawnDetached: (command, args) => {
-      if (command !== 'merge') throw new Error(`telegram.ts: no detached job for ${command}`);
-      spawn('bash', ['-c', DETACHED_JOB, '_', fleetHome, lockFile(), ...args], { detached: true, stdio: 'ignore', env }).unref();
+      let job: string[];
+      if (command === 'merge') job = [`--unit=fleet-merge-${Date.now()}`, 'bash', '-c', DETACHED_JOB, '_', fleetHome, lockFile(), ...args];
+      else if (command === 'test-deploy') job = ['--unit=fleet-test-deploy-build', 'bash', '-c', TEST_DEPLOY_JOB, '_', fleetHome, ...args];
+      else throw new Error(`telegram.ts: no detached job for ${command}`);
+      const [cmd, ...words] = splitCommand(detachCmd);
+      if (cmd === undefined) return { status: 1, output: 'DETACH_CMD is empty' };
+      const r = runSync(cmd, [...words, ...job], { env });
+      return { status: r.status, output: r.stdout + r.stderr };
     },
     runCommand: (argv) => {
       const [cmd, ...args] = argv;
@@ -305,6 +342,11 @@ const HELP = [
   '  both answer at once and send the result when the baseline is done',
   '/revert <repo> <id> — undo a story\'s merge into its epic',
   '',
+  'Try it before it lands',
+  '/testdeploy <repo> <branch> — build a branch and serve it at the test URL; the link follows when it is up',
+  '/testdeploy <repo> — what the test URL serves now',
+  '/testdeploy <repo> stop — stop serving it',
+  '',
   'Run it',
   '/run — drain the queue now instead of waiting for the timer',
   '/help — this',
@@ -435,8 +477,24 @@ function cmdMerge(c: BotContext, cfg: RepoConfig, what: string): string {
   } else {
     return 'usage: /merge <repo> <id>  (a story based on the integration branch)  |  /merge <repo> epic/<name>';
   }
-  c.deps.spawnDetached('merge', args);
+  const started = c.deps.spawnDetached('merge', args);
+  if (started.status !== 0) return `could not start the merge of ${what}: ${started.output.trim()}`;
   return `merging ${what} — deps, suite, build and lint run first, so give it a few minutes. The result follows on its own.`;
+}
+
+// A test deploy is the machine's one slot, not a story: the script owns every
+// refusal and every result. The build runs detached, since it takes minutes,
+// and it sends the URL itself. The branch name is checked here first, so that
+// a typo is answered at once rather than a few seconds later.
+function cmdTestDeploy(c: BotContext, cfg: RepoConfig, what: string): string {
+  if (what === '' || what === 'stop') {
+    const r = c.deps.runFleet('test-deploy', [cfg.name, what === '' ? '--status' : '--stop']);
+    return stripAnsi(r.output).replace(/\n$/, '');
+  }
+  if (!branchNameOk(what)) return `not a branch name: '${what}'\nusage: /testdeploy <repo> <branch>  |  /testdeploy <repo>  |  /testdeploy <repo> stop`;
+  const started = c.deps.spawnDetached('test-deploy', [cfg.name, what]);
+  if (started.status !== 0) return `could not start the test deploy of ${what} — is one still building? ${started.output.trim()}`;
+  return `building ${what} for the test URL — install and build take a few minutes; the link follows when it answers.`;
 }
 
 export type Resolved = { repo: string; arg: string; rest: string } | { reply: string };
@@ -445,14 +503,15 @@ export type Resolved = { repo: string; arg: string; rest: string } | { reply: st
  *  is ceremony, and forgetting it used to answer "unknown repo '012'" — a
  *  true statement about the registry, and no use to anyone. With exactly one
  *  repo the words shift right and that repo is used — only when the word in
- *  the repo slot is plainly not a repo name: absent, a story id, or an epic.
+ *  the repo slot is plainly not a repo name: absent, a story id, or a word
+ *  with a '/' in it (an epic, any branch), which no repo name has.
  *  A misspelt repo is told so rather than quietly read as a story id. With
  *  several, nothing is guessed: the reply names the ones that exist. */
 export function resolveRepo(c: BotContext, cmd: Command): Resolved {
   const { repo, arg, rest } = cmd;
   if (repo !== '' && existsSync(join(registryDir(c), `${repo}.env`))) return { repo, arg, rest };
   const only = repoNames(c);
-  if (only.length === 1 && (repo === '' || /^[0-9]{3,}$/.test(repo) || repo.startsWith('epic/'))) {
+  if (only.length === 1 && (repo === '' || /^[0-9]{3,}$/.test(repo) || repo.includes('/'))) {
     return { repo: only[0] ?? '', arg: repo, rest: arg !== '' ? `${arg} ${rest}` : rest };
   }
   return { reply: `unknown repo: ${repo === '' ? '(none given)' : repo}\nknown: ${only.join(' ')}\n/help lists the commands` };
@@ -470,7 +529,7 @@ function dispatchRaw(c: BotContext, text: string): string {
     case '/run': return cmdRun(c);
     case '/help': case '/start': return cmdHelp(c);
     case '/repo': case '/repos': return cmdRepo(c);
-    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': break;
+    case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': case '/testdeploy': break;
     default: return cmdHelp(c);
   }
   const r = resolveRepo(c, cmd);
@@ -494,6 +553,7 @@ function dispatchRaw(c: BotContext, text: string): string {
       case '/fallback': return locked(() => cmdFallback(cfg, r.arg));
       case '/revert': return locked(() => cmdRevert(c, cfg, r.arg));
       case '/merge': return locked(() => cmdMerge(c, cfg, r.arg));
+      case '/testdeploy': return cmdTestDeploy(c, cfg, r.arg);
       default: return '';
     }
   } catch (e) {
@@ -546,7 +606,8 @@ export async function poll(c: BotContext): Promise<void> {
 
 export function makeContext(fleetHome: string, env: NodeJS.ProcessEnv): BotContext {
   let root: string | undefined;
-  const deps = defaultDeps(fleetHome, env, () => {
+  const knobs = readBotKnobs(env);
+  const deps = defaultDeps(fleetHome, env, knobs.detachCmd, () => {
     if (root === undefined) throw new Error('telegram.ts: the fleet lock needs a loaded repo');
     return lockPath(root);
   });
@@ -556,5 +617,5 @@ export function makeContext(fleetHome: string, env: NodeJS.ProcessEnv): BotConte
     root = cfg.root;
     return cfg;
   };
-  return { fleetHome, env, knobs: readBotKnobs(env), deps };
+  return { fleetHome, env, knobs, deps };
 }

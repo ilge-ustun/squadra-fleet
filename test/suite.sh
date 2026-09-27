@@ -24,6 +24,10 @@
 # and the calls in ts/src/lib/agents.ts), so no launcher change is needed
 # for the substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of
 # repo/, exactly as in production (launch.ts: `${root}/../wt-${storyId}`).
+# test/fakes/{systemd-run,systemctl} stand in for the human's user manager
+# the same way: a detached bot job and a test deploy's server are units of
+# their own there, and a real one started from a fixture would be a real
+# unit — the live test deploy stopped by a suite run.
 #
 # Observing red. Most cases characterise behaviour the scripts already have,
 # so "see it fail first" means: run the case against a copy with the named
@@ -88,7 +92,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm; do
+  for name in claude codex npm systemd-run systemctl; do
     got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
       echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -99,14 +103,15 @@ shadow_check() {                      # shadow_check <fleet-copy> — die unless
 
 # The fleet under test is a copy of a working tree, minus its git metadata,
 # its real registry (a typo'd name in a case must never reach a real
-# checkout), anything machine-local, and ts/node_modules: the TypeScript
-# side's devDependencies (tsc, vitest) are tens of megabytes that would be
-# copied once per case, and nothing under ts/ may need them at run time —
-# their absence in every fixture is what proves that.
+# checkout), anything machine-local (.test-deploy.json names the real
+# target's tree, which a case's --stop would remove), and ts/node_modules:
+# the TypeScript side's devDependencies (tsc, vitest) are tens of megabytes
+# that would be copied once per case, and nothing under ts/ may need them at
+# run time — their absence in every fixture is what proves that.
 copy_fleet() {                        # copy_fleet <src> <dst>
   mkdir -p "$2"
   tar -C "$1" --exclude=./.git --exclude=./repos --exclude=./ts/node_modules -cf - . | tar -C "$2" -xf -
-  rm -rf "$2/.env.fleet" "$2/.bot-offset"
+  rm -rf "$2/.env.fleet" "$2/.bot-offset" "$2/.test-deploy.json"
 }
 
 # The fake Telegram API. Node's fetch never looks at PATH, so no fake on PATH
@@ -130,8 +135,20 @@ api_start() {                         # api_start → API_BASE
   API_BASE="http://127.0.0.1:$(cat "$TRACE/api-port")"
 }
 api_stop() {
+  units_stop
   [[ -n "${FX:-}" && -f "$FX/api.pid" ]] || return 0
   kill "$(cat "$FX/api.pid")" 2>/dev/null; rm -f "$FX/api.pid"
+}
+# Whatever the fake systemd-run started in this fixture — a test deploy's
+# server lives past the command that started it, as the real one does — goes
+# with the fixture.
+units_stop() {
+  [[ -n "${TRACE:-}" && -d "$TRACE/units" ]] || return 0
+  local f
+  for f in "$TRACE"/units/*.pid; do
+    [[ -f "$f" ]] || continue
+    kill -KILL -- "-$(cat "$f")" 2>/dev/null; rm -f "$f"
+  done
 }
 # What reached the API: one request per api-args-N, the URL then the decoded
 # form fields, text= first on its line and a multi-line message's remaining
@@ -3443,7 +3460,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_143_queue_pauses_on_a_refused_review
        case_144_bot_wait_and_fallback
        case_145_builder_refused_by_claude
-       case_146_fallback_reviewer_is_claude case_147_no_attribution)
+       case_146_fallback_reviewer_is_claude case_147_no_attribution
+       case_148_bot_job_is_its_own_unit case_149_test_deploy
+       case_150_bot_testdeploy)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3530,7 +3549,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status write-story lint-story new-epic launch run-queue check-mutation merge revert reset telegram install-skills update-agents; do
+  for c in status write-story lint-story new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -4013,6 +4032,215 @@ case_147_no_attribution() {
       bash "$FLEET/fleet" write-story t 951 "the moon toggle should show a moon" --base epic/test >/dev/null 2>&1 )
   assert_eq "$(calls claude)" 1 "the writer ran"
   assert_eq "$(arg_after --settings "$TRACE/claude-args-1")" "$NO_ATTRIBUTION" "the writer's --settings"
+}
+
+# L-34. A detached child of the poll is still in fleet-bot.service's cgroup,
+# and a oneshot's end kills whatever is left there: the /merge job of case 99
+# was killed seconds after its acknowledgement, every time, and only the
+# suite — which runs the bot outside systemd — ever saw one finish. A job
+# that must outlive the poll is a unit of its own, started with systemd-run.
+# Red while spawnDetached forks the job itself: no systemd-run call.
+case_148_bot_job_is_its_own_unit() {
+  CASE="148 /merge's job runs as a unit of its own, and still reports"; fixture c148
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  update 120 42 "/merge t $STORY"
+  bot poll
+  wait_for_send 2
+  local args="$TRACE/systemd-run-args-1"
+  assert_file "$args" "the job went through systemd-run"
+  assert_grep '^--user$' "$args" "in the human's user manager"
+  assert_grep '^--collect$' "$args" "unloaded when it ends, failed or not"
+  assert_grep '^--unit=fleet-merge-[0-9]+$' "$args" "named for what it is"
+  assert_grep '^--setenv=PATH$' "$args" "with the poll's PATH — the manager's has no node"
+  assert_contains "$(sent_text)" "merged into base" "and its result still reaches the human"
+}
+
+# 27 Sep. A branch on a URL other computers can open, before it lands: the
+# human names the branch, the fleet builds it in <target>/../test-deploy and
+# serves it from a unit of its own on a loopback port, which the web server
+# the human set up once (Caddy, docs/operations.md) publishes with a
+# certificate. One slot on the machine; a deploy replaces what it held.
+#
+# td_setup gives the fixture what production has: a port, a URL, and a
+# server — here a few lines of node serving the tree's src/marker.txt, so a
+# case can tell which branch is being served.
+td_setup() {                          # td_setup → TD_PORT TD_SERVE, and epic/test with its own marker
+  TD_PORT="$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+  cat > "$FX/serve.mjs" <<'EOF'
+import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+createServer((_q, s) => s.end(readFileSync('src/marker.txt'))).listen(Number(process.env.PORT), '127.0.0.1');
+EOF
+  TD_SERVE="exec node $FX/serve.mjs"
+  git -C "$REPO" checkout -q -b epic/test
+  printf 'epic content\n' > "$REPO/src/marker.txt"
+  git -C "$REPO" commit -qam "epic: its own marker"
+  git -C "$REPO" push -q -u origin epic/test
+  git -C "$REPO" checkout -q base
+}
+td() {                                # td <args…> → TDLOG TDRC      (TD_URL= for no URL in the environment)
+  TDLOG="$FX/td.log"
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" \
+      TEST_DEPLOY_URL="${TD_URL-https://test.example}" TEST_DEPLOY_PORT="$TD_PORT" \
+      TEST_DEPLOY_START_WAIT="${TEST_DEPLOY_START_WAIT:-15}" START_CMD="${START_CMD:-$TD_SERVE}" \
+      bash "$FLEET/fleet" test-deploy t "$@" ) > "$TDLOG" 2>&1
+  TDRC=$?
+}
+served() { curl -s --max-time 5 "http://127.0.0.1:$TD_PORT/"; }
+td_unit_pid() { cat "$TRACE/units/fleet-test-deploy.service.pid" 2>/dev/null; }
+
+# Red while `fleet test-deploy` does not exist; then, one at a time, without
+# the seed copy, the stop of the old server, the origin-before-local
+# resolution, the build's die, and the wait for the server to answer.
+case_149_test_deploy() {
+  CASE="149a an epic is built in ../test-deploy and served on the test port"; fixture c149a; td_setup
+  td epic/test
+  assert_eq "$TDRC" 0 "exit code"
+  assert_contains "$(cat "$TDLOG")" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) is up at https://test.example" "the last word is the URL"
+  assert_eq "$(tail -n 1 "$TDLOG" | sed 's/\x1b\[[0-9;]*m//g')" "==> t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) is up at https://test.example" "on the last line"
+  assert_eq "$(served)" "epic content" "the epic's tree is what is served"
+  assert_eq "$(git -C "$FX/test-deploy" rev-parse HEAD)" "$(git -C "$REPO" rev-parse origin/epic/test)" "a worktree at the epic's tip"
+  assert_file "$FX/test-deploy/.env.local" "seeded like any worktree"
+  local a; a="$(ls "$TRACE"/systemd-run-args-* | tail -n 1)"
+  assert_grep '^--unit=fleet-test-deploy$' "$a" "served by the one test unit"
+  assert_grep "^--working-directory=$FX/test-deploy\$" "$a" "from the tree"
+  assert_grep "^--setenv=PORT=$TD_PORT\$" "$a" "on the test port"
+  assert_grep '^--user$' "$a" "in the human's user manager"
+  td --status
+  assert_eq "$TDRC" 0 "--status exit code"
+  assert_contains "$(cat "$TDLOG")" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) at https://test.example — up since" "--status says what is served and that it is up"
+  flock -n "$REPO/.git/fleet-launch.lock" true && ok || fail "the launch lock is free again after the deploy"
+
+  CASE="149b a local story branch replaces it; the old server is stopped"
+  local old; old="$(td_unit_pid)"
+  git -C "$REPO" checkout -q -b "story/$STORY"
+  printf 'story content\n' > "$REPO/src/marker.txt"
+  git -C "$REPO" commit -qam "story: its own marker"
+  git -C "$REPO" checkout -q base
+  td "story/$STORY"
+  assert_eq "$TDRC" 0 "exit code"
+  assert_eq "$(served)" "story content" "the local branch is served — origin has none"
+  kill -0 "$old" 2>/dev/null && fail "the old server still runs" || ok
+  assert_grep '^systemctl --user stop fleet-test-deploy' "$TRACE/calls" "stopped through its unit"
+
+  CASE="149c origin's tip wins over a stale local branch of the same name"
+  git -C "$REPO" branch -f epic/test base
+  td epic/test
+  assert_eq "$(served)" "epic content" "origin/epic/test, not the local one"
+
+  CASE="149d an unknown branch or a bad name is refused and the deploy stays"
+  td nosuch
+  assert_eq "$TDRC" 1 "exit code"
+  assert_contains "$(cat "$TDLOG")" "no branch nosuch on origin or in $REPO" "says so"
+  assert_eq "$(served)" "epic content" "what was served still is"
+  local bad
+  for bad in '--upload-pack=x' 'a..b' 'epic/test;id' ''; do
+    td "$bad"
+    [[ "$TDRC" != 0 ]] && ok || fail "'$bad' was accepted"
+  done
+  assert_eq "$(served)" "epic content" "and still is"
+
+  CASE="149e a red build dies, and nothing is served afterwards"
+  BUILD_CMD=false td epic/test
+  assert_eq "$TDRC" 1 "exit code"
+  assert_contains "$(cat "$TDLOG")" "build failed" "names the step"
+  assert_eq "$(served)" "" "the old server went before the build"
+  td --status
+  assert_contains "$(cat "$TDLOG")" "nothing is deployed for testing" "--status agrees"
+
+  CASE="149f a server that never answers is a die, not a URL"
+  START_CMD=false td epic/test
+  assert_eq "$TDRC" 1 "exit code"
+  assert_contains "$(cat "$TDLOG")" "the server exited" "says so"
+  assert_not_contains "$(cat "$TDLOG")" "is up at" "no URL"
+
+  CASE="149g --stop stops it and removes the tree"
+  td epic/test
+  assert_eq "$(served)" "epic content" "precondition: served"
+  td --stop
+  assert_eq "$TDRC" 0 "exit code"
+  assert_contains "$(cat "$TDLOG")" "stopped t epic/test" "says what it stopped"
+  assert_eq "$(served)" "" "nothing answers"
+  [[ -d "$FX/test-deploy" ]] && fail "the tree is still there" || ok
+  td --stop
+  assert_contains "$(cat "$TDLOG")" "nothing is deployed for testing" "a second stop has nothing to do"
+  assert_eq "$TDRC" 0 "and is not an error"
+
+  CASE="149h no URL: a die naming where it goes; .env.fleet is read"
+  TD_URL= td epic/test
+  assert_eq "$TDRC" 1 "exit code"
+  assert_contains "$(cat "$TDLOG")" "TEST_DEPLOY_URL" "names the setting"
+  assert_contains "$(cat "$TDLOG")" ".env.fleet" "and the file"
+  printf 'TEST_DEPLOY_URL=https://from-file.example\n' > "$FLEET/.env.fleet"
+  TD_URL= td epic/test
+  assert_eq "$TDRC" 0 "read from .env.fleet"
+  assert_contains "$(cat "$TDLOG")" "is up at https://from-file.example" "that URL"
+  rm -f "$FLEET/.env.fleet"
+
+  CASE="149i a launch that holds the lock is waited for, up to TEST_DEPLOY_LOCK_WAIT"; fixture c149i; td_setup
+  printf '4242 launch 900\n' > "$REPO/.git/fleet-launch.lock"
+  # -o: the lock stays with flock, not its sleep, so killing flock frees it.
+  flock -o "$REPO/.git/fleet-launch.lock" sleep 30 & local holder=$!
+  wait_for 5 bash -c "! flock -n '$REPO/.git/fleet-launch.lock' true"
+  TEST_DEPLOY_LOCK_WAIT=1 td epic/test
+  assert_eq "$TDRC" 75 "busy, as a second launch is"
+  assert_contains "$(cat "$TDLOG")" "4242 launch 900" "names the holder"
+  assert_no_file "$TRACE/systemd-run-args-1" "nothing was started"
+  [[ -d "$FX/test-deploy" ]] && fail "a tree was made" || ok
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  flock "$REPO/.git/fleet-launch.lock" sleep 2 & holder=$!
+  wait_for 5 bash -c "! flock -n '$REPO/.git/fleet-launch.lock' true"
+  TEST_DEPLOY_LOCK_WAIT=20 td epic/test
+  assert_eq "$TDRC" 0 "a holder that lets go in time is waited for"
+  assert_contains "$(cat "$TDLOG")" "waiting up to 20s for the launch lock" "and says it waits"
+  assert_eq "$(served)" "epic content" "then deploys"
+  wait "$holder" 2>/dev/null
+}
+
+# The phone half. /testdeploy <repo> <branch> answers at once and starts the
+# build as a unit of its own — it takes minutes and the poll has two (L-33,
+# L-34); the build sends the URL when the server answers. With no branch it
+# is --status, with `stop` --stop. With one repo registered a branch in the
+# repo slot is a branch: a repo name never holds a '/'.
+# Red while the verb is unknown; then without the detached job.
+case_150_bot_testdeploy() {
+  CASE="150a /testdeploy builds from the phone and sends the URL when it is up"; fixture c150; td_setup
+  update 130 42 "/testdeploy t epic/test"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" START_CMD="$TD_SERVE" bot poll
+  assert_eq "$(sent)" 1 "the acknowledgement first"
+  assert_contains "$(sent_text)" "building epic/test" "which says it builds"
+  wait_for_send 2
+  assert_contains "$(sent_text)" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) is up at https://test.example" "then the URL"
+  assert_eq "$(served)" "epic content" "and it is served"
+  assert_grep '^--unit=fleet-test-deploy-build$' "$TRACE/systemd-run-args-1" "the build is a unit of its own"
+
+  CASE="150b /testdeploy with no branch is the status, and a branch alone finds the one repo"
+  api_clear
+  update 131 42 "/testdeploy t"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_contains "$(sent_text)" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) at https://test.example — up since" "the status"
+  api_clear
+  update 132 42 "/testdeploy nosuch/branch"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" START_CMD="$TD_SERVE" bot poll
+  assert_contains "$(sent_text)" "building nosuch/branch" "a word with a / is a branch of the one repo"
+  wait_for_send 2
+  assert_contains "$(sent_text)" "no branch nosuch/branch" "whose failure is sent too"
+
+  CASE="150c /testdeploy stop, and a bad name is refused before anything starts"
+  api_clear
+  update 133 42 "/testdeploy t a..b"
+  bot poll
+  assert_contains "$(sent_text)" "not a branch name" "refused"
+  local n; n="$(ls "$TRACE"/systemd-run-args-* | wc -l)"
+  api_clear
+  update 134 42 "/testdeploy t stop"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_contains "$(sent_text)" "stopped t epic/test" "the failed deploy never touched what was served"
+  assert_eq "$(ls "$TRACE"/systemd-run-args-* | wc -l)" "$n" "and no job was started for either"
+  api_clear
+  update 135 42 "/help"
+  bot poll
+  assert_contains "$(sent_text)" "/testdeploy <repo> <branch>" "/help lists it"
 }
 
 for c in "${CASES[@]}"; do

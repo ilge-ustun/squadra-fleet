@@ -248,6 +248,8 @@ it from anywhere; it finds its tree through the link.
 | `fleet merge <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
 | `fleet revert <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
 | `fleet reset <repo> <id> [--force] [--draft]` | | back to the queue |
+| `fleet test-deploy <repo> <branch>` | | build a branch (an epic from origin, a story branch from the checkout) and serve it at the test URL, replacing what was there; waits for a running launch, then 75 |
+| `fleet test-deploy <repo> --status` · `--stop` | | what the test URL serves and whether it is up · stop it and remove its tree |
 | `fleet install-skills` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
 | `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
 
@@ -256,6 +258,15 @@ sends the result when it ends. It has to be — the merge installs deps and
 runs the whole post-merge baseline, and the poll that answers the command is
 a systemd oneshot with a two-minute start timeout, which kills a merge
 mid-flight. At a terminal `fleet merge` is synchronous.
+
+A test deploy is not a deploy: production stays the human's own, by hand. It
+serves one branch from this machine, at the URL the web server publishes
+(the one-time setup is in `docs/operations.md`), so that other computers and
+phones can try it before it lands. There is one slot on the machine, and the
+next deploy of any repo replaces what it held. The build runs under the
+target's launch lock, so it never runs beside a story's. The server is the
+user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
+(`journalctl --user -u fleet-test-deploy`).
 
 Run a launcher detached, never as a child of an interactive agent session:
 
@@ -300,6 +311,7 @@ environment wins over the file; a missing required key is a `die`.
 | `REPO_RULES` | no | markdown file rendered into the builder's rules as `{{REPO_RULES}}` |
 | `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
 | `PR_CMD` | with `pr` | see below |
+| `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. A Next app that should listen on loopback only: `npx next start -H 127.0.0.1` |
 
 `.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
 test environment's known traps, an API to read in `node_modules` before
@@ -409,11 +421,17 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
 | `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `DETACH_CMD` | `systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
+| `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |
+| `TEST_DEPLOY_PORT` | 4100 | the loopback port the test server listens on and the web server passes to; also read from `.env.fleet` |
+| `TEST_DEPLOY_LOCK_WAIT` | 3600 | seconds a test deploy waits for a launch to let go of the repo |
+| `TEST_DEPLOY_START_WAIT` | 90 | seconds for the test server to answer before the deploy is a die |
 
 Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `../wt-<id>-review` for the reviewer, `../ws-<id>` for the story writer,
-`../merge-<name>` for a merge. All are throwaway.
+`../merge-<name>` for a merge, `../test-deploy` for the test deploy (kept
+while it serves, made afresh by the next one). All are throwaway.
 
 ## Changing the fleet
 

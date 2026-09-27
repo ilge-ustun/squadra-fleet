@@ -1,3 +1,4 @@
 .env.fleet
 .bot-offset
+.test-deploy.json
 ts/node_modules/

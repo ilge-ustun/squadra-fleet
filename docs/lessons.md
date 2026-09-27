@@ -596,3 +596,33 @@ say why, so a hand-set command keeps the property.
 can observe it: its bot sets `QUEUE_START_CMD=true`; the proof is a `/run`
 from the phone answered within seconds.
 
+### L-34 — a detached child still belongs to its unit's cgroup
+
+After L-33's cousin on 22 Sep (the epic/pwa merge killed at the poll's
+two-minute timeout), `/merge` forked its job with `detached: true` and
+answered at once. That fixed the timeout, but not the kill. A detached
+process is a new session, but it stays in the same cgroup, and when a
+oneshot's main process exits, systemd kills what is left in the unit's cgroup
+(`KillMode=control-group`, the default). Every `/merge` since then would
+have died seconds after "merging …", before landing anything or sending its
+result. None was sent in production, and the suite runs the bot outside
+systemd, where nothing kills the child, so case 99 passed throughout. Found
+on 27 Sep with a transient oneshot whose `setsid sleep` child was gone as soon
+as the unit ended.
+
+**Lesson:** a test that runs outside the supervisor cannot see what the
+supervisor does. Whether a process can outlive its caller depends on the
+caller's unit, not on how the process was forked.
+
+**Prevention:** a job that must outlive the poll is a unit of its own:
+`DETACH_CMD`, default `systemd-run --user --collect --quiet --setenv=PATH
+--setenv=HOME`, then `--unit=<name>`. The poll's PATH and HOME go along,
+because the manager's environment has no node. Checked on the machine: a
+unit started from inside another unit outlives it.
+
+**Enforced by:** `case_148_bot_job_is_its_own_unit`, with the fakes
+`test/fakes/systemd-run` and `test/fakes/systemctl` (both in
+`shadow_check`: a real one started from a fixture would be a real unit), and
+the `defaultDeps.spawnDetached` rows in `ts/src/telegram.test.ts`, red
+against the fork.
+

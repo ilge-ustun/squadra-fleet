@@ -26,7 +26,8 @@ timers run it — so it is changed in a worktree (the `fleet-develop` skill).
   BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR`, optional `REPO_RULES` (a markdown
   file, relative to the target, rendered into the agent prompts), optional
   `MERGE_MODE` (`direct`, the default, or `pr` — which requires `PR_CMD`;
-  the contract is in `README.md`).
+  the contract is in `README.md`), optional `START_CMD` (how `fleet
+  test-deploy` serves a built tree; `npm start` when absent).
   Missing file or missing key is a `die`. A variable already in the caller's
   environment wins over the file.
 - Every command takes the repo name first: `./fleet launch <repo> <id>`,
@@ -41,7 +42,8 @@ timers run it — so it is changed in a worktree (the `fleet-develop` skill).
   or `/merge` — never the queue.
 - Per-repo state (`.stories/ .review/ .blocked/` committed; `.runs/
   .review-out/` ignored) lives in the target. Machine-local fleet files
-  (`.env.fleet` with the bot token, `.bot-offset`) live here, gitignored.
+  (`.env.fleet` with the bot token and `TEST_DEPLOY_URL`, `.bot-offset`,
+  `.test-deploy.json`) live here, gitignored.
 
 ## Tests
 

@@ -13,7 +13,7 @@
 #   <target>/.fleet/config    the target's own settings, sourced by load_repo:
 #                             BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD
 #                             LINT_CMD SEED_FILES PROBE_DIR, optional
-#                             REPO_RULES MERGE_MODE PR_CMD
+#                             REPO_RULES MERGE_MODE PR_CMD START_CMD
 #
 # A variable already in the caller's environment wins over the file, so a
 # test can point VITEST_CMD at a fake and a hand run can override one value
@@ -24,7 +24,7 @@
 FLEET_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_REGISTRY_DIR="${FLEET_REGISTRY_DIR:-$FLEET_HOME/repos}"
 
-FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD"
+FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD START_CMD"
 FLEET_REPO_REQUIRED="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD PROBE_DIR"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'

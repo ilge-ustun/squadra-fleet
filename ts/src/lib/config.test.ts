@@ -104,6 +104,12 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(c.repoRules).toBe('.fleet/rules.md');
   });
 
+  it('START_CMD comes through when set, and is absent when not', () => {
+    expect(load().startCmd).toBeUndefined();
+    appendFileSync(join(target, '.fleet/config'), "START_CMD='npx next start -H 127.0.0.1'\n");
+    expect(load().startCmd).toBe('npx next start -H 127.0.0.1');
+  });
+
   it('a value with quotes, a dollar and a newline round-trips byte for byte', () => {
     const odd = 'say "hi" $HOME `x`\\ and\nmore';
     writeConfig(`${CONFIG}BUILD_CMD=${JSON.stringify(odd).replace(/^"|"$/g, "'").replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')}\n`);
