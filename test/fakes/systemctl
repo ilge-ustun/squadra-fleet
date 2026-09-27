@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# fleet/test/fakes/systemctl — stand-in for `systemctl --user …` under
+# fleet/test/suite.sh, over the units the fake systemd-run started
+# (units/<name>.pid). The real one would stop or start the human's own units
+# from inside a test, so shadow_check makes sure this is what resolves.
+#
+# Records a `systemctl <args>` line in calls, then:
+#   is-active <unit>     prints active and exits 0 while the unit's process
+#                        lives; otherwise inactive, exit 3
+#   stop <unit>          TERM to the unit's process group, KILL after 5 s;
+#                        a unit that is not running is "not loaded", exit 5
+#   reset-failed <unit>  nothing to do, exit 0
+# Anything else is not modelled and fails loudly.
+#
+trace="${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
+echo "systemctl $*" >> "$trace/calls"
+
+words=()
+for a in "$@"; do
+  case "$a" in --user|--quiet|-q|--no-block) ;; *) words+=("$a") ;; esac
+done
+verb="${words[0]:-}" unit="${words[1]:-}"
+[[ "$unit" == *.service ]] || unit="$unit.service"
+pidf="$trace/units/$unit.pid"
+alive() { [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; }
+
+case "$verb" in
+  is-active)
+    if alive; then echo active; exit 0; fi
+    echo inactive; exit 3 ;;
+  stop)
+    if ! alive; then
+      rm -f "$pidf"
+      echo "Failed to stop $unit: Unit $unit not loaded." >&2
+      exit 5
+    fi
+    pid="$(cat "$pidf")"
+    kill -TERM -- "-$pid" 2>/dev/null
+    for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    kill -KILL -- "-$pid" 2>/dev/null
+    rm -f "$pidf"
+    exit 0 ;;
+  reset-failed)
+    exit 0 ;;
+  *)
+    echo "fake systemctl: '$verb' is not modelled" >&2
+    exit 1 ;;
+esac

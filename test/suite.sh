@@ -24,6 +24,10 @@
 # and the calls in ts/src/lib/agents.ts), so no launcher change is needed
 # for the substitution. Worktrees land as $TMP/<case>/wt-<id>, siblings of
 # repo/, exactly as in production (launch.ts: `${root}/../wt-${storyId}`).
+# test/fakes/{systemd-run,systemctl} stand in for the human's user manager
+# the same way: a detached bot job and a test deploy's server are units of
+# their own there, and a real one started from a fixture would be a real
+# unit — the live test deploy stopped by a suite run.
 #
 # Observing red. Most cases characterise behaviour the scripts already have,
 # so "see it fail first" means: run the case against a copy with the named
@@ -88,7 +92,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm; do
+  for name in claude codex npm systemd-run systemctl; do
     got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
       echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -130,8 +134,20 @@ api_start() {                         # api_start → API_BASE
   API_BASE="http://127.0.0.1:$(cat "$TRACE/api-port")"
 }
 api_stop() {
+  units_stop
   [[ -n "${FX:-}" && -f "$FX/api.pid" ]] || return 0
   kill "$(cat "$FX/api.pid")" 2>/dev/null; rm -f "$FX/api.pid"
+}
+# Whatever the fake systemd-run started in this fixture — a test deploy's
+# server lives past the command that started it, as the real one does — goes
+# with the fixture.
+units_stop() {
+  [[ -n "${TRACE:-}" && -d "$TRACE/units" ]] || return 0
+  local f
+  for f in "$TRACE"/units/*.pid; do
+    [[ -f "$f" ]] || continue
+    kill -KILL -- "-$(cat "$f")" 2>/dev/null; rm -f "$f"
+  done
 }
 # What reached the API: one request per api-args-N, the URL then the decoded
 # form fields, text= first on its line and a multi-line message's remaining
@@ -3443,7 +3459,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_143_queue_pauses_on_a_refused_review
        case_144_bot_wait_and_fallback
        case_145_builder_refused_by_claude
-       case_146_fallback_reviewer_is_claude case_147_no_attribution)
+       case_146_fallback_reviewer_is_claude case_147_no_attribution
+       case_148_bot_job_is_its_own_unit)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4013,6 +4030,27 @@ case_147_no_attribution() {
       bash "$FLEET/fleet" write-story t 951 "the moon toggle should show a moon" --base epic/test >/dev/null 2>&1 )
   assert_eq "$(calls claude)" 1 "the writer ran"
   assert_eq "$(arg_after --settings "$TRACE/claude-args-1")" "$NO_ATTRIBUTION" "the writer's --settings"
+}
+
+# L-34. A detached child of the poll is still in fleet-bot.service's cgroup,
+# and a oneshot's end kills whatever is left there: the /merge job of case 99
+# was killed seconds after its acknowledgement, every time, and only the
+# suite — which runs the bot outside systemd — ever saw one finish. A job
+# that must outlive the poll is a unit of its own, started with systemd-run.
+# Red while spawnDetached forks the job itself: no systemd-run call.
+case_148_bot_job_is_its_own_unit() {
+  CASE="148 /merge's job runs as a unit of its own, and still reports"; fixture c148
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  update 120 42 "/merge t $STORY"
+  bot poll
+  wait_for_send 2
+  local args="$TRACE/systemd-run-args-1"
+  assert_file "$args" "the job went through systemd-run"
+  assert_grep '^--user$' "$args" "in the human's user manager"
+  assert_grep '^--collect$' "$args" "unloaded when it ends, failed or not"
+  assert_grep '^--unit=fleet-merge-[0-9]+$' "$args" "named for what it is"
+  assert_grep '^--setenv=PATH$' "$args" "with the poll's PATH — the manager's has no node"
+  assert_contains "$(sent_text)" "merged into base" "and its result still reaches the human"
 }
 
 for c in "${CASES[@]}"; do

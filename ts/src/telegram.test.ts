@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
 import type { RepoConfig } from './lib/config.ts';
 import {
-  type BotDeps, type BotContext, configuredFrom, dispatch, htmlPre, isoSeconds, machineBlockBody, parseCommand, poll,
+  type BotDeps, type BotContext, configuredFrom, defaultDeps, dispatch, htmlPre, isoSeconds, machineBlockBody, parseCommand, poll,
   readBotKnobs, resolveRepo, send, splitText, storyOk,
 } from './telegram.ts';
 
@@ -86,6 +86,7 @@ let warned: string[];
 let sent: { text: string; parseMode: string | undefined }[];
 let ran: string[][];
 let detached: string[][];
+let detachStatus: { status: number; output: string };
 let commands: string[][];
 let updatesBody: () => Awaited<ReturnType<BotDeps['api']['getUpdates']>>;
 let sendOk: boolean;
@@ -109,7 +110,7 @@ function ctx(extraEnv: Record<string, string> = {}): BotContext {
       getUpdates: async () => updatesBody(),
     },
     runFleet: (command, args) => { ran.push([command, ...args]); return { status: 0, output: `ran ${command} ${args.join(' ')}\x1b[32m!\x1b[0m` }; },
-    spawnDetached: (command, args) => { detached.push([command, ...args]); },
+    spawnDetached: (command, args) => { detached.push([command, ...args]); return detachStatus; },
     runCommand: (argv) => { commands.push([...argv]); return argv[0] === 'false' ? 1 : 0; },
     loadRepo: (_home, name) => { if (name === 't') return cfg(); throw new Error(`unknown repo '${name}'`); },
     now: () => new Date(2026, 8, 25, 10, 6, 8),
@@ -130,6 +131,7 @@ beforeEach(() => {
   git('config', 'user.name', 'fleet-test'); git('config', 'user.email', 'fleet-test@localhost');
   git('add', '.'); git('commit', '-q', '-m', 'fixture');
   logged = []; warned = []; sent = []; ran = []; detached = []; commands = [];
+  detachStatus = { status: 0, output: '' };
   updatesBody = () => ({ ok: true, updates: [] });
   sendOk = true;
 });
@@ -162,11 +164,36 @@ describe('configuredFrom', () => {
 
 describe('readBotKnobs', () => {
   it('defaults', () => {
-    expect(readBotKnobs({})).toEqual({ base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue.service' });
+    expect(readBotKnobs({})).toEqual({
+      base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue.service',
+      detachCmd: 'systemd-run --user --collect --quiet --setenv=PATH --setenv=HOME',
+    });
   });
   it('from the environment', () => {
-    expect(readBotKnobs({ TELEGRAM_API_BASE: 'http://h', TELEGRAM_TIMEOUT: '5', SEND_MAX: '10', FLEET_LOCK_WAIT: '1', QUEUE_START_CMD: 'true' }))
-      .toEqual({ base: 'http://h', timeoutSec: 5, sendMax: 10, lockWait: 1, queueStartCmd: 'true' });
+    expect(readBotKnobs({ TELEGRAM_API_BASE: 'http://h', TELEGRAM_TIMEOUT: '5', SEND_MAX: '10', FLEET_LOCK_WAIT: '1', QUEUE_START_CMD: 'true', DETACH_CMD: 'd' }))
+      .toEqual({ base: 'http://h', timeoutSec: 5, sendMax: 10, lockWait: 1, queueStartCmd: 'true', detachCmd: 'd' });
+  });
+});
+
+// A detached job outlives the poll only as a unit of its own (L-34): the
+// DETACH_CMD words, the unit's name, then the job's bash and its arguments.
+describe('defaultDeps.spawnDetached', () => {
+  it('starts the job through DETACH_CMD with a unit name, and hands back its status and output', () => {
+    const rec = join(tmp, 'rec');
+    writeFileSync(rec, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > ${join(tmp, 'argv')}\necho started\n`, { mode: 0o755 });
+    const deps = defaultDeps(fleetHome, { PATH: process.env['PATH'] ?? '' }, `${rec} --user`, () => '/l/fleet.lock');
+    expect(deps.spawnDetached('merge', ['t', '900', '--land'])).toEqual({ status: 0, output: 'started\n' });
+    const argv = readFileSync(join(tmp, 'argv'), 'utf8').split('\n');
+    expect(argv[0]).toBe('--user');
+    expect(argv[1]).toMatch(/^--unit=fleet-merge-[0-9]+$/);
+    expect(argv.slice(2, 4)).toEqual(['bash', '-c']);
+    // The job is several lines, so the record is split on its own newlines too.
+    const underscore = argv.indexOf('_');
+    expect(argv.slice(underscore, underscore + 6)).toEqual(['_', fleetHome, '/l/fleet.lock', 't', '900', '--land']);
+  });
+  it('a DETACH_CMD that fails is a status, not a throw', () => {
+    const deps = defaultDeps(fleetHome, { PATH: process.env['PATH'] ?? '' }, 'false', () => '/l/fleet.lock');
+    expect(deps.spawnDetached('merge', ['t', '900', '--land']).status).not.toBe(0);
   });
 });
 
@@ -340,6 +367,10 @@ describe('dispatch', () => {
     expect(dispatch(ctx(), '/merge t')).toMatch(/^usage: \/merge/);
     expect(dispatch(ctx(), '/merge t 901')).toBe('no such story: 901');
     expect(detached).toHaveLength(2);
+  });
+  it('/merge whose job could not be started says so, with what the starter said', () => {
+    detachStatus = { status: 1, output: 'Failed to start transient service unit\n' };
+    expect(dispatch(ctx(), '/merge t epic/x')).toBe('could not start the merge of epic/x: Failed to start transient service unit');
   });
   it('a reply never ends in newlines, as $(…) leaves it', () => {
     expect(dispatch(ctx(), '/help')).not.toMatch(/\n$/);

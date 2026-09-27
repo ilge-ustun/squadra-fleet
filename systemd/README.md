@@ -140,7 +140,7 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | `.service` | `AGENT_TIMEOUT=1800` | wall clock per agent call; a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
 | `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is in use before the fleet starts (`free -m` on an idle box) and a Next build peaks near 1.4 GB (`docs/operations.md`) |
 | `.service` | `TimeoutStartSec=6h` | a full drain is long; `AGENT_TIMEOUT` already bounds the part that can hang |
-| `fleet-bot.service` | `TimeoutStartSec=2min` | a poll is one request and a few git commands. `/run` starts the queue with `--no-block`: a plain `systemctl start` on a oneshot waits for the whole drain, and the poll was killed at two minutes with its reply unsent and the bot deaf meanwhile |
+| `fleet-bot.service` | `TimeoutStartSec=2min` | a poll is one request and a few git commands. `/run` starts the queue with `--no-block`: a plain `systemctl start` on a oneshot waits for the whole drain, and the poll was killed at two minutes with its reply unsent and the bot deaf meanwhile. `/merge`'s job is a transient unit of its own (`fleet-merge-<ms>`, `DETACH_CMD`): a child left in this oneshot's cgroup is killed when the poll ends (L-34) |
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
 | `fleet-bot.timer` | `Persistent=false` | a missed poll is not worth catching up; the offset means nothing is lost by being late |
 

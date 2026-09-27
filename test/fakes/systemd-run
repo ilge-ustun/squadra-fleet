@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# fleet/test/fakes/systemd-run — stand-in for `systemd-run --user …` under
+# fleet/test/suite.sh. The real one would start real units in the human's
+# user manager from inside a test — a fixture's server as the live
+# fleet-test-deploy, say — so shadow_check makes sure this is what resolves.
+#
+# Records its argv, one argument per line, in systemd-run-args-N and a
+# `systemd-run` line in calls, then does what the real one does with the
+# command after the options: starts it in a session of its own, detached,
+# and returns at once. --unit=<name> names the unit (<name>.service); its
+# pid is units/<name>.service.pid and its output units/<name>.service.log,
+# which the fake systemctl reads. A second start of a unit that is still
+# running fails, as the real one does. --setenv=K=V is applied; a bare
+# --setenv=K copies K from the caller, which the child inherits here anyway.
+# --working-directory=<dir> is the child's cwd. Every other option is taken
+# and ignored.
+#
+trace="${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
+n=1
+while [[ -e "$trace/systemd-run-args-$n" ]]; do n=$((n + 1)); done
+printf '%s\n' "$@" > "$trace/systemd-run-args-$n"
+echo "systemd-run" >> "$trace/calls"
+
+unit="" cwd=""
+envs=()
+while (( $# )); do
+  case "$1" in
+    --unit=*)              unit="${1#--unit=}" ;;
+    --working-directory=*) cwd="${1#--working-directory=}" ;;
+    --setenv=*=*)          envs+=("${1#--setenv=}") ;;
+    -p|--property|-E|--setenv|-u|--unit|-d) shift ;;
+    --)                    shift; break ;;
+    -*)                    ;;
+    *)                     break ;;
+  esac
+  shift
+done
+(( $# )) || { echo "fake systemd-run: no command" >&2; exit 1; }
+[[ -n "$unit" ]] || unit="run-u$n"
+[[ "$unit" == *.service ]] || unit="$unit.service"
+
+mkdir -p "$trace/units"
+pidf="$trace/units/$unit.pid"
+if [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+  echo "Failed to start transient service unit: Unit $unit was already loaded or has a fragment file." >&2
+  exit 1
+fi
+# Not a job-control shell, so the subshell is no group leader and setsid
+# execs without forking: $! is the command's own pid, and the leader of the
+# group the fake systemctl signals.
+(
+  if [[ -n "$cwd" ]]; then cd "$cwd" || exit 1; fi
+  exec env "${envs[@]}" setsid "$@"
+) < /dev/null > "$trace/units/$unit.log" 2>&1 &
+echo $! > "$pidf"
+exit 0

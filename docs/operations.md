@@ -152,6 +152,10 @@ deploys — belongs to that target, not here.
   `start` waits for the whole unit, and the poll's two-minute timeout
   killed it mid-drain with its reply unsent (L-33). A drain already running
   makes the start a no-op; the reply is still true.
+- **A bot job that outlives the poll is a unit of its own.** `/merge`
+  starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
+  child forked inside the poll was killed with the poll's cgroup, seconds
+  after the acknowledgement (L-34).
 - **Commits and PRs name the human only.** No `Co-Authored-By`,
   `Claude-Session`, "Generated with" or model trailer, from the builder, a
   coordinator or an interactive session (the human's decision, 26 Sep). The
