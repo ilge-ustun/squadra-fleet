@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Die } from './lib/die.ts';
 import { runSync } from './lib/proc.ts';
-import { branchNameOk, branchTip, localMinute, readKnobs, readState, stateFile, treeDir } from './test-deploy.ts';
+import { branchNameOk, branchTip, localMinute, readKnobs, readState, readWaiting, stateFile, treeDir, waitingFile, waitingLine } from './test-deploy.ts';
 
 // Only the parts that touch no unit: status, stop and deploy call the real
 // systemctl and systemd-run, so they are the suite's (case 149, with fakes
@@ -81,5 +81,41 @@ describe('the tree and the record', () => {
   });
   it('the time is local, to the minute', () => {
     expect(localMinute(new Date(2026, 8, 27, 9, 5, 59))).toBe('2026-09-27 09:05');
+  });
+});
+
+describe('waitingLine', () => {
+  it('names the holder, the branch and the limit', () => {
+    expect(waitingLine('khaita', 'epic/x', '1772248 story 045', 3600)).toBe(
+      'khaita epic/x: waiting for the launch lock — story 045 (pid 1772248) holds it; the build starts when it is free, and gives up after 60 min',
+    );
+  });
+  it('gives a limit that is not whole minutes in seconds', () => {
+    expect(waitingLine('t', 'b', '42 launch 900', 20)).toContain('gives up after 20s');
+  });
+  it('says so when the holder is unknown', () => {
+    expect(waitingLine('t', 'b', '', 60)).toContain('— an unknown launch holds it;');
+    expect(waitingLine('t', 'b', '42', 60)).toContain('— a launch (pid 42) holds it;');
+  });
+});
+
+describe('readWaiting', () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'td-wait-')); });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  it('is undefined with no file', () => {
+    expect(readWaiting(home)).toBeUndefined();
+  });
+  it('is the line while its writer lives', () => {
+    writeFileSync(waitingFile(home), `${process.pid}\nt b: waiting for the launch lock — x\n`);
+    expect(readWaiting(home)).toBe('t b: waiting for the launch lock — x');
+  });
+  it('is undefined once its writer is gone, or when the file is not its shape', () => {
+    const dead = runSync('bash', ['-c', 'echo $$']).stdout.trim();
+    writeFileSync(waitingFile(home), `${dead}\nt b: waiting\n`);
+    expect(readWaiting(home)).toBeUndefined();
+    writeFileSync(waitingFile(home), 'garbage');
+    expect(readWaiting(home)).toBeUndefined();
   });
 });

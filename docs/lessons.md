@@ -683,3 +683,29 @@ pushes what its merge left ahead.
 
 **Enforced by:** case 151 (a–d) and the `pushFollowingUpstream` tests in
 `ts/src/lib/git.test.ts`.
+
+### L-37 — a wait nobody is told about looks like a hang
+
+On 28 Sep the human sent `/testdeploy khaita epic/mobile-polish` at 10:54:01.
+Three seconds earlier the queue had launched story 045 on opus, which took the
+repo's launch lock. The deploy waited for the lock, as designed (a Next build
+beside a story's build does not fit in 3.8 GB), and said so only in its own
+log: `waiting up to 3600s for the launch lock — held by 1772248 story 045`.
+The job forwarded nothing until the end, so the phone showed "building…" and
+then silence. After 26 minutes the human asked what was going on.
+
+**Lesson:** a deliberate wait is only correct if the person waiting can see
+it. A log line is not a message: nobody reads a unit's journal from a phone.
+Anything that can block for minutes on something else says, at the moment it
+starts waiting, what it waits for and for how long.
+
+**Prevention:** the waiting line names the holder, the branch and the limit
+(`<repo> <branch>: waiting for the launch lock — story 045 (pid N) holds it;
+the build starts when it is free, and gives up after 60 min`). The bot's
+`/testdeploy` job forwards it the moment it is logged (`sed -u`, a read loop),
+and `fleet test-deploy --status` repeats it from `.test-deploy-waiting` while
+the waiting process lives.
+
+**Enforced by:** case 150d (the phone gets the line while the lock is held,
+and the status says it waits), case 149i (the line's wording), and the
+`waitingLine` / `readWaiting` unit tests in `ts/src/test-deploy.test.ts`.

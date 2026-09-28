@@ -248,7 +248,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet merge <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
 | `fleet revert <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
 | `fleet reset <repo> <id> [--force] [--draft]` | | back to the queue |
-| `fleet test-deploy <repo> <branch>` | | build a branch (an epic from origin, a story branch from the checkout) and serve it at the test URL, replacing what was there; waits for a running launch, then 75 |
+| `fleet test-deploy <repo> <branch>` | | build a branch (an epic from origin, a story branch from the checkout) and serve it at the test URL, replacing what was there; waits for a running launch, saying which, then 75 |
 | `fleet test-deploy <repo> --status` · `--stop` | | what the test URL serves and whether it is up · stop it and remove its tree |
 | `fleet install-skills` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
 | `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
@@ -264,7 +264,10 @@ serves one branch from this machine, at the URL the web server publishes
 (the one-time setup is in `docs/operations.md`), so that other computers and
 phones can try it before it lands. There is one slot on the machine, and the
 next deploy of any repo replaces what it held. The build runs under the
-target's launch lock, so it never runs beside a story's. The server is the
+target's launch lock, so it never runs beside a story's. When a story's
+launch holds it, the deploy says so at once, naming the story — `/testdeploy`
+sends that line to the phone, and `/testdeploy <repo>` (`--status`) repeats
+it while the wait lasts (L-37). The server is the
 user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
 (`journalctl --user -u fleet-test-deploy`).
 

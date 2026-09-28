@@ -43,7 +43,7 @@ timers run it — so it is changed in a worktree (the `fleet-develop` skill).
 - Per-repo state (`.stories/ .review/ .blocked/` committed; `.runs/
   .review-out/` ignored) lives in the target. Machine-local fleet files
   (`.env.fleet` with the bot token and `TEST_DEPLOY_URL`, `.bot-offset`,
-  `.test-deploy.json`) live here, gitignored.
+  `.test-deploy.json`, `.test-deploy-waiting`) live here, gitignored.
 
 ## Tests
 

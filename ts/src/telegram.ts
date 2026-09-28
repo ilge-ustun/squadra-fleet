@@ -162,7 +162,10 @@ const DETACHED_JOB = [
   'bash "$fleet/fleet" telegram send --pre "${out:-(no output)}"',
 ].join('\n');
 
-// The /testdeploy job: the build, then one message. When the build succeeds,
+// The /testdeploy job: the build, then one message — two when the build has
+// to wait for a story's launch first: the waiting line is sent the moment it
+// is logged (hence sed -u), naming the story that holds the repo (L-37). When
+// the build succeeds,
 // the message is the command's last line, the URL, as plain text so that the
 // phone shows it as a link. When it fails, the message is the tail of its
 // output as a code block. The whole output also goes to the unit's journal
@@ -173,7 +176,10 @@ const DETACHED_JOB = [
 const TEST_DEPLOY_JOB = [
   'fleet="$1"; shift',
   'log="$(mktemp)"',
-  'bash "$fleet/fleet" test-deploy "$@" 2>&1 | sed "s/\x1b\[[0-9;]*m//g" | tee "$log"',
+  'bash "$fleet/fleet" test-deploy "$@" 2>&1 | sed -u "s/\x1b\[[0-9;]*m//g" | tee "$log" | while IFS= read -r l; do',
+  '  printf "%s\\n" "$l"',
+  '  if [[ $l == "==> "*": waiting for the launch lock — "* ]]; then bash "$fleet/fleet" telegram send "${l#==> }" </dev/null; fi',
+  'done',
   'if (( PIPESTATUS[0] == 0 )); then last="$(tail -n 1 "$log")"; bash "$fleet/fleet" telegram send "${last#==> }"',
   'else bash "$fleet/fleet" telegram send --pre "$(tail -n 25 "$log")"; fi',
   'rm -f "$log"',
@@ -346,7 +352,7 @@ const HELP = [
   '/revert <repo> <id> — undo a story\'s merge into its epic',
   '',
   'Try it before it lands',
-  '/testdeploy <repo> <branch> — build a branch and serve it at the test URL; the link follows when it is up',
+  '/testdeploy <repo> <branch> — build a branch and serve it at the test URL; the link follows when it is up (after a running story, if one is building — you are told which)',
   '/testdeploy <repo> — what the test URL serves now',
   '/testdeploy <repo> stop — stop serving it',
   '',
