@@ -24,9 +24,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { Die } from './lib/die.ts';
 import { storyField } from './lib/frontmatter.ts';
-import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, upstreamBranch } from './lib/git.ts';
+import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, pushQuiet, revListCount, upstreamBranch } from './lib/git.ts';
 import { EXIT_AGENT_REFUSED, readKnobs, splitCommand } from './launch.ts';
-import { EXIT_LAUNCH_BUSY, launchLockHolder } from './lib/lock.ts';
+import { EXIT_LAUNCH_BUSY, launchLockHolder, withFleetLock } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
 import { formatIsoSeconds } from './lib/machine-block.ts';
 import { runInherit } from './lib/proc.ts';
@@ -75,8 +75,11 @@ export function busyLine(holder: string): string {
 
 /** Never fails the drain — no upstream, a merge/rebase already in progress,
  *  a failed fetch or a merge conflict are all warnings, and pre-run HEAD
- *  stays an ancestor of any new HEAD. */
-export function refreshFromOrigin(root: string): void {
+ *  stays an ancestor of any new HEAD. What the merge leaves ahead of the
+ *  upstream — status commits whose push was refused while origin had moved
+ *  (L-36) — is pushed when PUSH_STATUS=1, under the fleet lock the status
+ *  commits take; a push that fails is a warning too. */
+export function refreshFromOrigin(root: string, pushStatus: string, lockWait: number): void {
   const upstream = upstreamBranch(root);
   if (upstream === '') {
     warn('refresh failed: no upstream configured, continuing on local state', TAG);
@@ -98,6 +101,11 @@ export function refreshFromOrigin(root: string): void {
     return;
   }
   log(`refreshed from ${upstream}`, TAG);
+  if (pushStatus !== '1' || revListCount(root, `${upstream}..HEAD`) === 0) return;
+  withFleetLock(root, lockWait, () => warn('waited for the fleet lock — going ahead', TAG), () => {
+    if (pushQuiet(root) === 0) log(`pushed what the refresh left ahead of ${upstream}`, TAG);
+    else warn('push after the refresh failed, continuing on local state', TAG);
+  });
 }
 
 /** `"$FLEET_REGISTRY_DIR"/*.env`, sorted the way a shell
@@ -171,7 +179,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   }
 
   log('refreshing from origin before scan', TAG);
-  refreshFromOrigin(root);
+  refreshFromOrigin(root, knobs.pushStatus, knobs.lockWait);
 
   const started = formatIsoSeconds(new Date());
   const ran: RanLine[] = [];

@@ -655,3 +655,31 @@ go red without the flag), the `--expand-environment=no` assertions in cases
 148 and 149, and the `readBotKnobs` defaults row in
 `ts/src/telegram.test.ts`.
 
+### L-36 — an epic landed mid-round left every status push refused
+
+On 27 Sep the human landed `epic/search` from the phone while the queue was
+in story 039's second round. `fleet merge --epic` pushed origin's `develop`
+and then left the local `develop` alone, as it should: a launcher had the
+tree dirty, and landing fast-forwards only a clean checkout (case 120d).
+From then on the local branch was behind origin. Every status commit the
+launcher made — 039 `done`, its `merged:` record, 040 `in_progress`, `done`,
+its record — was committed and then refused, and each refusal was one line,
+`status push failed — queue not visible remotely`, in a log nobody reads.
+The next drain's refresh merged origin in, but nothing pushed after it, so
+the phone's `/status` showed stale states until the coordinator pushed by
+hand. Nothing was lost; it was only invisible.
+
+**Lesson:** a warning that a step failed is only half a handling. When the
+cause is ordinary and the remedy is known — the branch moved, merge it in —
+the code that sees the failure should apply the remedy, and warn only when
+the remedy fails too.
+
+**Prevention:** `pushFollowingUpstream` (`ts/src/lib/git.ts`). On a refused
+push it merges the upstream in, the way the refresh does (never a rebase,
+and a conflict is aborted), and pushes once more. It never merges into a
+checkout with changes of its own. `commitStatus` in `ts/src/launch.ts` and
+the merge record in `ts/src/merge.ts` push through it. `refreshFromOrigin`
+pushes what its merge left ahead.
+
+**Enforced by:** case 151 (a–d) and the `pushFollowingUpstream` tests in
+`ts/src/lib/git.test.ts`.

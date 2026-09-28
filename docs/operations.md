@@ -171,6 +171,16 @@ deploys — belongs to that target, not here.
   that up is the human's call, per story (L-32). When Claude refuses the
   builder, a message is all that follows — no retry, no fallback, no hold
   (the human's decision, 25 Sep).
+- **A refused status push follows origin; it never rewrites.** When origin's
+  integration branch moved without the checkout — an epic landed from the
+  phone while a launcher had the tree dirty, so landing could not
+  fast-forward it — a status or merge-record push is refused. The fleet then
+  merges the upstream in, the way the queue's refresh always has, and pushes
+  once more; a checkout with uncommitted changes is not merged into, and a
+  conflict is aborted and warned. A rebase was declined: the status commits
+  may already be on a phone's view of origin, and pre-run HEAD stays an
+  ancestor of every new HEAD (case 43). The drain's refresh pushes what its
+  merge left ahead (L-36).
 - **One launch per repo: a lock, not a claim.** `fleet launch` holds
   `<target>/.git/fleet-launch.lock` for its whole life; another launch —
   a drain's `--reap` included — says who holds it, exits 75 and touches
