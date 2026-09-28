@@ -1,4 +1,5 @@
 .env.fleet
 .bot-offset
 .test-deploy.json
+.test-deploy-waiting
 ts/node_modules/

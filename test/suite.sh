@@ -111,7 +111,7 @@ shadow_check() {                      # shadow_check <fleet-copy> — die unless
 copy_fleet() {                        # copy_fleet <src> <dst>
   mkdir -p "$2"
   tar -C "$1" --exclude=./.git --exclude=./repos --exclude=./ts/node_modules -cf - . | tar -C "$2" -xf -
-  rm -rf "$2/.env.fleet" "$2/.bot-offset" "$2/.test-deploy.json"
+  rm -rf "$2/.env.fleet" "$2/.bot-offset" "$2/.test-deploy.json" "$2/.test-deploy-waiting"
 }
 
 # The fake Telegram API. Node's fetch never looks at PATH, so no fake on PATH
@@ -4194,7 +4194,7 @@ case_149_test_deploy() {
   wait_for 5 bash -c "! flock -n '$REPO/.git/fleet-launch.lock' true"
   TEST_DEPLOY_LOCK_WAIT=20 td epic/test
   assert_eq "$TDRC" 0 "a holder that lets go in time is waited for"
-  assert_contains "$(cat "$TDLOG")" "waiting up to 20s for the launch lock" "and says it waits"
+  assert_contains "$(cat "$TDLOG")" "t epic/test: waiting for the launch lock — launch 900 (pid 4242) holds it; the build starts when it is free, and gives up after 20s" "and says it waits, for whom, and how long"
   assert_eq "$(served)" "epic content" "then deploys"
   wait "$holder" 2>/dev/null
 }
@@ -4243,6 +4243,29 @@ case_150_bot_testdeploy() {
   update 135 42 "/help"
   bot poll
   assert_contains "$(sent_text)" "/testdeploy <repo> <branch>" "/help lists it"
+
+  CASE="150d /testdeploy behind a launch says so at once, and the status says it waits"; fixture c150d; td_setup
+  printf '4242 story 045\n' > "$REPO/.git/fleet-launch.lock"
+  flock -o "$REPO/.git/fleet-launch.lock" sleep 60 & local holder=$!
+  wait_for 5 bash -c "! flock -n '$REPO/.git/fleet-launch.lock' true"
+  update 136 42 "/testdeploy t epic/test"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" START_CMD="$TD_SERVE" bot poll
+  assert_contains "$(sent_text)" "building epic/test" "the acknowledgement"
+  wait_for_send 2 20
+  assert_contains "$(sent_text)" "t epic/test: waiting for the launch lock — story 045 (pid 4242) holds it" "told at once who holds the lock (L-37)"
+  assert_not_contains "$(sent_text)" "is up at" "while nothing is built"
+  api_clear
+  update 137 42 "/testdeploy t"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_contains "$(sent_text)" "t epic/test: waiting for the launch lock — story 045 (pid 4242) holds it" "the status says it waits, and for whom"
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  wait_for_send 2
+  assert_contains "$(sent_text)" "t epic/test ($(git -C "$REPO" rev-parse --short origin/epic/test)) is up at https://test.example" "then the URL, once the lock is free"
+  api_clear
+  update 138 42 "/testdeploy t"
+  TEST_DEPLOY_URL=https://test.example TEST_DEPLOY_PORT="$TD_PORT" bot poll
+  assert_not_contains "$(sent_text)" "waiting for the launch lock" "the wait is over"
+  assert_contains "$(sent_text)" "up since" "the status is the deploy's again"
 }
 
 # 151: 28 Sep. An epic landed from the phone while a launcher was mid-round.

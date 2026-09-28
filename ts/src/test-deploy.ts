@@ -135,6 +135,42 @@ export function readState(fleetHome: string): Deployed | undefined {
   }
 }
 
+// ── the wait for the launch lock ─────────────────────────────────────────────
+
+/** The wait, in the words the human reads: the bot's job forwards this line
+ *  to the phone as soon as it is logged, and --status repeats it while the
+ *  wait lasts (L-37). The holder is the lock file's `<pid> <what>`. */
+export function waitingLine(repo: string, branch: string, holder: string, waitSec: number): string {
+  const [pid = '', ...what] = holder.split(' ');
+  const who = holder === '' ? 'an unknown launch' : `${what.join(' ') || 'a launch'} (pid ${pid})`;
+  const limit = waitSec % 60 === 0 ? `${waitSec / 60} min` : `${waitSec}s`;
+  return `${repo} ${branch}: waiting for the launch lock — ${who} holds it; the build starts when it is free, and gives up after ${limit}`;
+}
+
+/** Machine-local like the state file: `<pid>\n<waiting line>\n` while a
+ *  deploy waits for the launch lock, gone once it has it or gives up. */
+export function waitingFile(fleetHome: string): string {
+  return join(fleetHome, '.test-deploy-waiting');
+}
+
+/** The waiting line, when the process that wrote it is still alive. */
+export function readWaiting(fleetHome: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(waitingFile(fleetHome), 'utf8');
+  } catch {
+    return undefined;
+  }
+  const [pid = '', line = ''] = text.split('\n');
+  if (!/^[0-9]+$/.test(pid) || line === '') return undefined;
+  try {
+    process.kill(Number(pid), 0);
+  } catch {
+    return undefined;
+  }
+  return line;
+}
+
 /** `YYYY-MM-DD HH:MM`, local time: what the human reads in --status. */
 export function localMinute(d: Date): string {
   const p = (n: number): string => String(n).padStart(2, '0');
@@ -224,8 +260,14 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
   const what = `test-deploy ${o.branch}`;
   let lock = takeLaunchLock(root, what);
   if (!lock.held) {
-    log(`waiting up to ${o.knobs.lockWaitSec}s for the launch lock — held by ${lock.holder || 'unknown'}`);
-    lock = takeLaunchLock(root, what, o.knobs.lockWaitSec);
+    const line = waitingLine(cfg.name, o.branch, lock.holder, o.knobs.lockWaitSec);
+    log(line);
+    writeFileSync(waitingFile(o.fleetHome), `${process.pid}\n${line}\n`);
+    try {
+      lock = takeLaunchLock(root, what, o.knobs.lockWaitSec);
+    } finally {
+      rmSync(waitingFile(o.fleetHome), { force: true });
+    }
     if (!lock.held) {
       warn(`the launch lock is still held by ${lock.holder || 'unknown'} — nothing was touched`);
       return EXIT_LAUNCH_BUSY;
@@ -280,8 +322,15 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
   }
 }
 
-/** One line: what the slot serves and whether it is up. */
+/** What the slot serves and whether it is up — one line, preceded by the
+ *  waiting line while a deploy waits for the launch lock. */
 export function status(fleetHome: string, repo: string): string {
+  const waiting = readWaiting(fleetHome);
+  const now = slotStatus(fleetHome, repo);
+  return waiting === undefined ? now : `${waiting}\n${now}`;
+}
+
+function slotStatus(fleetHome: string, repo: string): string {
   const st = readState(fleetHome);
   const up = unitActive();
   if (st === undefined) {
