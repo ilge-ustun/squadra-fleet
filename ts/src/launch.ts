@@ -48,7 +48,7 @@ import { runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
-import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushQuiet, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
+import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushFollowingUpstream, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { Die } from './lib/die.ts';
 import { withFleetLock } from './lib/lock.ts';
 import { dieMessage, log, out, warn } from './lib/log.ts';
@@ -276,8 +276,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   /** Under the fleet lock, each path added on its own (git add stages
    *  nothing when one pathspec is missing, L-02), the evidence directory
    *  too; nothing staged is fine; a failed commit is a die — the story's
-   *  state would otherwise live only in the working tree; a failed push a
-   *  warning. */
+   *  state would otherwise live only in the working tree. A push refused
+   *  because the branch moved on origin merges origin in and goes again
+   *  (L-36); one that still fails is a warning. */
   const commitStatus = (id: string, st: string): void => {
     withFleetLock(root, knobs.lockWait, () => warn('waited for the fleet lock — going ahead'), () => {
       for (const p of [`.stories/${id}.md`, `.review/${id}.md`, `.blocked/${id}.md`]) {
@@ -286,7 +287,10 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       if (isDir(`${root}/.review/${id}`)) add(root, `.review/${id}`);
       if (stagedIsEmpty(root)) return;
       if (commit(root, `story(${id}): ${st}`) !== 0) throw new Die(`status commit failed for ${id} (${st})`);
-      if (knobs.pushStatus === '1' && pushQuiet(root) !== 0) warn('status push failed — queue not visible remotely');
+      if (knobs.pushStatus !== '1') return;
+      const p = pushFollowingUpstream(root);
+      if (!p.pushed) warn(`status push failed — queue not visible remotely (${p.why})`);
+      else if (p.merged !== '') log(`status push refused — ${p.merged} merged in, and pushed`);
     });
   };
 

@@ -417,7 +417,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
-| `PUSH_STATUS` | 1 | 0 to work offline |
+| `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
 | `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |

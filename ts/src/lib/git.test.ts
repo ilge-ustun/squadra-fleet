@@ -8,7 +8,7 @@ import {
   stagedIsEmpty, worktreeAdd, worktreeRemoveForce,
   addAll, branchDelete, branchForce, logOneline, lsFilesTracked, mergeAbort, mergeNoFf, pushRef, revertAbort, revertMerge,
   worktreeCheckedOutBranches, worktreePaths, worktreePrune, currentBranch, mergeFfOnly,
-  fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch,
+  fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch, pushFollowingUpstream,
   catFileExists, showLineCount,
   fetchRef, revParseShort,
 } from './git.ts';
@@ -420,5 +420,97 @@ describe('the queue\'s refreshFromOrigin operations', () => {
     mergeAbort(clone);
     expect(g(['rev-parse', 'HEAD'])).toBe(stuck);
     expect(g(['status', '--porcelain'])).toBe('');
+  });
+});
+
+// L-36: origin's branch moved while this checkout could not follow (an epic
+// landed from the phone mid-round), so a status push is refused.
+describe('pushFollowingUpstream', () => {
+  let d6: string;
+  let bare: string;
+  let mine: string;
+  let theirs: string;
+  const ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  function g(cwd: string, args: string[]): string {
+    const r = runSync('git', args, { cwd, env: ENV });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+  function change(cwd: string, file: string, text: string): string {
+    writeFileSync(join(cwd, file), text);
+    g(cwd, ['add', '-A']);
+    g(cwd, ['commit', '-qm', `${file}: ${text.trim()}`]);
+    return g(cwd, ['rev-parse', 'HEAD']);
+  }
+  beforeAll(() => {
+    d6 = mkdtempSync(join(tmpdir(), 'fleet-git6-'));
+    bare = join(d6, 'origin.git');
+    mine = join(d6, 'mine');
+    theirs = join(d6, 'theirs');
+    runSync('git', ['init', '-q', '--bare', '-b', 'base', bare]);
+    runSync('git', ['clone', '-q', bare, mine]);
+    for (const c of [mine]) { g(c, ['config', 'user.name', 't']); g(c, ['config', 'user.email', 't@t']); }
+    change(mine, 'a', 'one\n');
+    g(mine, ['push', '-q', '-u', 'origin', 'base']);
+    runSync('git', ['clone', '-q', bare, theirs]);
+    g(theirs, ['config', 'user.name', 't']); g(theirs, ['config', 'user.email', 't@t']);
+  });
+  afterAll(() => { rmSync(d6, { recursive: true, force: true }); });
+
+  it('a push that goes is all it does', () => {
+    const head = change(mine, 's', 'status one\n');
+    expect(pushFollowingUpstream(mine)).toEqual({ pushed: true, merged: '', why: '' });
+    expect(g(bare, ['rev-parse', 'base'])).toBe(head);
+  });
+
+  it('refused because the branch moved there: the upstream is merged in, never rebased, and the push goes', () => {
+    g(theirs, ['pull', '-q']);
+    const landed = change(theirs, 'landed', 'an epic\n');
+    g(theirs, ['push', '-q']);
+    const status = change(mine, 's', 'status two\n');
+    expect(pushFollowingUpstream(mine)).toEqual({ pushed: true, merged: 'origin/base', why: '' });
+    const tip = g(bare, ['rev-parse', 'base']);
+    expect(g(mine, ['rev-parse', 'HEAD'])).toBe(tip);
+    // Both parents kept as they were: the status commit is not rewritten.
+    expect(g(mine, ['rev-parse', 'HEAD^1'])).toBe(status);
+    expect(g(mine, ['rev-parse', 'HEAD^2'])).toBe(landed);
+  });
+
+  it('a checkout with changes of its own is not merged into', () => {
+    g(theirs, ['pull', '-q']);
+    change(theirs, 'landed', 'another epic\n');
+    g(theirs, ['push', '-q']);
+    const status = change(mine, 's', 'status three\n');
+    writeFileSync(join(mine, 'a'), 'someone is editing\n');
+    const r = pushFollowingUpstream(mine);
+    expect(r.pushed).toBe(false);
+    expect(r.merged).toBe('');
+    expect(r.why).toMatch(/uncommitted changes/);
+    expect(g(mine, ['rev-parse', 'HEAD'])).toBe(status);
+    expect(readFileSync(join(mine, 'a'), 'utf8')).toBe('someone is editing\n');
+    g(mine, ['checkout', '-q', '--', 'a']);
+  });
+
+  it('a conflict is aborted and said, and nothing moves', () => {
+    // mine is still behind from the last case; now both sides touch 's'.
+    g(theirs, ['pull', '-q']);
+    change(theirs, 's', 'theirs\n');
+    g(theirs, ['push', '-q']);
+    const stuck = change(mine, 's', 'mine\n');
+    const r = pushFollowingUpstream(mine);
+    expect(r).toEqual({ pushed: false, merged: '', why: 'merging origin/base conflicted — aborted' });
+    expect(g(mine, ['rev-parse', 'HEAD'])).toBe(stuck);
+    expect(existsSync(join(mine, '.git', 'MERGE_HEAD'))).toBe(false);
+    expect(g(mine, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('no upstream to merge: said, not guessed', () => {
+    const lone = join(d6, 'lone');
+    runSync('git', ['init', '-q', '-b', 'base', lone]);
+    g(lone, ['config', 'user.name', 't']); g(lone, ['config', 'user.email', 't@t']);
+    change(lone, 'a', 'one\n');
+    const r = pushFollowingUpstream(lone);
+    expect(r.pushed).toBe(false);
+    expect(r.why).toMatch(/no upstream/);
   });
 });

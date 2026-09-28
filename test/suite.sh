@@ -3462,7 +3462,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_145_builder_refused_by_claude
        case_146_fallback_reviewer_is_claude case_147_no_attribution
        case_148_bot_job_is_its_own_unit case_149_test_deploy
-       case_150_bot_testdeploy)
+       case_150_bot_testdeploy case_151_refused_push_follows_origin)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4243,6 +4243,70 @@ case_150_bot_testdeploy() {
   update 135 42 "/help"
   bot poll
   assert_contains "$(sent_text)" "/testdeploy <repo> <branch>" "/help lists it"
+}
+
+# 151: 28 Sep. An epic landed from the phone while a launcher was mid-round.
+# merge.ts does not fast-forward a checkout with changes in it, so origin's
+# base moved on without the local one, and every status push after that was
+# refused ("status push failed — queue not visible remotely"), the merge
+# record's too, until a human pushed by hand (L-36). A refused push now merges
+# the upstream in, as the queue's refresh does, and pushes once more; the
+# refresh pushes what its merge left ahead. Red against launch.ts, merge.ts
+# and run-queue.ts without them.
+origin_moves() {                      # origin_moves <msg> → LANDED: a commit on origin's base from another clone
+  rm -rf "$FX/elsewhere"
+  git clone -q "$FX/origin.git" "$FX/elsewhere"
+  printf '%s\n' "$1" > "$FX/elsewhere/landed.txt"
+  git -C "$FX/elsewhere" add landed.txt
+  git -C "$FX/elsewhere" -c user.name=fleet-test -c user.email=fleet-test@localhost commit -qm "$1"
+  git -C "$FX/elsewhere" push -q origin base
+  LANDED="$(git -C "$FX/elsewhere" rev-parse HEAD)"
+}
+level_with_origin() {                 # level_with_origin <what> — the checkout's base is origin's, and holds LANDED
+  git -C "$REPO" fetch -q origin
+  assert_eq "$(git -C "$REPO" rev-parse base)" "$(git -C "$REPO" rev-parse origin/base)" "$1: the checkout and origin agree"
+  git -C "$REPO" merge-base --is-ancestor "$LANDED" base && ok || fail "$1: what landed elsewhere is kept, not rewritten"
+}
+case_151_refused_push_follows_origin() {
+  CASE="151 a status push refused because origin moved merges origin in and pushes again"; fixture c151
+  origin_moves "an epic landed elsewhere"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "the story ran"
+  assert_not_grep 'status push failed' "$LOG" "no status push was left behind"
+  level_with_origin "after the launch"
+  git -C "$REPO" show "origin/base:.stories/$STORY.md" | grep -q '^status: done' \
+    && ok || fail "origin holds the story's last status"
+
+  CASE="151b the merge record's push too"; epic_story c151b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  origin_moves "an epic landed elsewhere"
+  merge_run
+  assert_eq "$MRC" 0 "merged"
+  assert_not_grep 'push failed' "$MLOG" "the record's push went"
+  level_with_origin "after the merge"
+  git -C "$REPO" show "origin/base:.stories/$STORY.md" | grep -q '^merged: ' \
+    && ok || fail "the record reached origin"
+
+  CASE="151c the queue's refresh pushes what its merge left ahead"; fixture c151c draft
+  origin_moves "an epic landed elsewhere"
+  printf 'refused\n' > "$REPO/status.txt"
+  git -C "$REPO" add status.txt
+  git -C "$REPO" commit -qm "story(900): a status commit whose push was refused"
+  queue MAX=0
+  assert_grep 'refreshed from origin/base' "$FX/queue.log" "the refresh merged"
+  level_with_origin "after the refresh"
+  git -C "$REPO" show origin/base:status.txt >/dev/null 2>&1 && ok || fail "the local commit reached origin"
+
+  # The same guard landing keeps (case 120d): a tree with someone's edit in
+  # it is told, not merged into.
+  CASE="151d a checkout with changes of its own is not merged into; the warning stays"; fixture c151d
+  origin_moves "an epic landed elsewhere"
+  printf 'a human is editing this\n' >> "$REPO/README.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "the story ran"
+  assert_grep 'status push failed — queue not visible remotely' "$LOG" "the warning stays"
+  git -C "$REPO" merge-base --is-ancestor "$LANDED" base && fail "origin was merged into a dirty checkout" || ok
+  assert_grep 'a human is editing this' "$REPO/README.md" "the edit survives"
 }
 
 for c in "${CASES[@]}"; do

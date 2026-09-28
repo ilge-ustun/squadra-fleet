@@ -255,6 +255,38 @@ export function mergeNoEditQuiet(root: string, ref: string): number {
   return r.status;
 }
 
+/** What became of a push that follows its upstream. */
+export interface PushOutcome {
+  /** The branch reached the remote. */
+  pushed: boolean;
+  /** The upstream merged in before the second push; '' when none was. */
+  merged: string;
+  /** Why the branch did not reach the remote; '' when it did. */
+  why: string;
+}
+
+/** `git push -q`, and when that fails because the branch moved on the
+ *  remote — an epic landed from the phone while this checkout could not
+ *  follow (L-36) — the upstream merged in the way the queue's refresh does
+ *  it, and one push more. A merge, never a rebase: what was pushed stays as
+ *  it was. A conflict is aborted. A checkout with changes of its own is not
+ *  merged into, the same guard landing keeps before it fast-forwards one. */
+export function pushFollowingUpstream(root: string): PushOutcome {
+  if (pushQuiet(root) === 0) return { pushed: true, merged: '', why: '' };
+  const failed = (why: string): PushOutcome => ({ pushed: false, merged: '', why });
+  if (porcelain(root) !== '') return failed('the checkout has uncommitted changes — not merged into');
+  const upstream = upstreamBranch(root);
+  if (upstream === '') return failed('no upstream to merge');
+  if (fetchQuiet(root, 'origin') !== 0) return failed('the fetch failed too');
+  if (revListCount(root, `HEAD..${upstream}`) === 0) return failed(`${upstream} holds nothing this checkout lacks`);
+  if (mergeNoEditQuiet(root, upstream) !== 0) {
+    mergeAbort(root);
+    return failed(`merging ${upstream} conflicted — aborted`);
+  }
+  if (pushQuiet(root) !== 0) return { pushed: false, merged: upstream, why: `refused again after merging ${upstream}` };
+  return { pushed: true, merged: upstream, why: '' };
+}
+
 // ── lint-story's citation walk ──────────────────────────────────────────────
 
 /** `git cat-file -e <ref>:<path> 2>/dev/null`: does the path exist as a blob

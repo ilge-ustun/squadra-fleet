@@ -24,7 +24,7 @@ import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
 import { recordMergedSha } from './lib/frontmatter.ts';
 import {
-  add, branchExists, branchForce, commit, currentBranch, fetch, isAncestor, mergeAbort, mergeFfOnly, mergeNoFf, porcelain, pushQuiet,
+  add, branchExists, branchForce, commit, currentBranch, fetch, isAncestor, mergeAbort, mergeFfOnly, mergeNoFf, porcelain, pushFollowingUpstream,
   pushRef, refExists, revParse, stagedIsEmpty, worktreeAdd, worktreeCheckedOutBranches, worktreeRemoveForce,
 } from './lib/git.ts';
 import { log, out, warn } from './lib/log.ts';
@@ -284,7 +284,14 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     if (stagedIsEmpty(root)) warn('nothing to record — the story file did not change');
     else {
       if (commit(root, `story(${id}): merged into ${base} at ${short(mergeSha)}`) !== 0) throw new Die('could not record the merge in the story');
-      if (pushStatus === '1' && pushQuiet(root) !== 0) warn('push failed — the record is local only');
+      if (pushStatus === '1') {
+        // The checkout's branch can be behind origin's — an epic landed while
+        // a dirty tree kept it from following — and a record refused for
+        // that follows origin (L-36).
+        const p = pushFollowingUpstream(root);
+        if (!p.pushed) warn(`push failed — the record is local only (${p.why})`);
+        else if (p.merged !== '') log(`the record's push was refused — ${p.merged} merged in, and pushed`);
+      }
     }
 
     // The builder's worktree has done its job: its commits are in the base,
