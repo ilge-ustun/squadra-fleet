@@ -1,6 +1,3 @@
-epic/done
-  1 story, 1 merged
-  in base
 epic/test
   2 stories, 1 merged
   2 ahead of base → /merge t epic/test

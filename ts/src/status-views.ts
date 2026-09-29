@@ -52,11 +52,18 @@ function colourFor(landing: string, p: Palette): string {
   }
 }
 
+/** True once an epic has nothing left: every story merged into it, and it
+ *  itself sitting in the base branch with nothing ahead. */
+function fullyLanded(e: EpicRow): boolean {
+  return e.total > 0 && e.merged === e.total && e.exists !== false && e.ahead === 0;
+}
+
 /** The epic block; undefined when no story names an epic. */
 export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): string | undefined {
   if (epics.length === 0) return undefined;
   let out = '';
   for (const e of epics) {
+    if (o.bot && !o.all && fullyLanded(e)) continue;
     const word = e.total === 1 ? 'story' : 'stories';
     if (o.bot) {
       out += `${e.name}\n  ${e.total} ${word}, ${e.merged} merged\n`;
@@ -71,6 +78,7 @@ export function renderEpics(epics: EpicRow[], o: ViewOptions, p: Palette): strin
       : `${p.dim}in ${o.baseBranch}${p.rst}`;
     out += `${pad(e.name, 22)} ${e.total} ${word}, ${e.merged} merged  ${state}\n`;
   }
+  if (out === '') return undefined;
   return out;
 }
 
