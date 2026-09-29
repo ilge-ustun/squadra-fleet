@@ -129,6 +129,15 @@ describe('the edges the goldens cannot hold', () => {
     expect(out).toBe('epic/a\\tb              1 story, 0 merged  1 ahead of base  → fleet merge t --epic epic/a\\tb\n');
   });
 
+  it('an epic with every story merged and nothing ahead hides from the bot, but not the terminal table, and --all still shows it', () => {
+    const plain = { red: '', grn: '', ylw: '', dim: '', rst: '' };
+    const e = { name: 'epic/done', total: 1, merged: 1, ahead: 0, exists: true };
+    expect(renderEpics([e], view('default'), plain)).toBe('epic/done              1 story, 1 merged  in base\n');
+    expect(renderEpics([e], { ...view('default'), bot: true }, plain)).toBeUndefined();
+    expect(renderEpics([e], { ...view('default'), bot: true, all: true }, plain))
+      .toBe('epic/done\n  1 story, 1 merged\n  in base\n');
+  });
+
   it('24 Sep: an epic whose branch does not exist yet says so, not "in base"', () => {
     const plain = { red: '', grn: '', ylw: '', dim: '', rst: '' };
     const e = { name: 'epic/search', total: 1, merged: 0, ahead: 0, exists: false };
