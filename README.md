@@ -78,7 +78,7 @@ The frontmatter:
 
 | key | who writes it | meaning |
 |---|---|---|
-| `status` | the writer, the human, the launcher | `draft` → `ready` → `in_progress` → `done` \| `blocked` \| `needs_human` |
+| `status` | the writer, the human, the launcher | `draft` → `ready` → `in_progress` → `done` \| `blocked` \| `needs_human` \| `declined` (a human's call, from `draft`; never queued) |
 | `round` | the launcher | rounds run so far; `MAX_ROUNDS` (default 2) more per launch |
 | `base` | the writer | `epic/<name>`, or absent for the integration branch |
 | `scope_deny` | the writer | space-separated globs the builder must not touch; deny-only; `.fleet/*` always |
@@ -120,6 +120,7 @@ launcher's word; the landing state says what became of a `done` story's code:
 | shown | meaning | what it needs |
 |---|---|---|
 | `draft` `ready` `in_progress` `blocked` `needs_human` | the frontmatter status, as is | the pipeline, or a human (`/promote`, `/answer`) |
+| `declined` | the frontmatter status, as is — a human decided the story is not needed and hand-set it, usually from `draft` | nothing; hidden from `fleet status --bot` unless `--all` or a single id, same as `landed`/`done` |
 | `awaiting merge` | `done`, computed PASS, branch still there, nobody merged it | a human: `fleet merge <repo> <id> --land` or `/merge <repo> <id>` |
 | `on epic` | `done` and merged into its epic, which is not yet in the integration branch | the epic to land: `/merge <repo> epic/<name>` |
 | `landed` | `done` and its code is in the integration branch — its branch, or the `merged:` sha in its frontmatter, is an ancestor of it | nothing |
