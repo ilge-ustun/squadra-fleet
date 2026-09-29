@@ -102,14 +102,14 @@ export function renderTable(rows: StoryRow[], detail: Detail | undefined, p: Pal
   return out;
 }
 
-/** The phone: landed and done hidden unless --all or one id. */
+/** The phone: landed, done and declined hidden unless --all or one id. */
 export function renderBot(rows: StoryRow[], detail: Detail | undefined, o: ViewOptions): string {
   let out = '';
   let shown = false;
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i];
     if (r === undefined) continue;
-    if (!o.all && o.one === undefined && (r.landing === 'landed' || r.landing === 'done')) continue;
+    if (!o.all && o.one === undefined && (r.landing === 'landed' || r.landing === 'done' || r.landing === 'declined')) continue;
     if (!shown) out += '-------\n';
     shown = true;
     const round = /^[0-9]+$/.test(r.round) ? `R${r.round}` : r.round;

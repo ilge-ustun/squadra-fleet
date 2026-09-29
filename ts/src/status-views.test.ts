@@ -86,6 +86,15 @@ describe('the edges the goldens cannot hold', () => {
     expect(renderStatus({ epics: [], stories: rows }, view('bot'))).toBe('nothing in flight — /status-all t shows what has landed\n');
   });
 
+  it('declined hides from the bot like landed and done, but --all or one id still shows it', () => {
+    const rows = [row({ landing: 'declined' })];
+    expect(renderStatus({ epics: [], stories: rows }, view('bot'))).toBe('nothing in flight — /status-all t shows what has landed\n');
+    expect(renderStatus({ epics: [], stories: rows }, view('bot', true))).toContain('declined');
+    expect(renderStatus({ epics: [], stories: rows }, view('bot', false, '1'))).toContain('declined');
+    // the terminal table is the full history — declined never hides there.
+    expect(renderStatus({ epics: [], stories: rows }, view('default'))).toContain('declined');
+  });
+
   it('a quirk the goldens hold: widths in characters, padding in bytes — a lone — cell is two spaces short', () => {
     const out = renderStatus({ epics: [], stories: [row({ id: 'abc', title: '—' })] }, view('default'));
     // TITLE is 5 wide (the header); '—' is 3 bytes, so 2 spaces of padding, then the 2-space gap.

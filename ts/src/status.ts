@@ -6,6 +6,9 @@
 // The landing state is derived on every run, never stored — the story's
 // frontmatter `status:` is authoritative and is left alone:
 //   draft ready in_progress blocked needs_human   as in the frontmatter
+//   declined         a human decided against it, by hand, in the frontmatter —
+//                    kept for its evidence, never queued; hidden from the
+//                    bot view like landed/done (status-views.ts renderBot)
 //   awaiting merge   done, computed PASS, not merged — a human's decision
 //   on epic          done, merged into an epic that is not in the integration branch
 //   landed           done, merged, and its base is in the integration branch
