@@ -158,5 +158,21 @@
     "live": false,
     "blocked": false,
     "reasons": ""
+  },
+  {
+    "id": "950",
+    "title": "Declined on an otherwise-landed epic",
+    "status": "declined",
+    "landing": "declined",
+    "round": 0,
+    "verdict": null,
+    "base": "epic/done",
+    "branch": "—",
+    "merged": false,
+    "ahead": 0,
+    "worktree": false,
+    "live": false,
+    "blocked": false,
+    "reasons": ""
   }
 ]

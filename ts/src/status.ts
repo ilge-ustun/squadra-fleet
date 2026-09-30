@@ -224,6 +224,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
   for (const id of ids) {
     const e = storyField(root, id, 'base');
     if (e === '' || e === cfg.baseBranch) continue;
+    if (storyField(root, id, 'status') === 'declined') continue;
     total.set(e, (total.get(e) ?? 0) + 1);
     if (branchExists(root, `story/${id}`) && isAncestor(root, `story/${id}`, refOf(e))) {
       mergedCount.set(e, (mergedCount.get(e) ?? 0) + 1);

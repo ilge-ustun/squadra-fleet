@@ -6,6 +6,9 @@ epic/test
   2 ahead of base → /merge t epic/test
 
 -------
+950 Declined on an otherwise-landed epic
+→ epic/done | declined | R0 | —
+-------
 908 —
 → base | — | — | —
 -------
