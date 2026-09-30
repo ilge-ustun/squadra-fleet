@@ -44,6 +44,8 @@ commit README.md base
 # 904: done, merged into base → landed.
 g checkout -q -b story/904; commit s904 "story 904"; g checkout -q base; g merge -q --ff-only story/904
 # epic/done: its story 907 merged into it, and it merged into base → in base; 907 landed.
+# 950 is declined on epic/done — a declined story is never built, so it must not
+# hold the epic's count open forever (it has no branch of its own to merge).
 g checkout -q -b epic/done; g checkout -q -b story/907; commit s907 "story 907"
 g checkout -q epic/done; g merge -q --ff-only story/907; g checkout -q base; g merge -q --ff-only epic/done
 # 905: done, no branch, merged: <sha> recorded by merge.sh — the sha is in base → landed.
@@ -70,6 +72,7 @@ story 904   'status: done' 'round: 1' -- '# Story 904 — landed' ''
 story 905   'status: done' 'round: 2' "merged: $merged_sha" -- '# Merged by sha, branch gone' ''
 story 906   'status: ready' 'base: epic/test' -- '# Story 906: ready on the epic' ''
 story 907   'status: done' 'round: 1' 'base: epic/done' -- '# On an epic that landed' ''
+story 950   'status: declined' 'round: 0' 'base: epic/done' -- '# Declined on an otherwise-landed epic' ''
 story 908   -- 'No frontmatter, no heading, nothing to show.'
 story 9000  'status: in_progress' 'round: 2' -- '# Story 9000 — Über long title, ümlauts and — dashes' ''
 printf -- '---\nstatus: draft\n---\n\n# Story NNN: template\n' > "$repo/.stories/TEMPLATE.md"

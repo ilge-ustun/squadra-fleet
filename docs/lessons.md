@@ -709,3 +709,33 @@ the waiting process lives.
 **Enforced by:** case 150d (the phone gets the line while the lock is held,
 and the status says it waits), case 149i (the line's wording), and the
 `waitingLine` / `readWaiting` unit tests in `ts/src/test-deploy.test.ts`.
+
+### L-38 — a declined story held its epic's count open forever
+
+On 29 Sep, khaita's `epic/performance` had landed — every story that was
+ever going to be built for it was in `develop` — but `fleet status --bot`
+kept showing `epic/performance  4 stories, 3 merged  in develop` after
+declined stories were hidden from the bot's story list. The epic block's
+`total` counted every story with `base: epic/performance`, declined or not;
+story 049 was declined (its premise turned out wrong) and, like every
+declined story, never gets a `story/<id>` branch — so it could never reach
+`merged`, and the epic could never read "fully landed" (`total === merged`),
+so it could never hide.
+
+**Lesson:** hiding a terminal status from a list is not enough if something
+upstream still counts it as open. A declined story is exactly as finished
+as a landed one; anything that asks "is there anything left here" has to
+treat them the same, not just anything that asks "what's the frontmatter say."
+
+**Prevention:** `statusOf`'s epic walk (`ts/src/status.ts`) excludes
+`status: declined` stories from an epic's `total` the same way it already
+would from `merged` (they have no branch to be an ancestor of). A declined
+story on an otherwise-landed epic (fixture story 950, `ts/fixtures/status/
+make-target.sh`) is the case: the epic reads "1 story, 1 merged, in base"
+and hides from the bot, exactly as if 950 did not exist for counting
+purposes — while still showing as its own `declined` row in the full
+terminal table.
+
+**Enforced by:** the `byte for byte against the goldens` case in
+`ts/src/status-views.test.ts`, against the `epic/done` + declined-950
+fixture scenario.

@@ -13,3 +13,4 @@ ID     TITLE                                  STATUS          R  VERDICT  INTO  
 906    ready on the epic                      [0mready         [0m  —  —      epic/test  
 907    On an epic that landed                 [32mlanded        [0m  1  PASS     epic/done  
 908    —                                    [0m—           [0m  —  —      base       
+950    Declined on an otherwise-landed epic   [0mdeclined      [0m  0  —      epic/done  
