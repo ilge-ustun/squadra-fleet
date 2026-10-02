@@ -9,11 +9,11 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 | file | placeholders |
 |---|---|
-| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` |
+| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` |
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
-| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` |
+| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` |
 | `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as

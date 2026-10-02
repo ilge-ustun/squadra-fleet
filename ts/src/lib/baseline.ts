@@ -1,4 +1,5 @@
-// The baseline. The harness runs the suite, the build and the lint itself,
+// The baseline. The harness runs the suite, the build and the lint itself —
+// and the repo's browser suite when it sets E2E_CMD —
 // in the clean reviewer tree, before the reviewer is asked anything; the
 // results are files under round-N/baseline/, committed with the status. A
 // red baseline is a machine veto.
@@ -93,6 +94,8 @@ export interface BaselineInput {
   vitestCmd: string;
   buildCmd: string;
   lintCmd: string;
+  /** Run after the lint when set and not empty; its log is baseline/e2e.log. */
+  e2eCmd?: string;
 }
 
 /** The suite with the JSON reporter, the raw file removed first so a stale
@@ -112,7 +115,8 @@ export function runBaseline(i: BaselineInput): Baseline {
   writeFileSync(join(ev, 'test.summary.json'), summary(text));
   const build = tailed(i.buildCmd, i.wt, join(ev, 'build.log'));
   const lint = tailed(i.lintCmd, i.wt, join(ev, 'lint.log'));
-  return { test, build, lint };
+  if (!i.e2eCmd) return { test, build, lint };
+  return { test, build, lint, e2e: tailed(i.e2eCmd, i.wt, join(ev, 'e2e.log')) };
 }
 
 /** The post-merge baseline in the merge worktree. The same rule for the
@@ -126,14 +130,28 @@ export interface MergeBaselineInput {
   testLog: string;
   buildLog: string;
   lintLog: string;
+  e2eLog: string;
   vitestCmd: string;
   buildCmd: string;
   lintCmd: string;
+  e2eCmd?: string;
 }
 
 export function runMergeBaseline(i: MergeBaselineInput): Baseline {
   const test = baselineColour(runVitestJson(i.wt, i.vitestCmd, i.rawJson, i.testLog));
   const build: Colour = runBashTo(i.buildCmd, { cwd: i.wt, logFile: i.buildLog }) === 0 ? 'GREEN' : 'RED';
   const lint: Colour = runBashTo(i.lintCmd, { cwd: i.wt, logFile: i.lintLog }) === 0 ? 'GREEN' : 'RED';
-  return { test, build, lint };
+  if (!i.e2eCmd) return { test, build, lint };
+  return { test, build, lint, e2e: runBashTo(i.e2eCmd, { cwd: i.wt, logFile: i.e2eLog }) === 0 ? 'GREEN' : 'RED' };
+}
+
+/** `test G | build G | lint G`, then ` | e2e G` when the repo ran one — the
+ *  launcher's and the merge's log line. */
+export function baselineLine(b: Baseline): string {
+  return `test ${b.test} | build ${b.build} | lint ${b.lint}${b.e2e === undefined ? '' : ` | e2e ${b.e2e}`}`;
+}
+
+/** Every run that ran is GREEN. */
+export function baselineGreen(b: Baseline): boolean {
+  return b.test === 'GREEN' && b.build === 'GREEN' && b.lint === 'GREEN' && (b.e2e === undefined || b.e2e === 'GREEN');
 }

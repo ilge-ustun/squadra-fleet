@@ -40,6 +40,7 @@ describe('computeVerdict — the rule', () => {
     [{ baseline: { test: 'RED', build: 'GREEN', lint: 'GREEN' } }, 'baseline test RED'],
     [{ baseline: { test: 'GREEN', build: 'RED', lint: 'GREEN' } }, 'baseline build RED'],
     [{ baseline: { test: 'GREEN', build: 'GREEN', lint: 'RED' } }, 'baseline lint RED'],
+    [{ baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN', e2e: 'RED' } }, 'baseline e2e RED'],
     [{ scope: 'VIOLATION', scopeHits: ['src/marker.txt'] }, 'scope VIOLATION: src/marker.txt '],
     [{ scope: 'VIOLATION', scopeHits: ['.fleet/config', 'src/a.ts'] }, 'scope VIOLATION: .fleet/config src/a.ts '],
     [{ acIds: ['AC1', 'AC2'] }, 'AC2 has no mutation'],
@@ -84,5 +85,15 @@ describe('computeVerdict — the rule', () => {
   });
   it('the veto is the only way the machine changes a verdict: never PASS from anything else', () => {
     expect(computeVerdict({ ...green, reviewerText: 'VERDICT: FAIL' })).toEqual({ model: 'FAIL', computed: 'FAIL', reasons: [] });
+  });
+});
+
+describe('the optional e2e run', () => {
+  it('a green e2e run is not a reason', () => {
+    expect(computeVerdict({ ...green, baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN', e2e: 'GREEN' } }).computed).toBe('PASS');
+  });
+  it('a red one comes after the lint in the reasons', () => {
+    expect(computeVerdict({ ...green, baseline: { test: 'GREEN', build: 'GREEN', lint: 'RED', e2e: 'RED' } }).reasons)
+      .toEqual(['baseline lint RED', 'baseline e2e RED']);
   });
 });

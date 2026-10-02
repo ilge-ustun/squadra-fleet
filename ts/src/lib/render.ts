@@ -16,7 +16,7 @@ export class RenderError extends Error {}
  *  REPO_RULES_TEXT {{REPO_RULES}}; the rest share their placeholder's name. */
 export type RenderVar =
   | 'STORY_ID' | 'RULES' | 'REVIEW_TEXT' | 'STORY_TEXT' | 'INTENT' | 'STORY_BASE' | 'HEAD_SHA' | 'BASE_SHA' | 'ROUND'
-  | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'CHECK_MUTATION';
+  | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'E2E_STEP' | 'CHECK_MUTATION';
 
 export type RenderVars = Partial<Record<RenderVar, string>>;
 
@@ -25,13 +25,14 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
   ['STORY_ID', 'STORY_ID'], ['RULES', 'RULES'], ['REVIEW_TEXT', 'REVIEW_TEXT'], ['STORY', 'STORY_TEXT'], ['INTENT', 'INTENT'],
   ['STORY_BASE', 'STORY_BASE'], ['HEAD_SHA', 'HEAD_SHA'], ['BASE_SHA', 'BASE_SHA'], ['ROUND', 'ROUND'],
   ['REPO_RULES', 'REPO_RULES_TEXT'], ['VITEST_CMD', 'VITEST_CMD'], ['BUILD_CMD', 'BUILD_CMD'], ['LINT_CMD', 'LINT_CMD'],
+  ['E2E_STEP', 'E2E_STEP'],
   ['CHECK_MUTATION', 'CHECK_MUTATION'],
 ];
 
 /** The names whose empty value is a die when the SOURCE uses `{{<name>}}`.
  *  The list says STORY_TEXT, and no file writes {{STORY_TEXT}}, so {{STORY}}
  *  is never guarded; REPO_RULES is exempt on purpose (a target need not add
- *  rules). Kept as it is, pinned by a test. */
+ *  rules), and so is E2E_STEP (', then <E2E_CMD>', empty when the repo runs none). Kept as it is, pinned by a test. */
 const GUARDED: readonly RenderVar[] = [
   'STORY_ID', 'RULES', 'REVIEW_TEXT', 'STORY_TEXT', 'INTENT', 'STORY_BASE', 'HEAD_SHA', 'BASE_SHA', 'ROUND',
   'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION',

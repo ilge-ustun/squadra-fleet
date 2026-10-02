@@ -45,11 +45,13 @@ export type RoundOutcome = Verdict | 'UNAVAILABLE';
 
 export type Colour = 'GREEN' | 'RED';
 
-/** The three baseline runs on the reviewer's tree. */
+/** The baseline runs on the reviewer's tree: three always, and e2e when
+ *  the repo sets E2E_CMD — absent, not GREEN, when it does not. */
 export interface Baseline {
   test: Colour;
   build: Colour;
   lint: Colour;
+  e2e?: Colour;
 }
 
 /** One mutation row: "ACn CLASS slug". cls is a string, not a

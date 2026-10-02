@@ -84,6 +84,13 @@ describe('renderPrompt', () => {
     expect(render(f, { REPO_RULES_TEXT: '' })).toBe('rules  end');
   });
 
+  it('E2E_STEP is substituted, and empty is legal: a repo without E2E_CMD renders without a gap', () => {
+    const f = prompt('e.md', 'run {{LINT_CMD}}{{E2E_STEP}}.\n');
+    expect(render(f, { LINT_CMD: 'lt', E2E_STEP: ', then e2e' })).toBe('run lt, then e2e.');
+    expect(render(f, { LINT_CMD: 'lt', E2E_STEP: '' })).toBe('run lt.');
+    expect(render(f, { LINT_CMD: 'lt' })).toBe('run lt.');
+  });
+
   it('the guard reads the source: a placeholder that arrives through a value is not guarded — a later replacement empties it', () => {
     const f = prompt('via.md', '{{RULES}}');
     expect(render(f, { RULES: 'x {{VITEST_CMD}}', VITEST_CMD: '' })).toBe('x ');

@@ -110,6 +110,12 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(load().startCmd).toBe('npx next start -H 127.0.0.1');
   });
 
+  it('E2E_CMD comes through when set, and is absent when not', () => {
+    expect(load().e2eCmd).toBeUndefined();
+    appendFileSync(join(target, '.fleet/config'), "E2E_CMD='npx playwright test'\n");
+    expect(load().e2eCmd).toBe('npx playwright test');
+  });
+
   it('a value with quotes, a dollar and a newline round-trips byte for byte', () => {
     const odd = 'say "hi" $HOME `x`\\ and\nmore';
     writeConfig(`${CONFIG}BUILD_CMD=${JSON.stringify(odd).replace(/^"|"$/g, "'").replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')}\n`);

@@ -4,7 +4,7 @@
 // grants one, and it never touches SPEC (the story is wrong, not the build)
 // or UNPARSEABLE or the reviewer's own FAIL — the reasons are still listed
 // on the computed: line so a human reads the whole picture.
-//   baseline   test, build, lint all green
+//   baseline   test, build, lint all green, and e2e when the repo runs one
 //   scope      no changed path the story denies
 //   coverage   every AC in the story has at least one mutation
 //   D1         every mutation is RED — a survivor means the instrument is
@@ -60,6 +60,7 @@ export function computeVerdict(i: VerdictInput): VerdictResult {
   if (i.baseline.test !== 'GREEN') reasons.push(`baseline test ${i.baseline.test}`);
   if (i.baseline.build !== 'GREEN') reasons.push(`baseline build ${i.baseline.build}`);
   if (i.baseline.lint !== 'GREEN') reasons.push(`baseline lint ${i.baseline.lint}`);
+  if (i.baseline.e2e !== undefined && i.baseline.e2e !== 'GREEN') reasons.push(`baseline e2e ${i.baseline.e2e}`);
   // "scope <scope>: <hits>; " where every hit carries a trailing space
   if (i.scope !== 'CLEAN') reasons.push(`scope ${i.scope}: ${i.scopeHits.map((h) => `${h} `).join('')}`);
   for (const ac of i.acIds) {
