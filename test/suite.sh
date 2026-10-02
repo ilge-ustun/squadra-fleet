@@ -3462,7 +3462,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_145_builder_refused_by_claude
        case_146_fallback_reviewer_is_claude case_147_no_attribution
        case_148_bot_job_is_its_own_unit case_149_test_deploy
-       case_150_bot_testdeploy case_151_refused_push_follows_origin)
+       case_150_bot_testdeploy case_151_refused_push_follows_origin
+       case_152_e2e_baseline case_153_merge_runs_e2e)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4330,6 +4331,50 @@ case_151_refused_push_follows_origin() {
   assert_grep 'status push failed — queue not visible remotely' "$LOG" "the warning stays"
   git -C "$REPO" merge-base --is-ancestor "$LANDED" base && fail "origin was merged into a dirty checkout" || ok
   assert_grep 'a human is editing this' "$REPO/README.md" "the edit survives"
+}
+
+# A browser suite sees what neither the tests (jsdom) nor the build see. A
+# repo opts in with E2E_CMD in .fleet/config; the launcher runs it after the
+# lint, and a red run vetoes like a red build. Red without E2E_CMD in
+# lib.sh's keys, without the baseline step, or without the veto.
+case_152_e2e_baseline() {
+  baseline_case c152 "152 baseline e2e RED vetoes PASS" 'lint GREEN \| e2e RED' E2E_CMD=false
+  assert_file "$REPO/.review/$STORY/round-1/baseline/e2e.log" "e2e log kept"
+
+  CASE="152b a green e2e run is recorded, and both agents are told it runs"; fixture c152b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 E2E_CMD="echo E2E_RAN_7c1"
+  assert_eq "$(field status)" done "story status"
+  assert_eq "$(review_line 3)" "verdict: PASS" ".review line 3"
+  assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN \| e2e GREEN' "$REPO/.review/$STORY.md" "machine block records the e2e run"
+  assert_grep 'E2E_RAN_7c1' "$REPO/.review/$STORY/round-1/baseline/e2e.log" "the command ran in the baseline"
+  assert_grep "then true, then echo E2E_RAN_7c1" "$TRACE/claude-prompt-1" "the builder is told to run it"
+  assert_grep "Run: $FLEET/test/fakes/vitest, true, true, then echo E2E_RAN_7c1" "$TRACE/codex-prompt-1" "the reviewer too"
+
+  CASE="152c a repo without E2E_CMD keeps the three-run baseline"; fixture c152c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN$' "$REPO/.review/$STORY.md" "no e2e column"
+  assert_no_file "$REPO/.review/$STORY/round-1/baseline/e2e.log" "no e2e log"
+  assert_not_grep '\{\{E2E' "$TRACE/claude-prompt-1" "no leftover placeholder for the builder"
+  assert_not_grep '\{\{E2E' "$TRACE/codex-prompt-1" "nor for the reviewer"
+}
+
+# The post-merge baseline runs the same e2e command, so a merge cannot land
+# what the browser suite rejects. Red without it in merge.ts.
+case_153_merge_runs_e2e() {
+  CASE="153 a red post-merge e2e run undoes the merge"; epic_story c153
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  merge_run E2E_CMD=false
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'e2e RED' "$MLOG" "the message names the e2e run"
+  assert_eq "$(epic_head)" "$before" "the epic is exactly where it was"
+  assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "and nothing claims it merged"
+
+  CASE="153b a green post-merge e2e run merges"; epic_story c153b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run E2E_CMD=true
+  assert_eq "$MRC" 0 "exit code"
+  assert_grep 'post-merge baseline: test GREEN \| build GREEN \| lint GREEN \| e2e GREEN' "$MLOG" "the e2e run is in the baseline line"
 }
 
 for c in "${CASES[@]}"; do

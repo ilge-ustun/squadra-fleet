@@ -21,8 +21,8 @@ Rules that override anything you infer:
   undoes the patch, and prints the class the verdict will print. Anything
   but RED is a finding you still own — fix the test, the patch or the
   selector, commit, regenerate the patch, run it again.
-- The harness runs three commands as the baseline, on your final commit: {{VITEST_CMD}}, then {{BUILD_CMD}}, then {{LINT_CMD}}.
-  Run all three yourself before you finish. A build or lint that goes RED
+- The harness runs these commands as the baseline, on your final commit: {{VITEST_CMD}}, then {{BUILD_CMD}}, then {{LINT_CMD}}{{E2E_STEP}}.
+  Run them all yourself before you finish. A build, lint or end-to-end run that goes RED
   fails the round however green the tests are: a type error the test runner
   never type-checks is the usual way.
 - An instrument must assert what the acceptance criterion claims. If deleting the

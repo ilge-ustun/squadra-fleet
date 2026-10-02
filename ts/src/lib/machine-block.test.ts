@@ -119,3 +119,18 @@ describe('formatIsoSeconds — date -Iseconds', () => {
     }
   });
 });
+
+describe('the baseline line with and without the e2e run', () => {
+  const section = (baseline: { test: 'GREEN' | 'RED'; build: 'GREEN' | 'RED'; lint: 'GREEN' | 'RED'; e2e?: 'GREEN' | 'RED' }): string => renderRoundSection({
+    round: '1', headSha: 'h', roundCommits: '1', reviewedAt: 't', baseline,
+    timing: { build: '0', base: '0', review: '0', mut: '0', total: '0' }, builderModel: 'sonnet', reviewerModel: '',
+    acIds: [], scope: 'CLEAN', scopeHits: [], model: 'PASS', computed: 'PASS', reasons: [], mutRows: [], probeRows: [],
+    builderText: Buffer.from('b\n'), reviewerText: Buffer.from('r\n'),
+  }).toString('utf8');
+  it('without: the three runs, nothing after the lint', () => {
+    expect(section({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' })).toContain('\nbaseline: test GREEN | build GREEN | lint GREEN\n');
+  });
+  it('with: the e2e run after the lint', () => {
+    expect(section({ test: 'GREEN', build: 'GREEN', lint: 'GREEN', e2e: 'RED' })).toContain('\nbaseline: test GREEN | build GREEN | lint GREEN | e2e RED\n');
+  });
+});

@@ -36,6 +36,9 @@ export interface RepoConfig {
   /** How `fleet test-deploy` serves a built tree, PORT in its environment;
    *  absent means `npm start`. */
   startCmd?: string;
+  /** A browser suite the baseline runs after the lint, in the story's and
+   *  the merge's tree; absent or empty means the baseline is three runs. */
+  e2eCmd?: string;
 }
 
 export class ConfigError extends Error {
@@ -95,6 +98,7 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
   const repoRules = m.get('REPO_RULES');
   const prCmd = m.get('PR_CMD');
   const startCmd = m.get('START_CMD');
+  const e2eCmd = m.get('E2E_CMD');
   return {
     name: required(m, 'REPO_NAME'),
     root: required(m, 'REPO_ROOT'),
@@ -109,5 +113,6 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
     mergeMode,
     ...(prCmd !== undefined ? { prCmd } : {}),
     ...(startCmd !== undefined ? { startCmd } : {}),
+    ...(e2eCmd !== undefined && e2eCmd !== '' ? { e2eCmd } : {}),
   };
 }

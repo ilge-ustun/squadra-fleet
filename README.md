@@ -137,7 +137,7 @@ result and writes it as line 3 of `.review/<id>.md`, with a `### Machine`
 block per round.
 
 ```
-machine_pass := baseline green — test, build, lint, run by the harness
+machine_pass := baseline green — test, build, lint (and e2e when E2E_CMD is set), run by the harness
              ∧ scope CLEAN — no changed path the story's scope_deny names
              ∧ every **ACn in the story has ≥1 mutation in .review-out/mutations/
              ∧ every mutation is RED when the harness runs it
@@ -316,6 +316,7 @@ environment wins over the file; a missing required key is a `die`.
 | `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
 | `PR_CMD` | with `pr` | see below |
 | `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. A Next app that should listen on loopback only: `npx next start -H 127.0.0.1` |
+| `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log` |
 
 `.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
 test environment's known traps, an API to read in `node_modules` before

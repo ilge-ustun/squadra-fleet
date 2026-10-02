@@ -140,7 +140,7 @@ export function renderRoundSection(s: RoundSection): Buffer {
     `commits this round: ${s.roundCommits}\n` +
     `reviewed: ${s.reviewedAt}\n\n` +
     `${MACHINE_HEADING}\n\n` +
-    `${label('baseline')}test ${b.test} | build ${b.build} | lint ${b.lint}\n` +
+    `${label('baseline')}test ${b.test} | build ${b.build} | lint ${b.lint}${b.e2e === undefined ? '' : ` | e2e ${b.e2e}`}\n` +
     `${label('timing')}builder ${t.build}s | baseline ${t.base}s | reviewer ${t.review}s | mutations ${t.mut}s | total ${t.total}s\n` +
     `${label('builder')}${s.builderModel}${resolved(s.builderModel, s.builderModelUsed)}\n` +
     `${label('reviewer')}${s.reviewerCli === 'claude' ? `claude ${s.reviewerModel} (fallback)` : `codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}`}${resolved(s.reviewerModel, s.reviewerModelUsed)}\n` +

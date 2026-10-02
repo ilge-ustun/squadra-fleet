@@ -143,7 +143,7 @@ describe('runMergeBaseline', () => {
     runMergeBaseline({
       wt, rawJson: join(runs, '900-merge-baseline.json'),
       testLog: join(runs, '900-merge-test.log'), buildLog: join(runs, '900-merge-build.log'), lintLog: join(runs, '900-merge-lint.log'),
-      vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true',
+      e2eLog: join(runs, '900-merge-e2e.log'), vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true',
     });
 
   it('all green: the three colours, the four files under .runs and nothing else — no summary', () => {
@@ -175,5 +175,57 @@ describe('runMergeBaseline', () => {
   it('runs in the worktree, each command a bash line', () => {
     process.env['FAKE_VITEST'] = 'pass';
     expect(run({ buildCmd: `test "$(pwd -P)" = "${realpathSync(wt)}"`, lintCmd: 'cd src && test -f marker.txt' })).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+  });
+});
+
+// E2E_CMD: an optional fourth run, a browser suite. Absent, the baseline is
+// exactly the three runs it was; present, it runs after the lint and its
+// colour is its exit status.
+describe('the optional e2e run', () => {
+  let dir: string; let wt: string; let ev: string; let runs: string;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fleet-e2e-'));
+    wt = join(dir, 'wt'); ev = join(dir, 'ev'); runs = join(dir, 'runs');
+    mkdirSync(join(wt, 'src'), { recursive: true }); mkdirSync(runs); mkdirSync(join(dir, 'trace'));
+    writeFileSync(join(wt, 'src/marker.txt'), 'm\n');
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) saved[k] = process.env[k];
+    process.env['FAKE_TRACE_DIR'] = join(dir, 'trace');
+    process.env['FAKE_VITEST'] = 'pass';
+  });
+  afterEach(() => {
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const story = (e2eCmd?: string) => runBaseline({
+    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    ...(e2eCmd !== undefined ? { e2eCmd } : {}),
+  });
+  const merge = (e2eCmd?: string) => runMergeBaseline({
+    wt, rawJson: join(runs, '900-merge-baseline.json'),
+    testLog: join(runs, '900-merge-test.log'), buildLog: join(runs, '900-merge-build.log'), lintLog: join(runs, '900-merge-lint.log'),
+    e2eLog: join(runs, '900-merge-e2e.log'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    ...(e2eCmd !== undefined ? { e2eCmd } : {}),
+  });
+
+  it('absent: no e2e key and no e2e log, in both baselines', () => {
+    expect(story()).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+    expect(existsSync(join(ev, 'baseline/e2e.log'))).toBe(false);
+    expect(merge()).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+    expect(existsSync(join(runs, '900-merge-e2e.log'))).toBe(false);
+  });
+  it('an empty E2E_CMD is the same as none', () => {
+    expect(story('')).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+    expect(merge('')).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
+  });
+  it('present: its exit status is its colour, its output in its log, run in the worktree', () => {
+    expect(story('pwd; echo E2E_OK').e2e).toBe('GREEN');
+    const log = readFileSync(join(ev, 'baseline/e2e.log'), 'utf8');
+    expect(log).toContain('E2E_OK');
+    expect(log).toContain(realpathSync(wt));
+    expect(story('echo E2E_FAIL; exit 3').e2e).toBe('RED');
+    expect(merge('echo M_OK').e2e).toBe('GREEN');
+    expect(readFileSync(join(runs, '900-merge-e2e.log'), 'utf8')).toContain('M_OK');
+    expect(merge('false').e2e).toBe('RED');
   });
 });

@@ -19,7 +19,7 @@
 // story with no review or no verdict line is refused in words. No fleet lock
 // here: the bot holds it around this command.
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { runMergeBaseline } from './lib/baseline.ts';
+import { baselineGreen, baselineLine, runMergeBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
 import { recordMergedSha } from './lib/frontmatter.ts';
@@ -243,15 +243,17 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       testLog: `${root}/.runs/${logId}-merge-test.log`,
       buildLog: `${root}/.runs/${logId}-merge-build.log`,
       lintLog: `${root}/.runs/${logId}-merge-lint.log`,
+      e2eLog: `${root}/.runs/${logId}-merge-e2e.log`,
       vitestCmd: cfg.vitestCmd,
       buildCmd: cfg.buildCmd,
       lintCmd: cfg.lintCmd,
+      ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
     });
-    log(`post-merge baseline: test ${b.test} | build ${b.build} | lint ${b.lint}`);
-    if (b.test !== 'GREEN' || b.build !== 'GREEN' || b.lint !== 'GREEN') {
+    log(`post-merge baseline: ${baselineLine(b)}`);
+    if (!baselineGreen(b)) {
       // Nothing was pushed, so there is nothing to undo: the merge exists only
       // in a worktree the cleanup is about to delete.
-      throw new Die(`post-merge baseline is red (test ${b.test}, build ${b.build}, lint ${b.lint}) — ${base} is untouched, logs in .runs/${logId}-merge-*`);
+      throw new Die(`post-merge baseline is red (${baselineLine(b)}) — ${base} is untouched, logs in .runs/${logId}-merge-*`);
     }
 
     // ── publish ──────────────────────────────────────────────────────────────

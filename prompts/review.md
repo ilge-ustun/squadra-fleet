@@ -71,7 +71,7 @@ case of a claim already made is folded into that claim, while a criterion
 invented for it becomes another branch in the implementation, and another
 case nobody has stated.
 
-Run: {{VITEST_CMD}}, {{BUILD_CMD}}, {{LINT_CMD}}. The harness has run them
+Run: {{VITEST_CMD}}, {{BUILD_CMD}}, {{LINT_CMD}}{{E2E_STEP}}. The harness has run them
 too; yours inform your judgment, its results decide.
 
 If a criterion cannot be satisfied by ANY implementation — the instrument it

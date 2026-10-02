@@ -44,7 +44,7 @@ import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSy
 import { join, resolve } from 'node:path';
 import { builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
-import { runBaseline } from './lib/baseline.ts';
+import { baselineLine, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
@@ -470,6 +470,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         STORY_ID: storyId, RULES: state.rules, REVIEW_TEXT: reviewText, STORY_TEXT: storyText, STORY_BASE: storyBase,
         HEAD_SHA: state.headSha, BASE_SHA: baseSha, ROUND: state.round, REPO_RULES_TEXT: repoRulesText,
         VITEST_CMD: cfg.vitestCmd, BUILD_CMD: cfg.buildCmd, LINT_CMD: cfg.lintCmd, CHECK_MUTATION: checkMutation,
+        E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
       };
       let r;
       try {
@@ -619,8 +620,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const baseline = runBaseline({
         wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`,
         vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
+        ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
       });
-      log(`baseline: test ${baseline.test} | build ${baseline.build} | lint ${baseline.lint}`);
+      log(`baseline: ${baselineLine(baseline)}`);
       const scope = checkScope({ deny: storyField(root, storyId, 'scope_deny'), changed: changedPaths, storyId });
       writeFileSync(`${evidenceDir}/scope.txt`, scope.fileText);
       log(scope.logLine);
