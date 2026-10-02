@@ -3463,7 +3463,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_146_fallback_reviewer_is_claude case_147_no_attribution
        case_148_bot_job_is_its_own_unit case_149_test_deploy
        case_150_bot_testdeploy case_151_refused_push_follows_origin
-       case_152_e2e_baseline case_153_merge_runs_e2e)
+       case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4375,6 +4375,40 @@ case_153_merge_runs_e2e() {
   merge_run E2E_CMD=true
   assert_eq "$MRC" 0 "exit code"
   assert_grep 'post-merge baseline: test GREEN \| build GREEN \| lint GREEN \| e2e GREEN' "$MLOG" "the e2e run is in the baseline line"
+}
+
+# An e2e suite starts servers, and a server that outlives its run, or a run
+# that never returns, would stall the launcher: the baseline is synchronous
+# and nothing else times it. khaita's 062 writer saw exactly that hang. The
+# e2e run gets E2E_TIMEOUT seconds (default 900) and its process group is
+# killed when they run out; whatever is still running in the tree afterwards
+# is killed too, and either way the run is RED. Red without the timeout (the
+# case waits out a 60 s sleep) or without the sweep (the sleeper survives).
+case_154_e2e_bounded() {
+  local t0
+  CASE="154 an e2e run that never returns is killed at E2E_TIMEOUT and is RED"; fixture c154
+  t0=$SECONDS
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 E2E_CMD="sleep 60" E2E_TIMEOUT=2
+  (( SECONDS - t0 < 50 )) && ok || fail "the launcher waited out the sleep ($((SECONDS - t0)) s)"
+  assert_eq "$(review_line 3)" "verdict: FAIL" ".review line 3 — machine veto"
+  assert_grep 'lint GREEN \| e2e RED' "$REPO/.review/$STORY.md" "machine block names the e2e run"
+  assert_grep 'timed out after 2 s' "$REPO/.review/$STORY/round-1/baseline/e2e.log" "the log says why"
+
+  CASE="154b a process the e2e run leaves in the tree is killed, and the run is RED"; fixture c154b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 E2E_CMD="setsid sleep 300 >/dev/null 2>&1 & echo started"
+  assert_eq "$(review_line 3)" "verdict: FAIL" ".review line 3 — machine veto"
+  assert_grep 'left running' "$REPO/.review/$STORY/round-1/baseline/e2e.log" "the log names the leftover"
+  pgrep -f '^sleep 300$' >/dev/null && fail "the leftover sleep is still running" || ok
+
+  CASE="154c a post-merge e2e run that never returns is killed, and nothing lands"; epic_story c154c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local before; before="$(epic_head)"
+  t0=$SECONDS
+  merge_run E2E_CMD="sleep 60" E2E_TIMEOUT=2
+  (( SECONDS - t0 < 50 )) && ok || fail "the merge waited out the sleep ($((SECONDS - t0)) s)"
+  assert_eq "$MRC" 1 "exit code (die)"
+  assert_grep 'e2e RED' "$MLOG" "the message names the e2e run"
+  assert_eq "$(epic_head)" "$before" "the epic is exactly where it was"
 }
 
 for c in "${CASES[@]}"; do

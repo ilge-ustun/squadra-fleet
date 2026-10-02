@@ -621,6 +621,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`,
         vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
         ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
+        ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
       });
       log(`baseline: ${baselineLine(baseline)}`);
       const scope = checkScope({ deny: storyField(root, storyId, 'scope_deny'), changed: changedPaths, storyId });

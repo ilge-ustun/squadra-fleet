@@ -13,9 +13,10 @@
 // two differ on purpose, and case 106 stubs that file, so nothing here may
 // import it.
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runBashTo } from './proc.ts';
+import { procsInWorktree } from './procs.ts';
 import type { Baseline, Colour } from './types.ts';
 
 /** jq's `v > 0`: numbers by value; null and booleans sort below numbers,
@@ -84,6 +85,70 @@ function tailed(cmd: string, cwd: string, logFile: string): Colour {
   }
 }
 
+/** The e2e run's bound when the repo sets no E2E_TIMEOUT: fifteen minutes,
+ *  three times the five the first browser suite (khaita 062) was sized for. */
+export const E2E_TIMEOUT_DEFAULT = 900;
+
+/** Wait up to `ms` for every pid to be gone; the ones still alive. */
+function survivors(pids: readonly string[], ms: number): string[] {
+  const end = Date.now() + ms;
+  let alive = pids.filter((p) => existsSync(`/proc/${p}`));
+  while (alive.length > 0 && Date.now() < end) {
+    spawnSync('sleep', ['0.1']);
+    alive = alive.filter((p) => existsSync(`/proc/${p}`));
+  }
+  return alive;
+}
+
+function signal(pids: readonly string[], sig: NodeJS.Signals): void {
+  for (const p of pids) {
+    try {
+      process.kill(Number(p), sig);
+    } catch {
+      // gone already
+    }
+  }
+}
+
+/** The e2e run. A browser suite starts servers, and a run that never
+ *  returns or a server it leaves behind would stall the launcher, whose
+ *  baseline is synchronous (khaita 062's writer saw the hang). So:
+ *  - the line runs under coreutils `timeout`, which leads its own process
+ *    group and kills the whole group at the bound (KILL ten seconds after
+ *    TERM);
+ *  - afterwards every process whose cwd is in the tree is a leftover, even
+ *    one that escaped the group with setsid: TERM, then KILL after five
+ *    seconds;
+ *  - a timeout or a leftover is RED whatever the exit status, with a
+ *    `[fleet]` line in the log saying which.
+ *  `tail` keeps the story baseline's 200-line log (tailed()); without it
+ *  the whole of both streams goes to the log, as runBashTo writes the
+ *  merge's. */
+function runE2e(cmd: string, cwd: string, logFile: string, timeoutSec: number, tail: boolean): Colour {
+  const line = tail ? `( ${cmd}\n) 2>&1 | tail -n 200` : cmd;
+  const fd = openSync(logFile, 'w');
+  const t0 = Date.now();
+  let status: number | null;
+  try {
+    const r = spawnSync('timeout', ['--kill-after=10', String(timeoutSec), 'bash', '-o', 'pipefail', '-c', line], {
+      cwd, stdio: ['ignore', fd, tail ? 'inherit' : fd],
+    });
+    status = r.status;
+  } finally {
+    closeSync(fd);
+  }
+  const notes: string[] = [];
+  if ((status === 124 || status === 137) && Date.now() - t0 >= timeoutSec * 1000) notes.push(`timed out after ${timeoutSec} s`);
+  const left = procsInWorktree(cwd).filter((p) => p !== String(process.pid));
+  if (left.length > 0) {
+    signal(left, 'SIGTERM');
+    signal(survivors(left, 5000), 'SIGKILL');
+    notes.push(`left running in the tree, killed: pids ${left.join(' ')}`);
+  }
+  if (notes.length > 0) appendFileSync(logFile, `\n[fleet] e2e ${notes.join('; ')}\n`);
+  return status === 0 && notes.length === 0 ? 'GREEN' : 'RED';
+}
+
 export interface BaselineInput {
   wt: string;
   /** round-N; the files go under its baseline/. */
@@ -96,6 +161,8 @@ export interface BaselineInput {
   lintCmd: string;
   /** Run after the lint when set and not empty; its log is baseline/e2e.log. */
   e2eCmd?: string;
+  /** Seconds before the e2e run's process group is killed; default 900. */
+  e2eTimeoutSec?: number;
 }
 
 /** The suite with the JSON reporter, the raw file removed first so a stale
@@ -116,7 +183,7 @@ export function runBaseline(i: BaselineInput): Baseline {
   const build = tailed(i.buildCmd, i.wt, join(ev, 'build.log'));
   const lint = tailed(i.lintCmd, i.wt, join(ev, 'lint.log'));
   if (!i.e2eCmd) return { test, build, lint };
-  return { test, build, lint, e2e: tailed(i.e2eCmd, i.wt, join(ev, 'e2e.log')) };
+  return { test, build, lint, e2e: runE2e(i.e2eCmd, i.wt, join(ev, 'e2e.log'), i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, true) };
 }
 
 /** The post-merge baseline in the merge worktree. The same rule for the
@@ -135,6 +202,7 @@ export interface MergeBaselineInput {
   buildCmd: string;
   lintCmd: string;
   e2eCmd?: string;
+  e2eTimeoutSec?: number;
 }
 
 export function runMergeBaseline(i: MergeBaselineInput): Baseline {
@@ -142,7 +210,7 @@ export function runMergeBaseline(i: MergeBaselineInput): Baseline {
   const build: Colour = runBashTo(i.buildCmd, { cwd: i.wt, logFile: i.buildLog }) === 0 ? 'GREEN' : 'RED';
   const lint: Colour = runBashTo(i.lintCmd, { cwd: i.wt, logFile: i.lintLog }) === 0 ? 'GREEN' : 'RED';
   if (!i.e2eCmd) return { test, build, lint };
-  return { test, build, lint, e2e: runBashTo(i.e2eCmd, { cwd: i.wt, logFile: i.e2eLog }) === 0 ? 'GREEN' : 'RED' };
+  return { test, build, lint, e2e: runE2e(i.e2eCmd, i.wt, i.e2eLog, i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, false) };
 }
 
 /** `test G | build G | lint G`, then ` | e2e G` when the repo ran one — the

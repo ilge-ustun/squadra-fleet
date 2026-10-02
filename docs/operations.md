@@ -147,10 +147,12 @@ deploys — belongs to that target, not here.
   the baseline and the post-merge baseline (cases 152, 153). No target sets
   it yet: khaita's Playwright story comes first, and the box needs Chromium's
   system libraries and a Java runtime for the Firestore emulator, both a
-  root install. Two things are still open. A suite run against the
-  `/testdeploy` URL after a test deploy, the live-data smoke, is not built.
-  And a browser run on this 3.8 GiB box has not been measured beside the
-  builder.
+  root install. Each run is bounded by `E2E_TIMEOUT` (default 900 s) and
+  swept for leftover processes, because khaita 062's writer saw a leaked
+  server hang a run (case 154). Two things are still open. A suite run
+  against the `/testdeploy` URL after a test deploy, the live-data smoke,
+  is not built. And a browser run on this 3.8 GiB box has not been
+  measured beside the builder.
 
 ## Decided, and why
 
