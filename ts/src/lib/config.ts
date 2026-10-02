@@ -39,6 +39,9 @@ export interface RepoConfig {
   /** A browser suite the baseline runs after the lint, in the story's and
    *  the merge's tree; absent or empty means the baseline is three runs. */
   e2eCmd?: string;
+  /** E2E_TIMEOUT: the seconds an e2e run may take before its process group
+   *  is killed; absent means the baseline's default. */
+  e2eTimeoutSec?: number;
 }
 
 export class ConfigError extends Error {
@@ -99,6 +102,10 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
   const prCmd = m.get('PR_CMD');
   const startCmd = m.get('START_CMD');
   const e2eCmd = m.get('E2E_CMD');
+  const e2eTimeout = m.get('E2E_TIMEOUT');
+  if (e2eTimeout !== undefined && e2eTimeout !== '' && !/^[1-9][0-9]*$/.test(e2eTimeout)) {
+    throw new ConfigError(`E2E_TIMEOUT=${e2eTimeout} in .fleet/config for '${m.get('REPO_NAME') ?? name}' is not a whole number of seconds`, false);
+  }
   return {
     name: required(m, 'REPO_NAME'),
     root: required(m, 'REPO_ROOT'),
@@ -114,5 +121,6 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
     ...(prCmd !== undefined ? { prCmd } : {}),
     ...(startCmd !== undefined ? { startCmd } : {}),
     ...(e2eCmd !== undefined && e2eCmd !== '' ? { e2eCmd } : {}),
+    ...(e2eTimeout !== undefined && e2eTimeout !== '' ? { e2eTimeoutSec: Number(e2eTimeout) } : {}),
   };
 }

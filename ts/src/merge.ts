@@ -248,6 +248,7 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       buildCmd: cfg.buildCmd,
       lintCmd: cfg.lintCmd,
       ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
+      ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
     });
     log(`post-merge baseline: ${baselineLine(b)}`);
     if (!baselineGreen(b)) {

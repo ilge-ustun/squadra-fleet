@@ -316,7 +316,8 @@ environment wins over the file; a missing required key is a `die`.
 | `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
 | `PR_CMD` | with `pr` | see below |
 | `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. A Next app that should listen on loopback only: `npx next start -H 127.0.0.1` |
-| `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log` |
+| `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log`. The run is bounded by `E2E_TIMEOUT` and swept afterwards: a timeout, or any process still running in the tree, is RED and is killed |
+| `E2E_TIMEOUT` | no, default 900 | seconds an `E2E_CMD` run may take. At the bound coreutils `timeout` kills its whole process group, so a hung browser suite cannot stall a launcher or a merge |
 
 `.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
 test environment's known traps, an API to read in `node_modules` before

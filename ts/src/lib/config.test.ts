@@ -116,6 +116,14 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(load().e2eCmd).toBe('npx playwright test');
   });
 
+  it('E2E_TIMEOUT: absent is undefined, a positive integer comes through as seconds, anything else dies', () => {
+    expect(load().e2eTimeoutSec).toBeUndefined();
+    appendFileSync(join(target, '.fleet/config'), "E2E_TIMEOUT=600\n");
+    expect(load().e2eTimeoutSec).toBe(600);
+    appendFileSync(join(target, '.fleet/config'), "E2E_TIMEOUT=10m\n");
+    expect(() => load()).toThrow(/E2E_TIMEOUT/);
+  });
+
   it('a value with quotes, a dollar and a newline round-trips byte for byte', () => {
     const odd = 'say "hi" $HOME `x`\\ and\nmore';
     writeConfig(`${CONFIG}BUILD_CMD=${JSON.stringify(odd).replace(/^"|"$/g, "'").replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')}\n`);

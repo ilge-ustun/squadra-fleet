@@ -229,3 +229,58 @@ describe('the optional e2e run', () => {
     expect(merge('false').e2e).toBe('RED');
   });
 });
+
+// A browser suite starts servers. One that never returns, or one that leaves
+// a server behind, would stall the launcher: the e2e run is bounded by
+// e2eTimeoutSec and swept for leftovers afterwards, and either is RED.
+describe('the e2e run is bounded and swept', () => {
+  let dir: string; let wt: string; let ev: string; let runs: string;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fleet-e2e-bound-'));
+    wt = join(dir, 'wt'); ev = join(dir, 'ev'); runs = join(dir, 'runs');
+    mkdirSync(join(wt, 'src'), { recursive: true }); mkdirSync(runs); mkdirSync(join(dir, 'trace'));
+    writeFileSync(join(wt, 'src/marker.txt'), 'm\n');
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) saved[k] = process.env[k];
+    process.env['FAKE_TRACE_DIR'] = join(dir, 'trace');
+    process.env['FAKE_VITEST'] = 'pass';
+  });
+  afterEach(() => {
+    for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const story = (e2eCmd: string, e2eTimeoutSec?: number) => runBaseline({
+    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    e2eCmd, ...(e2eTimeoutSec !== undefined ? { e2eTimeoutSec } : {}),
+  });
+  const merge = (e2eCmd: string, e2eTimeoutSec?: number) => runMergeBaseline({
+    wt, rawJson: join(runs, '900-merge-baseline.json'),
+    testLog: join(runs, '900-merge-test.log'), buildLog: join(runs, '900-merge-build.log'), lintLog: join(runs, '900-merge-lint.log'),
+    e2eLog: join(runs, '900-merge-e2e.log'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    e2eCmd, ...(e2eTimeoutSec !== undefined ? { e2eTimeoutSec } : {}),
+  });
+  const alive = (pid: string): boolean => existsSync(`/proc/${pid}`);
+
+  it('a run that outlasts its timeout is killed, whole process group, and is RED with the reason in its log', () => {
+    const t0 = Date.now();
+    expect(story('sleep 30 & wait', 1).e2e).toBe('RED');
+    expect(Date.now() - t0).toBeLessThan(15_000);
+    expect(readFileSync(join(ev, 'baseline/e2e.log'), 'utf8')).toContain('timed out after 1 s');
+    const t1 = Date.now();
+    expect(merge('sleep 30', 1).e2e).toBe('RED');
+    expect(Date.now() - t1).toBeLessThan(15_000);
+    expect(readFileSync(join(runs, '900-merge-e2e.log'), 'utf8')).toContain('timed out after 1 s');
+  }, 40_000);
+  it('a process left running in the tree, even in its own session, is killed and makes the run RED', () => {
+    const pidFile = join(dir, 'leftover.pid');
+    expect(story(`setsid sleep 300 >/dev/null 2>&1 & echo $! > '${pidFile}'; sleep 0.3`).e2e).toBe('RED');
+    const pid = readFileSync(pidFile, 'utf8').trim();
+    expect(alive(pid)).toBe(false);
+    expect(readFileSync(join(ev, 'baseline/e2e.log'), 'utf8')).toContain('left running');
+  }, 20_000);
+  it('a run within its time that leaves nothing behind stays GREEN, and the default bound is not 0', () => {
+    expect(story('echo fine').e2e).toBe('GREEN');
+    expect(readFileSync(join(ev, 'baseline/e2e.log'), 'utf8')).not.toContain('[fleet]');
+    expect(merge('echo fine').e2e).toBe('GREEN');
+  });
+});
