@@ -11,7 +11,7 @@ You are in a clean checkout at commit {{HEAD_SHA}}. The base was {{BASE_SHA}}.
 This is review round {{ROUND}}.
 
 Do NOT review by reading the diff. Derive your evidence independently:
-read the current state of the files, run the tests, run the build.
+read the current state of the files, and run the tests your judgment needs.
 
 For every claim you make, cite file:line. A claim without a citation is not
 a finding.
@@ -71,8 +71,16 @@ case of a claim already made is folded into that claim, while a criterion
 invented for it becomes another branch in the implementation, and another
 case nobody has stated.
 
-Run: {{VITEST_CMD}}, {{BUILD_CMD}}, {{LINT_CMD}}{{E2E_STEP}}. The harness has run them
-too; yours inform your judgment, its results decide.
+The harness ran its baseline — {{VITEST_CMD}}, {{BUILD_CMD}}, {{LINT_CMD}}{{E2E_STEP}} —
+on this head, in a clean tree like yours, before you started:
+
+  {{BASELINE}}
+
+Its results decide. Do not run the whole suite, the build, the lint or the
+browser suite again to confirm them: that is minutes the round spends twice.
+Run what your judgment needs — the tests the story touches, the selectors of
+the mutations you write, your probes, any single test you doubt — and read
+its logs when you want to see more.
 
 If a criterion cannot be satisfied by ANY implementation — the instrument it
 demands cannot exist given the codebase as it stands — that is a defect in the

@@ -55,7 +55,7 @@ replaceable at that seam.
 |---|---|---|---|---|
 | story writer | `fleet write-story`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `opus` (alias: the newest Opus) | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
 | builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `fleet check-mutation` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
-| reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head: reads files, runs the suite, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
+| reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head, told the harness's baseline result: reads files, runs the tests it needs, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | the launcher: `ts/src/lib/baseline.ts`, `scope.ts`, `evidence.ts` over `ts/src/classifier.ts`, `ts/src/lib/verdict.ts` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
 | the human | terminal or phone | — | promotes, lands, answers blocks, deploys, holds every token | — |
@@ -109,6 +109,11 @@ How each lands:
 
 Every merge runs the suite, build and lint on the **merged** result in a
 throwaway worktree and pushes only if that is green (`MERGE_MODE=direct`).
+One exception, the queue's own merge of a story into its epic: when the
+merged tree is the tree the story's last round checked all GREEN, with the
+commands that round recorded in `round-N/baseline/commands.json`, that
+check stands and the log says `post-merge baseline: SKIPPED — …` (L-39).
+An epic, and a story landed with `--land`, are always checked whole.
 A repo can instead ask for a request on its host (`MERGE_MODE=pr`, below).
 
 ### What STATUS means
@@ -152,7 +157,11 @@ selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
 The reviewer writes at least one per criterion; the builder writes its own
 as `ACn-tdd-<slug>` — the failing test it observed, handed over instead of
 described. The harness runs every one in a clean tree with the classifier
-in `ts/src/classifier.ts`:
+in `ts/src/classifier.ts`: `git apply --check`, the selector unmutated
+(the pre-run), the patch, the selector again. In a round the tree is the
+same clean HEAD before every patch, so a selector's GREEN pre-run is made
+once and stands for every later patch that names it; its `-pre.log` in
+`.runs/` says whose run it reused (L-39).
 
 | class | meaning | who fixes it |
 |---|---|---|
@@ -198,9 +207,10 @@ builder's rules tell it to run this on `.review-out/mutations/AC*-tdd-*.patch`
 before finishing, so an invalid selector or a stale patch is found before
 the round ends, not after. `prompts/README.md` is the full contract.
 
-Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`,
-`scope.txt`, `mutations/` (every patch, selector and `.result`), `probes/`,
-`reviewer.md`, `builder.md`. Raw runner output stays machine-local in the
+Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
+(its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
+(every patch, selector and `.result`), `probes/`, `reviewer.md`,
+`builder.md`. Raw runner output stays machine-local in the
 target's `.runs/`.
 
 ## Watching it
@@ -237,7 +247,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
 | `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
 | `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
-| edit `status: ready` | `/promote <repo> <id>` | into the queue |
+| edit `status: ready` | `/promote <repo> <id>` | into the queue; `/promote` also starts a drain, an edit waits for the timer or `/run` |
 | `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
 | `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
 | `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
@@ -418,7 +428,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEWER_MODEL` | empty | empty keeps codex's own default; set, `codex exec -m`; recorded as `reviewer:` in the Machine block |
 | `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
-| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human |
+| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
@@ -426,7 +436,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
-| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run`, and `/promote` after its commit, start a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |

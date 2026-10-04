@@ -5,9 +5,13 @@
 // A mutation is ACn-<slug>.patch with a .test (vitest selector) or .cmd (any
 // command) beside it. In a clean tree:
 //
+//   git apply --check   → else PATCH_INVALID, before anything is run
 //   pre-run, unmutated  → must be GREEN. NO_TESTS → SELECTOR_INVALID: the
 //                         selector never named a test. RED → PRE_RED: the
-//                         instrument was already red and proves nothing
+//                         instrument was already red and proves nothing.
+//                         With a preRuns cache (the round's runner), a GREEN
+//                         pre-run of the same selector at the same HEAD
+//                         stands for this one (L-39); a red one never does
 //   git apply           → else PATCH_INVALID
 //   run, mutated        → RED needs a REAL failure (.test: numFailedTests > 0;
 //                         zero tests collected is NO_TESTS, never RED — L-08.
@@ -16,9 +20,9 @@
 //                         after can be trusted: DirtyTreeError, and the run stops
 //
 // Nothing here exits or prints; bin/mutation.ts does that.
-import { existsSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { apply, applyCheck, applyReverse, checkoutClean, porcelain } from './lib/git.ts';
+import { apply, applyCheck, applyReverse, checkoutClean, porcelain, revParse } from './lib/git.ts';
 import { runBashTo } from './lib/proc.ts';
 import type { MutationClass, Restore, RunClass, SelectorKind } from './lib/types.ts';
 import { classFromVitestJson, readVitestJson } from './lib/vitest-json.ts';
@@ -99,6 +103,16 @@ export interface ClassifyInput extends RunSelectorInput {
   /** Raw files: <rawPrefix>-pre.*, <rawPrefix>-apply.log, <rawPrefix>-mut.*. */
   rawPrefix: string;
   restore: Restore;
+  /** GREEN pre-runs already made, keyed by preRunKey, valued by the raw
+   *  prefix of the run that made it. The round's runner passes one map for
+   *  all its patches; without it every patch runs its own. */
+  preRuns?: Map<string, string>;
+}
+
+/** HEAD, the selector's kind and its first line — the run, exactly. The tree
+ *  is asserted clean before every patch, so HEAD names its content. */
+export function preRunKey(head: string, kind: SelectorKind, line: string): string {
+  return `${head}\0${kind}\0${line}`;
 }
 
 export interface Classification {
@@ -113,7 +127,28 @@ export function classifyMutation(i: ClassifyInput): Classification {
   const dirtyBefore = porcelain(i.wt);
   if (dirtyBefore !== '') throw new DirtyTreeError('before', name, dirtyBefore);
 
-  const pre = runSelector({ ...i, rawPrefix: `${i.rawPrefix}-pre` });
+  // A patch that cannot apply is known without running anything; --check
+  // changes nothing, so there is nothing to restore.
+  const applyLog = `${i.rawPrefix}-apply.log`;
+  const check = applyCheck(i.wt, i.patch);
+  if (check.status !== 0) {
+    writeFileSync(applyLog, check.stderr);
+    return { cls: 'PATCH_INVALID' };
+  }
+
+  const prePrefix = `${i.rawPrefix}-pre`;
+  const line = readFileSync(i.selectorFile, 'utf8').split('\n')[0] ?? '';
+  const key = i.preRuns === undefined ? '' : preRunKey(revParse(i.wt, 'HEAD'), i.kind, line);
+  const seen = i.preRuns?.get(key);
+  let pre: RunClass;
+  if (seen !== undefined) {
+    writeFileSync(`${prePrefix}.log`, `pre: same selector and HEAD as ${basename(seen)}, GREEN — not run again (L-39)\n`);
+    if (existsSync(`${seen}.json`)) copyFileSync(`${seen}.json`, `${prePrefix}.json`);
+    pre = 'GREEN';
+  } else {
+    pre = runSelector({ ...i, rawPrefix: prePrefix });
+    if (pre === 'GREEN') i.preRuns?.set(key, prePrefix);
+  }
   if (pre === 'NO_TESTS') {
     // A path that does not exist, a -t pattern that matches no test, or a
     // shell command written into a .test file (014, round 1). Not the same
@@ -122,16 +157,10 @@ export function classifyMutation(i: ClassifyInput): Classification {
   }
   if (pre !== 'GREEN') return { cls: 'PRE_RED' };
 
-  const applyLog = `${i.rawPrefix}-apply.log`;
-  const check = applyCheck(i.wt, i.patch);
   writeFileSync(applyLog, check.stderr);
-  let applied = check.status === 0;
-  if (applied) {
-    const a = apply(i.wt, i.patch);
-    appendFileSync(applyLog, a.stderr);
-    applied = a.status === 0;
-  }
-  if (!applied) {
+  const a = apply(i.wt, i.patch);
+  appendFileSync(applyLog, a.stderr);
+  if (a.status !== 0) {
     restoreTree(i.wt, 'checkout', i.patch);
     return { cls: 'PATCH_INVALID' };
   }

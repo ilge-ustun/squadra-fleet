@@ -521,6 +521,18 @@ case_19_mutation_green()    { mutation_case c19 "19 mutation survives → GREEN"
 case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation → NO_TESTS" NO_TESTS     AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker-notests; }
 case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }
 case_22_mutation_prered()   { mutation_case c22 "22 instrument already red → PRE_RED"      PRE_RED      AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=fail; }
+# L-39. Two mutations in one round name one selector. The tree is the same
+# clean HEAD before each, so the first's GREEN pre-run stands for the second
+# (khaita 071 ran a 165 s full-suite pre-run twice). Red when runMutations
+# stops sharing its cache: the second -pre.log is a run of its own.
+case_22b_mutation_prerun_once() {
+  CASE="22b two mutations, one selector: one pre-run"; fixture c22b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=twice FAKE_VITEST=marker
+  assert_grep '^AC1 +RED +again' "$REPO/.review/$STORY.md" "the first caught"
+  assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "the second caught"
+  assert_grep 'same selector and HEAD as .*AC1-again-pre, GREEN' "$REPO/.runs/$STORY-round1-AC1-marker-pre.log" "the second reused the first's pre-run"
+  assert_not_grep 'same selector' "$REPO/.runs/$STORY-round1-AC1-again-pre.log" "the first ran its own"
+}
 case_23_mutation_cmd()      { mutation_case c23 "23 .cmd selector, non-zero exit → RED"    RED          AC1-marker FAKE_MUTATIONS=cmd; }
 # Phase A3. PRE_RED used to mean two things: an instrument that genuinely
 # fails before the mutation (22, worth a human's attention) and a selector
@@ -1165,6 +1177,39 @@ case_58_merge_undoes_itself() {
   assert_grep 'baseline' "$MLOG" "the message names the baseline"
   assert_eq "$(epic_head)" "$before" "the epic is exactly where it was"
   assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "and nothing claims it merged"
+}
+
+# L-39. The queue merges a story into an epic that has not moved since the
+# story was cut, so the merged tree is the tree its last round checked GREEN,
+# and with the same commands a second run has nothing new to say (khaita 071:
+# 6m13s re-checking an identical tree). Red when merge.ts runs the post-merge
+# baseline anyway — the fake vitest is called — or when it reuses the round
+# after the epic moved.
+case_58b_merge_reuses_the_round() {
+  CASE="58b an unmoved epic: the round's GREEN baseline stands for the merge"; epic_story c58b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_file "$REPO/.review/$STORY/round-1/baseline/commands.json" "the round recorded the commands it ran"
+  local nv; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 0 "exit code"
+  assert_grep 'post-merge baseline: SKIPPED .*round 1 checked GREEN' "$MLOG" "the log names the round that stands for it"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$nv" "no suite ran"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/epic/test && ok || fail "the story is in the epic"
+
+  CASE="58c the epic moved: the merge runs its own baseline"; epic_story c58c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  # Another story reached the epic after this one was cut.
+  git -C "$REPO" worktree add -q "$FX/epic-wt" epic/test
+  echo moved > "$FX/epic-wt/epic-moved.txt"
+  git -C "$FX/epic-wt" add epic-moved.txt
+  git -C "$FX/epic-wt" commit -qm "another story"
+  git -C "$FX/epic-wt" push -q origin epic/test
+  git -C "$REPO" worktree remove --force "$FX/epic-wt"
+  nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 0 "exit code"
+  assert_grep 'post-merge baseline: running .*not the tree round 1 checked' "$MLOG" "the log says why it runs"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" $((nv + 1)) "the suite ran on the merged tree"
 }
 
 # develop and main are human-only, always. Red when that guard is deleted.
@@ -1875,8 +1920,13 @@ case_86_probe_dir() {
 case_84_prompts_carry_the_targets_facts() {
   CASE="84 the reviewer is told the target's commands, not npm's"; fixture c84
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "Run: $FLEET/test/fakes/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
+  assert_grep "baseline — $FLEET/test/fakes/vitest, true, true —" "$TRACE/codex-prompt-1" "the config's commands, in order"
   assert_not_grep 'npm test' "$TRACE/codex-prompt-1" "and not khaita's"
+  # L-39: the reviewer is told the harness's result instead of re-running it.
+  # Red while review.md asks it to run them again, or {{BASELINE}} is unfilled.
+  assert_grep 'test GREEN \| build GREEN \| lint GREEN — the suite ran 2 tests, 0 failed\. Logs: .*/\.review/'"$STORY"'/round-1/baseline/' \
+    "$TRACE/codex-prompt-1" "the reviewer is given the baseline's result and its logs"
+  assert_grep 'Do not run the whole suite' "$TRACE/codex-prompt-1" "and asked not to run it again"
 
   CASE="84b REPO_RULES reaches the builder through the rules"; fixture c84b
   printf -- '- Never touch the SENTINEL_RULE_9f3 subsystem.\n' > "$REPO/.fleet/rules.md"
@@ -3401,7 +3451,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_15_baseline_notests case_16_reviewer_dirty_tree
        case_17_reviewer_output_copied case_18_mutation_red
        case_19_mutation_green case_20_mutation_notests
-       case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
+       case_21_mutation_badpatch case_22_mutation_prered case_22b_mutation_prerun_once
+       case_23_mutation_cmd
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
        case_27_round2_gets_machine_facts case_28_scope_violation
        case_29_scope_undeclared case_30_scope_elsewhere
@@ -3416,7 +3467,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_51_selector_invalid case_52_reset
        case_53_reset_refuses_while_live case_54_reset_refuses_unmerged
        case_55_status_json case_56_merge case_57_merge_refuses_fail
-       case_58_merge_undoes_itself case_59_merge_refuses_integration_branch
+       case_58_merge_undoes_itself case_58b_merge_reuses_the_round
+       case_59_merge_refuses_integration_branch
        case_60_bot_send case_61_bot_unconfigured_is_not_fatal
        case_62_bot_ignores_strangers case_63_bot_status case_64_bot_promote
        case_65_bot_offset_advances case_66_revert
@@ -4348,7 +4400,8 @@ case_152_e2e_baseline() {
   assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN \| e2e GREEN' "$REPO/.review/$STORY.md" "machine block records the e2e run"
   assert_grep 'E2E_RAN_7c1' "$REPO/.review/$STORY/round-1/baseline/e2e.log" "the command ran in the baseline"
   assert_grep "then true, then echo E2E_RAN_7c1" "$TRACE/claude-prompt-1" "the builder is told to run it"
-  assert_grep "Run: $FLEET/test/fakes/vitest, true, true, then echo E2E_RAN_7c1" "$TRACE/codex-prompt-1" "the reviewer too"
+  assert_grep "baseline — $FLEET/test/fakes/vitest, true, true, then echo E2E_RAN_7c1 —" "$TRACE/codex-prompt-1" "the reviewer too"
+  assert_grep 'lint GREEN \| e2e GREEN — the suite ran' "$TRACE/codex-prompt-1" "with the e2e run's result"
 
   CASE="152c a repo without E2E_CMD keeps the three-run baseline"; fixture c152c
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1

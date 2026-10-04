@@ -13,11 +13,18 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
-| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` |
+| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` |
 | `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 `{{RULES}}` in every build prompt.
+
+`{{BASELINE}}` is the harness's own baseline at the head under review —
+its line, the suite's count and failed names, and where its logs are
+(`baselineForReviewer` in `ts/src/lib/baseline.ts`) — so the reviewer does
+not spend minutes re-running what the harness already ran (L-39). It is the
+last replacement, so nothing in it is substituted, and it is guarded: a
+review prompt is never rendered without it.
 
 ## The verdict contract
 

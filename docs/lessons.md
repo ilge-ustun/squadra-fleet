@@ -739,3 +739,39 @@ terminal table.
 **Enforced by:** the `byte for byte against the goldens` case in
 `ts/src/status-views.test.ts`, against the `epic/done` + declined-950
 fixture scenario.
+
+### L-39 — the merge re-checked a tree the round had just checked
+
+On 3 Oct, khaita 071 passed in one round. `fleet merge` then made a
+throwaway worktree at `epic/react-compiler`'s tip, merged `story/071`,
+installed, and ran test, build, lint and e2e: 6m13s, green. The epic had not
+moved since 071 was cut — the queue runs one story at a time — so the
+merge commit's tree was byte for byte the tree the round's baseline had
+checked GREEN twenty minutes earlier, with the same commands. Nothing a
+second run could find was not already known; what it could find instead was
+a flake. The same held for nearly every story merge the queue had made.
+
+**Lesson:** a check re-run on an identical tree with identical commands is a
+cost, not a check. The post-merge baseline earns the autonomy by checking
+what two stories that each passed alone do together (`ts/src/merge.ts`);
+when there is no second story, the tree says so.
+
+**Prevention:** the story baseline records what it ran,
+`round-N/baseline/commands.json` (`baselineCommands` in
+`ts/src/lib/baseline.ts`). `fleet merge` of a story into its epic reuses
+the last round's baseline only when the merged tree is that round's tree,
+the round's line is all GREEN (e2e included when the repo runs one), and the
+commands it would run are the recorded ones (`reviewedBaseline`); the log
+says `post-merge baseline: SKIPPED — …` and names the round. Anything else
+runs the whole baseline and says why. An epic landing on the integration
+branch, and a story a human lands with `--land`, are always checked whole.
+The same reasoning applies inside a round: the mutation runner restores a
+clean HEAD before every patch, so a selector's GREEN pre-run stands for the
+next patch that names it (`preRuns` in `ts/src/classifier.ts`, case 22b;
+071 ran one 165 s full-suite pre-run twice). A red pre-run is never reused.
+And the reviewer, which ran the whole suite, the build, the lint and e2e
+again inside its own 594 s although the harness had just run them and its
+results decide (L-15), is now given that result (`{{BASELINE}}` in
+`prompts/review.md`, case 84) and asked to run only what its judgment needs.
+
+**Enforced by:** `case_58b_merge_reuses_the_round`

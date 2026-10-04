@@ -9,7 +9,9 @@
 // Written as a list of refusals and then the part that earns the autonomy:
 // the merge happens in a throwaway worktree at origin's tip and the suite,
 // the build and the lint run against the MERGED result; nothing is pushed
-// until that is green. In pr mode the branch is pushed and PR_CMD opens the
+// until that is green. When the queue merges a story into an epic that has
+// not moved, the merged tree is the tree its last round checked GREEN with
+// the same commands, and that check stands for this one (L-39). In pr mode the branch is pushed and PR_CMD opens the
 // request; nothing is merged here.
 //
 // Pinned, each by a test: the story's state comes from status.ts
@@ -18,14 +20,15 @@
 // only; a seed file that cannot be copied is a die, as in the launcher; a
 // story with no review or no verdict line is refused in words. No fleet lock
 // here: the bot holds it around this command.
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { baselineGreen, baselineLine, runMergeBaseline } from './lib/baseline.ts';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { baselineCommands, baselineGreen, baselineLine, runMergeBaseline, type BaselineCommands } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
 import { recordMergedSha } from './lib/frontmatter.ts';
+import { readLastRound, type LastRound } from './lib/review.ts';
 import {
   add, branchExists, branchForce, commit, currentBranch, fetch, isAncestor, mergeAbort, mergeFfOnly, mergeNoFf, porcelain, pushFollowingUpstream,
-  pushRef, refExists, revParse, stagedIsEmpty, worktreeAdd, worktreeCheckedOutBranches, worktreeRemoveForce,
+  pushRef, refExists, revParse, stagedIsEmpty, treeOf, worktreeAdd, worktreeCheckedOutBranches, worktreeRemoveForce,
 } from './lib/git.ts';
 import { log, out, warn } from './lib/log.ts';
 import { runBashTo, runSync } from './lib/proc.ts';
@@ -115,6 +118,48 @@ export function refusal(r: StoryRow, c: RefusalContext): Refusal {
   return { kind: 'go' };
 }
 
+export interface ReuseInput {
+  /** readLastRound of the story's review; undefined when it names no round. */
+  last: LastRound | undefined;
+  /** That round's baseline/commands.json, as text; undefined when absent. */
+  recorded: string | undefined;
+  /** What this merge would run. */
+  now: BaselineCommands;
+  mergedTree: string;
+  /** The tree of last.head; '' when this repository does not have it. */
+  reviewedTree: string;
+}
+
+export type Reuse = { reuse: true; round: string; head: string } | { reuse: false; why: string };
+
+/** Whether a round's baseline already checked the merged tree (L-39). The
+ *  post-merge baseline earns the autonomy by checking what two stories that
+ *  each passed alone do together; when the base has not moved, the merge
+ *  holds exactly the tree the round checked, and the same commands on the
+ *  same tree have nothing new to say. Every other answer runs it: a RED or
+ *  missing colour, an e2e run the round did not make, a round from before
+ *  commands were recorded, a changed command or bound, a head this
+ *  repository lacks, a different tree. Seed files are not compared: they are
+ *  the checkout's, read at review and at merge alike. */
+export function reviewedBaseline(i: ReuseInput): Reuse {
+  const no = (why: string): Reuse => ({ reuse: false, why });
+  if (i.last === undefined) return no('the review names no round with a head and a baseline');
+  const { round, head, baseline } = i.last;
+  const want = `test GREEN | build GREEN | lint GREEN${i.now.e2e === null ? '' : ' | e2e GREEN'}`;
+  if (baseline !== want) return no(`round ${round}'s baseline was ${baseline}`);
+  if (i.recorded === undefined) return no(`round ${round} recorded no commands`);
+  let then: unknown;
+  try {
+    then = JSON.parse(i.recorded);
+  } catch {
+    return no(`the commands changed since round ${round} (its record is not JSON)`);
+  }
+  if (JSON.stringify(then) !== JSON.stringify(i.now)) return no(`the commands changed since round ${round}`);
+  if (i.reviewedTree === '') return no(`round ${round}'s head ${short(head)} is not in this repository`);
+  if (i.reviewedTree !== i.mergedTree) return no(`the merged tree is not the tree round ${round} checked — the base moved`);
+  return { reuse: true, round, head };
+}
+
 /** The untracked files a fresh worktree does not inherit, copied when the
  *  checkout has them, skipped when not. A copy that fails is a die — pinned. */
 export function seedMergeWorktree(root: string, mwt: string, seedFiles: readonly string[]): void {
@@ -162,6 +207,24 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     let branch: string;
     let base: string;
     let mergeRef: string;
+
+    /** Only the queue's own merge, a story into its epic, may reuse its
+     *  round's baseline (L-39). An epic, and a story a human lands with
+     *  --land, reach the integration branch, and get the whole check. */
+    function reuseOfReview(): Reuse {
+      if (a.mode === 'epic') return { reuse: false, why: 'an epic is checked whole when a human lands it' };
+      if (a.land) return { reuse: false, why: `--land reaches ${cfg.baseBranch}, which gets the whole check` };
+      const reviewFile = `${root}/.review/${id}.md`;
+      const last = isFile(reviewFile) ? readLastRound(readFileSync(reviewFile, 'utf8')) : undefined;
+      const commandsFile = last === undefined ? '' : `${root}/.review/${id}/round-${last.round}/baseline/commands.json`;
+      return reviewedBaseline({
+        last,
+        recorded: last !== undefined && isFile(commandsFile) ? readFileSync(commandsFile, 'utf8') : undefined,
+        now: baselineCommands(cfg),
+        mergedTree: treeOf(mwt, 'HEAD'),
+        reviewedTree: last === undefined ? '' : treeOf(root, last.head),
+      });
+    }
 
     // ── refusals ─────────────────────────────────────────────────────────────
     if (a.mode === 'epic') {
@@ -232,29 +295,35 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     }
 
     // ── the baseline that earns this ─────────────────────────────────────────
-    seedMergeWorktree(root, mwt, cfg.seedFiles);
-    log('installing deps in the merge worktree');
-    if (runBashTo(cfg.installCmd, { cwd: mwt, logFile: `${root}/.runs/${logId}-merge-install.log` }) !== 0) {
-      throw new Die(`install failed in the merge worktree — see .runs/${logId}-merge-install.log`);
-    }
-    const b = runMergeBaseline({
-      wt: mwt,
-      rawJson: `${root}/.runs/${logId}-merge-baseline.json`,
-      testLog: `${root}/.runs/${logId}-merge-test.log`,
-      buildLog: `${root}/.runs/${logId}-merge-build.log`,
-      lintLog: `${root}/.runs/${logId}-merge-lint.log`,
-      e2eLog: `${root}/.runs/${logId}-merge-e2e.log`,
-      vitestCmd: cfg.vitestCmd,
-      buildCmd: cfg.buildCmd,
-      lintCmd: cfg.lintCmd,
-      ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
-      ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
-    });
-    log(`post-merge baseline: ${baselineLine(b)}`);
-    if (!baselineGreen(b)) {
-      // Nothing was pushed, so there is nothing to undo: the merge exists only
-      // in a worktree the cleanup is about to delete.
-      throw new Die(`post-merge baseline is red (${baselineLine(b)}) — ${base} is untouched, logs in .runs/${logId}-merge-*`);
+    const reuse = reuseOfReview();
+    if (reuse.reuse) {
+      log(`post-merge baseline: SKIPPED — the merged tree is the tree round ${reuse.round} checked GREEN at ${short(reuse.head)}, with the same commands`);
+    } else {
+      log(`post-merge baseline: running — ${reuse.why}`);
+      seedMergeWorktree(root, mwt, cfg.seedFiles);
+      log('installing deps in the merge worktree');
+      if (runBashTo(cfg.installCmd, { cwd: mwt, logFile: `${root}/.runs/${logId}-merge-install.log` }) !== 0) {
+        throw new Die(`install failed in the merge worktree — see .runs/${logId}-merge-install.log`);
+      }
+      const b = runMergeBaseline({
+        wt: mwt,
+        rawJson: `${root}/.runs/${logId}-merge-baseline.json`,
+        testLog: `${root}/.runs/${logId}-merge-test.log`,
+        buildLog: `${root}/.runs/${logId}-merge-build.log`,
+        lintLog: `${root}/.runs/${logId}-merge-lint.log`,
+        e2eLog: `${root}/.runs/${logId}-merge-e2e.log`,
+        vitestCmd: cfg.vitestCmd,
+        buildCmd: cfg.buildCmd,
+        lintCmd: cfg.lintCmd,
+        ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
+        ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
+      });
+      log(`post-merge baseline: ${baselineLine(b)}`);
+      if (!baselineGreen(b)) {
+        // Nothing was pushed, so there is nothing to undo: the merge exists only
+        // in a worktree the cleanup is about to delete.
+        throw new Die(`post-merge baseline is red (${baselineLine(b)}) — ${base} is untouched, logs in .runs/${logId}-merge-*`);
+      }
     }
 
     // ── publish ──────────────────────────────────────────────────────────────

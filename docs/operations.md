@@ -143,16 +143,14 @@ deploys — belongs to that target, not here.
   `<selector> --reporter json --outputFile <f>` and write vitest's JSON
   shape. Another runner needs an adapter in `ts/src/lib/vitest-json.ts`,
   the one place a runner's JSON becomes a class.
-- **E2E_CMD is wired, not yet exercised.** A repo's browser suite runs in
-  the baseline and the post-merge baseline (cases 152, 153). No target sets
-  it yet: khaita's Playwright story comes first, and the box needs Chromium's
-  system libraries and a Java runtime for the Firestore emulator, both a
-  root install. Each run is bounded by `E2E_TIMEOUT` (default 900 s) and
-  swept for leftover processes, because khaita 062's writer saw a leaked
-  server hang a run (case 154). Two things are still open. A suite run
-  against the `/testdeploy` URL after a test deploy, the live-data smoke,
-  is not built. And a browser run on this 3.8 GiB box has not been
-  measured beside the builder.
+- **E2E_CMD runs in khaita's baselines** since story 062 (cases 152, 153):
+  063–071 ran it green, 39–97 s a run on this box. Each run is bounded by
+  `E2E_TIMEOUT` (default 900 s) and swept for leftover processes, because
+  khaita 062's writer saw a leaked server hang a run (case 154). A builder
+  whose instruments are browser tests runs e2e for every TDD check; 072's
+  was killed at 1800 s mid-work, so the queue unit gives agents 3600 s.
+  Still open: a suite run against the `/testdeploy` URL after a test
+  deploy, the live-data smoke, is not built.
 
 ## Decided, and why
 
@@ -203,7 +201,20 @@ deploys — belongs to that target, not here.
   `systemctl --user start --no-block fleet-queue.service`. A oneshot's
   `start` waits for the whole unit, and the poll's two-minute timeout
   killed it mid-drain with its reply unsent (L-33). A drain already running
-  makes the start a no-op; the reply is still true.
+  makes the start a no-op; the reply is still true. `/promote` starts one the same way
+  after its commit, so a promoted story does not wait for the timer.
+- **Re-run only what could have changed (L-39).** khaita 071, one round,
+  46 min from pickup to merged: builder 11 min, baseline 5¾, reviewer 10,
+  mutations 11½, merge 6½. The merge re-checked the tree the round had just
+  checked, the reviewer re-ran the baseline the harness had just run, and
+  one full-suite pre-run ran twice. Now: a story merged into an unmoved
+  epic reuses its round's GREEN baseline when the tree and the recorded
+  commands match (`baseline/commands.json`); a selector's GREEN pre-run is
+  made once per round; the reviewer is given the baseline (`{{BASELINE}}`)
+  and runs only what its judgment needs. What stays: fresh worktrees and
+  installs (L-01, L-09), the builder's own baseline runs (025's
+  `next build`-only failure), and one thing at a time on a 2-CPU,
+  3.8 GiB box (L-37).
 - **A bot job that outlives the poll is a unit of its own.** `/merge`
   starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
   child forked inside the poll was killed with the poll's cgroup, seconds

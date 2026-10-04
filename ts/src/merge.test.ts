@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Die } from './lib/die.ts';
-import { USAGE, logIdOf, parseArgs, refusal, seedMergeWorktree } from './merge.ts';
+import { USAGE, logIdOf, parseArgs, refusal, reviewedBaseline, seedMergeWorktree } from './merge.ts';
+import { baselineCommands } from './lib/baseline.ts';
 import { DASH, type StoryRow } from './status.ts';
 
 // The pure parts of `fleet merge`; the flow itself is proven by test/suite.sh
@@ -85,5 +86,34 @@ describe('seedMergeWorktree', () => {
     expect(readFileSync(join(mwt, '.env.local'), 'utf8')).toBe('A=1\n');
     mkdirSync(join(root, 'sub')); writeFileSync(join(root, 'sub/x.env'), 'B=2\n');
     expect(() => seedMergeWorktree(root, mwt, ['sub/x.env'])).toThrow(/cannot copy seed file sub\/x.env/);
+  });
+});
+
+// L-39: the post-merge baseline is skipped only when it would re-run the same
+// commands on the tree a round already checked green. Every other answer runs it.
+describe('reviewedBaseline — whether a round already checked the merged tree', () => {
+  const now = baselineCommands({ installCmd: 'npm ci', vitestCmd: 'npx vitest run', buildCmd: 'npm run build', lintCmd: 'npm run lint', e2eCmd: 'npm run e2e' });
+  const recorded = `${JSON.stringify(now, null, 2)}\n`;
+  const last = { round: '2', head: 'abc123456789', baseline: 'test GREEN | build GREEN | lint GREEN | e2e GREEN' };
+  const ok = { last, recorded, now, mergedTree: 'tree1', reviewedTree: 'tree1' };
+
+  it('the same tree, checked all GREEN by the same commands: reused, naming the round and its head', () => {
+    expect(reviewedBaseline(ok)).toEqual({ reuse: true, round: '2', head: 'abc123456789' });
+  });
+
+  it.each([
+    ['no round in the review', { last: undefined }, /no round/],
+    ['a RED in the round\'s baseline', { last: { ...last, baseline: 'test GREEN | build RED | lint GREEN | e2e GREEN' } }, /round 2's baseline was test GREEN \| build RED/],
+    ['an e2e run now that the round did not run', { last: { ...last, baseline: 'test GREEN | build GREEN | lint GREEN' } }, /round 2's baseline was/],
+    ['a round that recorded no commands (written before L-39)', { recorded: undefined }, /round 2 recorded no commands/],
+    ['a record that is not JSON', { recorded: 'nope' }, /commands changed since round 2/],
+    ['a command that changed since', { now: { ...now, build: 'false' } }, /commands changed since round 2/],
+    ['an e2e bound that changed since', { now: { ...now, e2eTimeoutSec: 60 } }, /commands changed since round 2/],
+    ['a head this repository does not have', { reviewedTree: '' }, /head abc12345 is not in this repository/],
+    ['a different tree: the base moved', { mergedTree: 'tree2' }, /not the tree round 2 checked/],
+  ])('%s: runs it, and says why', (_name, change, why) => {
+    const r = reviewedBaseline({ ...ok, ...change });
+    expect(r.reuse).toBe(false);
+    if (!r.reuse) expect(r.why).toMatch(why);
   });
 });

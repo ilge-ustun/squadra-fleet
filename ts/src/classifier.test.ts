@@ -59,7 +59,7 @@ function markerPatch(name = 'AC1-marker', selector = 'fake.test.tsx\n', ext: 'te
 function calls(): number {
   return existsSync(join(fx.trace, 'calls')) ? readFileSync(join(fx.trace, 'calls'), 'utf8').split('\n').filter((l) => l.startsWith('vitest')).length : 0;
 }
-function classify(patch: string, o: { kind?: 'test' | 'cmd'; restore?: 'checkout' | 'reverse'; fake?: string } = {}) {
+function classify(patch: string, o: { kind?: 'test' | 'cmd'; restore?: 'checkout' | 'reverse'; fake?: string; preRuns?: Map<string, string>; raw?: string } = {}) {
   const kind = o.kind ?? 'test';
   process.env['FAKE_VITEST'] = o.fake ?? 'marker';
   return classifyMutation({
@@ -67,9 +67,10 @@ function classify(patch: string, o: { kind?: 'test' | 'cmd'; restore?: 'checkout
     patch,
     kind,
     selectorFile: patch.replace(/\.patch$/, `.${kind}`),
-    rawPrefix: join(fx.raw, 'AC1-marker'),
+    rawPrefix: join(fx.raw, o.raw ?? 'AC1-marker'),
     restore: o.restore ?? 'checkout',
     vitestCmd: FAKE_VITEST,
+    ...(o.preRuns !== undefined ? { preRuns: o.preRuns } : {}),
   });
 }
 
@@ -250,5 +251,55 @@ describe('classifyMutation — a dirty tree stops everything', () => {
     const p = markerPatch('AC1-litter', 'touch src/junk.txt; grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n', 'cmd');
     expect(classify(p, { kind: 'cmd', restore: 'checkout' }).cls).toBe('RED');
     expect(porcelainOf()).toBe('');
+  });
+});
+
+// L-39. Within one round's runner the tree is the same clean HEAD before every
+// patch (asserted), so a selector that ran GREEN unmutated is GREEN unmutated
+// for the next patch too. khaita 071 ran one 165 s full-suite pre-run twice.
+describe('classifyMutation — the pre-run, once per selector and HEAD', () => {
+  it('a second patch with the same selector reuses the GREEN pre-run; its -pre.log says whose', () => {
+    const preRuns = new Map<string, string>();
+    expect(classify(markerPatch('AC1-a'), { preRuns, raw: 'AC1-a' }).cls).toBe('RED');
+    expect(calls()).toBe(2);
+    expect(classify(markerPatch('AC1-b'), { preRuns, raw: 'AC1-b' }).cls).toBe('RED');
+    expect(calls()).toBe(3);   // the mutated run only
+    expect(readFileSync(join(fx.raw, 'AC1-b-pre.log'), 'utf8')).toMatch(/same selector and HEAD as .*AC1-a-pre, GREEN/);
+    expect(existsSync(join(fx.raw, 'AC1-b-pre.json'))).toBe(true);   // copied, so the raw files stay complete
+  });
+
+  it('a different selector, a different kind or a new HEAD runs its own pre-run', () => {
+    const preRuns = new Map<string, string>();
+    classify(markerPatch('AC1-a'), { preRuns, raw: 'AC1-a' });
+    classify(markerPatch('AC1-b', 'fake.test.tsx -t other\n'), { preRuns, raw: 'AC1-b' });
+    expect(calls()).toBe(4);
+    classify(markerPatch('AC1-c', 'true\n', 'cmd'), { preRuns, raw: 'AC1-c', kind: 'cmd' });
+    writeFileSync(join(fx.wt, 'src/other.txt'), 'x\n'); commit('a new head');
+    classify(markerPatch('AC1-d'), { preRuns, raw: 'AC1-d' });
+    expect(calls()).toBe(6);   // AC1-c is a .cmd (no vitest call); AC1-d pre and mut
+    expect(readFileSync(join(fx.raw, 'AC1-d-pre.log'), 'utf8')).not.toMatch(/same selector/);
+  });
+
+  it('PRE_RED and SELECTOR_INVALID are never reused: each patch reports its own', () => {
+    const preRuns = new Map<string, string>();
+    expect(classify(markerPatch('AC1-a'), { preRuns, raw: 'AC1-a', fake: 'fail' }).cls).toBe('PRE_RED');
+    expect(classify(markerPatch('AC1-b'), { preRuns, raw: 'AC1-b', fake: 'fail' }).cls).toBe('PRE_RED');
+    expect(classify(markerPatch('AC1-c'), { preRuns, raw: 'AC1-c', fake: 'notests' }).cls).toBe('SELECTOR_INVALID');
+    expect(calls()).toBe(3);
+    expect(preRuns.size).toBe(0);
+  });
+
+  it('without a cache, as fleet check-mutation calls it, every patch runs its own', () => {
+    classify(markerPatch('AC1-a'), { raw: 'AC1-a' });
+    classify(markerPatch('AC1-b'), { raw: 'AC1-b' });
+    expect(calls()).toBe(4);
+  });
+
+  it('a patch that does not apply costs no run at all', () => {
+    const p = join(fx.mut, 'AC1-bad.patch');
+    writeFileSync(p, '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-x\n+y\n');
+    writeFileSync(join(fx.mut, 'AC1-bad.test'), 'fake.test.tsx\n');
+    expect(classify(p, { raw: 'AC1-bad' }).cls).toBe('PATCH_INVALID');
+    expect(calls()).toBe(0);
   });
 });
