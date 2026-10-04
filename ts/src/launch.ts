@@ -618,7 +618,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const changedPaths = diffNameOnly(builderWt, `${baseSha}..${headSha}`);
       let t0 = secs();
       const baseline = runBaseline({
-        wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`,
+        wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`, installCmd: cfg.installCmd,
         vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
         ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
         ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),

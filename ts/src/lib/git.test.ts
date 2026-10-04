@@ -10,7 +10,7 @@ import {
   worktreeCheckedOutBranches, worktreePaths, worktreePrune, currentBranch, mergeFfOnly,
   fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch, pushFollowingUpstream,
   catFileExists, showLineCount,
-  fetchRef, revParseShort,
+  fetchRef, revParseShort, treeOf,
 } from './git.ts';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 
@@ -382,6 +382,14 @@ describe('the queue\'s refreshFromOrigin operations', () => {
     expect(short.length).toBeGreaterThan(0);
     expect(g(['rev-parse', 'base'])).toMatch(new RegExp(`^${short}`));
     expect(revParseShort(clone, 'nosuch')).toBe('');
+  });
+
+  it("treeOf: the commit's tree, the same for two commits with the same content; '' when git cannot answer", () => {
+    expect(treeOf(clone, 'base')).toBe(g(['rev-parse', 'base^{tree}']));
+    expect(treeOf(clone, 'base')).not.toBe(g(['rev-parse', 'base']));
+    g(['commit', '-q', '--allow-empty', '-m', 'same tree'], clone);
+    expect(treeOf(clone, 'HEAD')).toBe(treeOf(clone, 'HEAD~1'));
+    expect(treeOf(clone, 'nosuch')).toBe('');
   });
 
   it('fetchQuiet: 0 on a real remote, non-zero when it cannot be reached', () => {

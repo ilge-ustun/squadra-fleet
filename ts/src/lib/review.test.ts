@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './proc.ts';
-import { readReview } from './review.ts';
+import { readLastRound, readReview } from './review.ts';
 
 // The three reads as awk programs, the oracle for this module.
 const VERDICT_AWK = '/^verdict:/ {print $2; exit}';
@@ -65,5 +65,29 @@ describe('readReview — row by row against the awk', () => {
     expect(readReview('').verdict).toBeUndefined();
     expect(readReview('').machineBlock).toBeUndefined();
     expect(readReview('verdict:\n').verdict).toBe('');
+  });
+});
+
+// fleet merge reads the round it may reuse: the last one, its head and its
+// baseline, as renderRoundSection wrote them.
+describe('readLastRound', () => {
+  it('the last round: its number, its head, its baseline line', () => {
+    const r1 = ROUND(1, 'FAIL', '', 'baseline:  test GREEN | build RED | lint GREEN\n').replace('head: abc', 'head: 111');
+    const r2 = ROUND(2, 'PASS', '', 'baseline:  test GREEN | build GREEN | lint GREEN | e2e GREEN\n').replace('head: abc', 'head: 222');
+    expect(readLastRound(`# Review: 900\n\nverdict: PASS\n\n${r1}${r2}`)).toEqual({
+      round: '2', head: '222', baseline: 'test GREEN | build GREEN | lint GREEN | e2e GREEN',
+    });
+  });
+
+  it('a round section without a head or a baseline line, or no round at all, is undefined', () => {
+    expect(readLastRound('')).toBeUndefined();
+    expect(readLastRound('# Review: 900\n\nverdict: PASS\n')).toBeUndefined();
+    expect(readLastRound(ROUND(1, 'PASS', '').replace('head: abc\n', ''))).toBeUndefined();
+    expect(readLastRound(ROUND(1, 'PASS', '', 'acs:       AC1 \n'))).toBeUndefined();
+  });
+
+  it('a head or baseline in the builder\'s or reviewer\'s text is not the round\'s', () => {
+    const quoted = ROUND(1, 'PASS', '', 'acs:       AC1 \n').replace('\nb\n', '\nhead: fff\nbaseline:  test GREEN | build GREEN | lint GREEN\n');
+    expect(readLastRound(quoted)).toBeUndefined();
   });
 });

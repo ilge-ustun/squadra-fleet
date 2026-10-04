@@ -109,6 +109,11 @@ How each lands:
 
 Every merge runs the suite, build and lint on the **merged** result in a
 throwaway worktree and pushes only if that is green (`MERGE_MODE=direct`).
+One exception, the queue's own merge of a story into its epic: when the
+merged tree is the tree the story's last round checked all GREEN, with the
+commands that round recorded in `round-N/baseline/commands.json`, that
+check stands and the log says `post-merge baseline: SKIPPED — …` (L-39).
+An epic, and a story landed with `--land`, are always checked whole.
 A repo can instead ask for a request on its host (`MERGE_MODE=pr`, below).
 
 ### What STATUS means
@@ -198,9 +203,10 @@ builder's rules tell it to run this on `.review-out/mutations/AC*-tdd-*.patch`
 before finishing, so an invalid selector or a stale patch is found before
 the round ends, not after. `prompts/README.md` is the full contract.
 
-Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`,
-`scope.txt`, `mutations/` (every patch, selector and `.result`), `probes/`,
-`reviewer.md`, `builder.md`. Raw runner output stays machine-local in the
+Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
+(its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
+(every patch, selector and `.result`), `probes/`, `reviewer.md`,
+`builder.md`. Raw runner output stays machine-local in the
 target's `.runs/`.
 
 ## Watching it

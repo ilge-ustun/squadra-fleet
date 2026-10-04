@@ -1167,6 +1167,39 @@ case_58_merge_undoes_itself() {
   assert_not_grep '^merged:' "$REPO/.stories/$STORY.md" "and nothing claims it merged"
 }
 
+# L-39. The queue merges a story into an epic that has not moved since the
+# story was cut, so the merged tree is the tree its last round checked GREEN,
+# and with the same commands a second run has nothing new to say (khaita 071:
+# 6m13s re-checking an identical tree). Red when merge.ts runs the post-merge
+# baseline anyway — the fake vitest is called — or when it reuses the round
+# after the epic moved.
+case_58b_merge_reuses_the_round() {
+  CASE="58b an unmoved epic: the round's GREEN baseline stands for the merge"; epic_story c58b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_file "$REPO/.review/$STORY/round-1/baseline/commands.json" "the round recorded the commands it ran"
+  local nv; nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 0 "exit code"
+  assert_grep 'post-merge baseline: SKIPPED .*round 1 checked GREEN' "$MLOG" "the log names the round that stands for it"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" "$nv" "no suite ran"
+  git -C "$REPO" merge-base --is-ancestor "story/$STORY" origin/epic/test && ok || fail "the story is in the epic"
+
+  CASE="58c the epic moved: the merge runs its own baseline"; epic_story c58c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  # Another story reached the epic after this one was cut.
+  git -C "$REPO" worktree add -q "$FX/epic-wt" epic/test
+  echo moved > "$FX/epic-wt/epic-moved.txt"
+  git -C "$FX/epic-wt" add epic-moved.txt
+  git -C "$FX/epic-wt" commit -qm "another story"
+  git -C "$FX/epic-wt" push -q origin epic/test
+  git -C "$REPO" worktree remove --force "$FX/epic-wt"
+  nv="$(grep -c '^vitest' "$TRACE/calls")"
+  merge_run
+  assert_eq "$MRC" 0 "exit code"
+  assert_grep 'post-merge baseline: running .*not the tree round 1 checked' "$MLOG" "the log says why it runs"
+  assert_eq "$(grep -c '^vitest' "$TRACE/calls")" $((nv + 1)) "the suite ran on the merged tree"
+}
+
 # develop and main are human-only, always. Red when that guard is deleted.
 case_59_merge_refuses_integration_branch() {
   CASE="59 merge refuses to touch the integration branch"; fixture c59
@@ -3416,7 +3449,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_51_selector_invalid case_52_reset
        case_53_reset_refuses_while_live case_54_reset_refuses_unmerged
        case_55_status_json case_56_merge case_57_merge_refuses_fail
-       case_58_merge_undoes_itself case_59_merge_refuses_integration_branch
+       case_58_merge_undoes_itself case_58b_merge_reuses_the_round
+       case_59_merge_refuses_integration_branch
        case_60_bot_send case_61_bot_unconfigured_is_not_fatal
        case_62_bot_ignores_strangers case_63_bot_status case_64_bot_promote
        case_65_bot_offset_advances case_66_revert

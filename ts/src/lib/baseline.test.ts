@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { baselineColour, runBaseline, runMergeBaseline } from './baseline.ts';
+import { E2E_TIMEOUT_DEFAULT, baselineColour, baselineCommands, runBaseline, runMergeBaseline } from './baseline.ts';
 import { readdirSync, realpathSync } from 'node:fs';
 
 // The harness runs the suite, the build and the lint in the clean reviewer
@@ -48,7 +48,7 @@ describe('runBaseline', () => {
     rmSync(dir, { recursive: true, force: true });
   });
   const run = (o: { vitestCmd?: string; buildCmd?: string; lintCmd?: string } = {}) =>
-    runBaseline({ wt, evidenceDir: ev, rawJson: raw, vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true' });
+    runBaseline({ wt, evidenceDir: ev, rawJson: raw, installCmd: 'npm ci', vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true' });
 
   it('all green: the three colours, the summary in jq\'s shape, the logs', () => {
     process.env['FAKE_VITEST'] = 'pass';
@@ -58,6 +58,9 @@ describe('runBaseline', () => {
     expect(existsSync(join(ev, 'baseline/test.log'))).toBe(true);
     expect(readFileSync(join(ev, 'baseline/build.log'), 'utf8')).toBe('');
     expect(readFileSync(join(ev, 'baseline/lint.log'), 'utf8')).toBe('');
+    // What fleet merge compares before it reuses this run (L-39).
+    expect(JSON.parse(readFileSync(join(ev, 'baseline/commands.json'), 'utf8'))).toEqual(
+      { install: 'npm ci', test: FAKE_VITEST, build: 'true', lint: 'true', e2e: null, e2eTimeoutSec: null });
     expect(existsSync(raw)).toBe(true);
   });
 
@@ -198,7 +201,7 @@ describe('the optional e2e run', () => {
     rmSync(dir, { recursive: true, force: true });
   });
   const story = (e2eCmd?: string) => runBaseline({
-    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), installCmd: 'npm ci', vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
     ...(e2eCmd !== undefined ? { e2eCmd } : {}),
   });
   const merge = (e2eCmd?: string) => runMergeBaseline({
@@ -250,7 +253,7 @@ describe('the e2e run is bounded and swept', () => {
     rmSync(dir, { recursive: true, force: true });
   });
   const story = (e2eCmd: string, e2eTimeoutSec?: number) => runBaseline({
-    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
+    wt, evidenceDir: ev, rawJson: join(runs, '900-round1-baseline.json'), installCmd: 'npm ci', vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true',
     e2eCmd, ...(e2eTimeoutSec !== undefined ? { e2eTimeoutSec } : {}),
   });
   const merge = (e2eCmd: string, e2eTimeoutSec?: number) => runMergeBaseline({
@@ -282,5 +285,17 @@ describe('the e2e run is bounded and swept', () => {
     expect(story('echo fine').e2e).toBe('GREEN');
     expect(readFileSync(join(ev, 'baseline/e2e.log'), 'utf8')).not.toContain('[fleet]');
     expect(merge('echo fine').e2e).toBe('GREEN');
+  });
+});
+
+describe('baselineCommands — what a baseline ran, in one comparable shape', () => {
+  const c = { installCmd: 'npm ci', vitestCmd: 'npx vitest run', buildCmd: 'npm run build', lintCmd: 'npm run lint' };
+  it('no e2e, or an empty one, is null with no bound', () => {
+    expect(baselineCommands(c)).toEqual({ install: 'npm ci', test: 'npx vitest run', build: 'npm run build', lint: 'npm run lint', e2e: null, e2eTimeoutSec: null });
+    expect(baselineCommands({ ...c, e2eCmd: '' })).toEqual(baselineCommands(c));
+  });
+  it('an e2e run carries its bound, the default when none is set', () => {
+    expect(baselineCommands({ ...c, e2eCmd: 'npm run e2e' })).toMatchObject({ e2e: 'npm run e2e', e2eTimeoutSec: E2E_TIMEOUT_DEFAULT });
+    expect(baselineCommands({ ...c, e2eCmd: 'npm run e2e', e2eTimeoutSec: 60 })).toMatchObject({ e2eTimeoutSec: 60 });
   });
 });

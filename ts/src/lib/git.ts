@@ -99,6 +99,13 @@ export function revParse(root: string, ref: string): string {
   return r.status === 0 ? r.stdout.trim() : '';
 }
 
+/** The tree a commit holds — two commits with the same content share it;
+ *  '' when git cannot answer (an unknown ref says nothing on stderr). */
+export function treeOf(root: string, ref: string): string {
+  const r = runSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${ref}^{tree}`]);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
 /** `git diff --name-only <range>`, trailing newlines stripped. */
 export function diffNameOnly(root: string, range: string): string {
   return runSync('git', ['-C', root, 'diff', '--name-only', range], { stderr: 'inherit' }).stdout.replace(/\n+$/, '');

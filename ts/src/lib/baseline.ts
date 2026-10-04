@@ -149,6 +149,34 @@ function runE2e(cmd: string, cwd: string, logFile: string, timeoutSec: number, t
   return status === 0 && notes.length === 0 ? 'GREEN' : 'RED';
 }
 
+/** The commands a baseline ran, written beside its logs as
+ *  baseline/commands.json. fleet merge reuses a round's baseline only when
+ *  the merged tree is the tree that round checked AND these are what it
+ *  would run now: the same commands on the same tree have nothing new to say
+ *  (L-39). e2e is null when the repo runs none; its bound only when it does. */
+export interface BaselineCommands {
+  install: string;
+  test: string;
+  build: string;
+  lint: string;
+  e2e: string | null;
+  e2eTimeoutSec: number | null;
+}
+
+export function baselineCommands(c: {
+  installCmd: string; vitestCmd: string; buildCmd: string; lintCmd: string; e2eCmd?: string; e2eTimeoutSec?: number;
+}): BaselineCommands {
+  const e2e = c.e2eCmd ? c.e2eCmd : null;
+  return {
+    install: c.installCmd,
+    test: c.vitestCmd,
+    build: c.buildCmd,
+    lint: c.lintCmd,
+    e2e,
+    e2eTimeoutSec: e2e === null ? null : (c.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT),
+  };
+}
+
 export interface BaselineInput {
   wt: string;
   /** round-N; the files go under its baseline/. */
@@ -156,6 +184,9 @@ export interface BaselineInput {
   /** .runs/<id>-round<N>-baseline.json — removed first, so a stale file
    *  cannot stand in for a run that wrote nothing. */
   rawJson: string;
+  /** Not run here — the caller installed the tree — but recorded in
+   *  baseline/commands.json with the rest. */
+  installCmd: string;
   vitestCmd: string;
   buildCmd: string;
   lintCmd: string;
@@ -177,6 +208,7 @@ function runVitestJson(wt: string, vitestCmd: string, rawJson: string, logFile: 
 export function runBaseline(i: BaselineInput): Baseline {
   const ev = join(i.evidenceDir, 'baseline');
   mkdirSync(ev, { recursive: true });
+  writeFileSync(join(ev, 'commands.json'), `${JSON.stringify(baselineCommands(i), null, 2)}\n`);
   const text = runVitestJson(i.wt, i.vitestCmd, i.rawJson, join(ev, 'test.log'));
   const test = baselineColour(text);
   writeFileSync(join(ev, 'test.summary.json'), summary(text));
