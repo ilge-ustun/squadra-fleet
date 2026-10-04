@@ -340,7 +340,7 @@ const HELP = [
   '/repo — the repos this bot knows',
   '',
   'Move a story on',
-  '/promote <repo> <id> — draft to ready; the next drain takes it',
+  '/promote <repo> <id> — draft to ready, and a drain starts',
   '/answer <repo> <id> <text> — answer a blocked story and requeue it',
   '/wait <repo> <id> — a refused review: resume it after the reset; the queue holds for it',
   '/fallback <repo> <id> — a refused review: Claude reviews it at the next drain (a weaker check)',
@@ -389,7 +389,10 @@ function launcherHas(root: string, id: string): string | undefined {
   return `${id} is in_progress — a launcher has it; if that launcher died, the next drain returns it to the queue`;
 }
 
-function cmdPromote(cfg: RepoConfig, id: string): string {
+/** A promotion is wanted now (L-39): after its commit it starts a drain with
+ *  the command /run uses. A drain already running takes the story after its
+ *  current one (run-queue's nextToRun), so a second start is a no-op. */
+function cmdPromote(c: BotContext, cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
   const running = launcherHas(cfg.root, id);
   if (running !== undefined) return running;
@@ -399,7 +402,9 @@ function cmdPromote(cfg: RepoConfig, id: string): string {
   if (stagedIsEmpty(cfg.root)) return `${id} was already ready`;
   if (commit(cfg.root, `story(${id}): promoted to ready (telegram)`) !== 0) return `${id} could not be committed`;
   pushQuiet(cfg.root);
-  return `${id} is ready — the next drain will pick it up`;
+  return c.deps.runCommand(splitCommand(c.knobs.queueStartCmd)) === 0
+    ? `${id} is ready — a drain is starting, or the one running takes it next`
+    : `${id} is ready — could not start a drain now; the next one picks it up`;
 }
 
 function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): string {
@@ -556,7 +561,7 @@ function dispatchRaw(c: BotContext, text: string): string {
       case '/status': return cmdStatus(c, cfg, false);
       case '/status-all': return cmdStatus(c, cfg, true);
       case '/why': return cmdWhy(cfg, r.arg);
-      case '/promote': return locked(() => cmdPromote(cfg, r.arg));
+      case '/promote': return locked(() => cmdPromote(c, cfg, r.arg));
       case '/answer': return r.rest !== '' ? locked(() => cmdAnswer(c, cfg, r.arg, r.rest)) : 'usage: /answer <repo> <id> <text>';
       case '/wait': return locked(() => cmdWait(cfg, r.arg));
       case '/fallback': return locked(() => cmdFallback(cfg, r.arg));

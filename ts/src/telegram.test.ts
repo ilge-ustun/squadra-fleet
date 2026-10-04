@@ -303,11 +303,26 @@ describe('dispatch', () => {
     expect(dispatch(ctx(), '/why t 900')).toBe('computed: FAIL — x');
   });
   it('/promote: draft → ready, committed and pushed (push failure ignored)', () => {
-    expect(dispatch(ctx(), '/promote t 900')).toBe('900 is ready — the next drain will pick it up');
+    expect(dispatch(ctx(), '/promote t 900')).toBe('900 is ready — a drain is starting, or the one running takes it next');
     expect(readFileSync(join(root, '.stories', '900.md'), 'utf8')).toContain('\nstatus: ready\n');
     expect(git('log', '-1', '--format=%s')).toBe('story(900): promoted to ready (telegram)');
     expect(dispatch(ctx(), '/promote t 900')).toBe('900 was already ready');
     expect(dispatch(ctx(), '/promote t 901')).toBe('no such story: 901');
+  });
+  // L-39: a promotion is wanted now. It starts a drain as /run does, once,
+  // after the commit; nothing is started for a promotion that changed nothing.
+  it('/promote starts a drain after the commit, with the command /run uses', () => {
+    const c = ctx({ QUEUE_START_CMD: 'systemctl --user start x' });
+    dispatch(c, '/promote t 900');
+    expect(commands).toEqual([['systemctl', '--user', 'start', 'x']]);
+    expect(git('log', '-1', '--format=%s')).toBe('story(900): promoted to ready (telegram)');
+    dispatch(c, '/promote t 900');
+    expect(commands).toHaveLength(1);
+    expect(dispatch(ctx({ QUEUE_START_CMD: 'false' }), '/promote t 900')).toBe('900 was already ready');
+  });
+  it('/promote whose drain cannot start still promotes, and says the timer will', () => {
+    expect(dispatch(ctx({ QUEUE_START_CMD: 'false' }), '/promote t 900')).toBe('900 is ready — could not start a drain now; the next one picks it up');
+    expect(readFileSync(join(root, '.stories', '900.md'), 'utf8')).toContain('\nstatus: ready\n');
   });
   it('/answer: appended to the blocked file, story back to ready, one commit', () => {
     expect(dispatch(ctx(), '/answer t 900 yes')).toBe('900 is not blocked — nothing is waiting for an answer');

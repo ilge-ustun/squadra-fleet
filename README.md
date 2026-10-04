@@ -247,7 +247,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
 | `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
 | `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
-| edit `status: ready` | `/promote <repo> <id>` | into the queue |
+| edit `status: ready` | `/promote <repo> <id>` | into the queue; `/promote` also starts a drain, an edit waits for the timer or `/run` |
 | `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
 | `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
 | `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
@@ -436,7 +436,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
-| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run` starts a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run`, and `/promote` after its commit, start a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |

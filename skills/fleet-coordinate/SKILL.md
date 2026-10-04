@@ -57,8 +57,8 @@ human should run instead.
 ## Rules for a coordinator of any model
 
 - **Start no launcher.** Never run `fleet launch` or `fleet run-queue` yourself. A
-  promoted story is picked up by the queue timer within fifteen minutes, or
-  the human sends `/run`. A launcher started as a child of an interactive
+  story promoted with `/promote` starts a drain at once; a status edited at
+  a terminal waits for the queue timer (fifteen minutes) or `/run`. A launcher started as a child of an interactive
   session inherits its memory policy and sandbox and has been killed by
   both (`docs/operations.md`, memory).
 - Editing the launcher (`ts/src/launch.ts`) while `fleet status` shows a
