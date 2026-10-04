@@ -428,7 +428,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEWER_MODEL` | empty | empty keeps codex's own default; set, `codex exec -m`; recorded as `reviewer:` in the Machine block |
 | `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
-| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human |
+| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |

@@ -21,7 +21,11 @@ Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/
 Environment=HOME=/home/fleet
 
 # Per-agent wall clock. The queue's own ceiling is --max stories, per repo.
-Environment=AGENT_TIMEOUT=1800
+# An hour, not the launcher's default half hour: a builder on a story whose
+# instruments are browser tests runs e2e for every TDD check, about two
+# minutes a run, and khaita 072's builder was killed at 1800 s mid-work.
+# It bounds a hung agent; a working one should not meet it.
+Environment=AGENT_TIMEOUT=3600
 
 ExecStart=/bin/bash /home/fleet/work/fleet/fleet run-queue --all --max 5
 
