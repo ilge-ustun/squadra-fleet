@@ -36,6 +36,8 @@
 #   cmd       same patch, but AC1-marker.cmd instead of .test
 #   badpatch  AC1-bad.patch that does not apply, + .test
 #   ac2only   the marker patch filed as AC2-marker (AC1 has no mutation)
+#   twice     the marker patch twice for AC1, AC1-again and AC1-marker, one
+#             selector between them
 #   dirty     same as patch but the change is NOT reverted — contract broken
 #
 # Phase 3.2: FAKE_PROBES writes .review-out/probes/ — runnable tests the
@@ -110,6 +112,9 @@ case "${FAKE_MUTATIONS:-none}" in
   patch)    marker_patch AC1 test ;;
   cmd)      marker_patch AC1 cmd ;;
   ac2only)  marker_patch AC2 test ;;
+  twice)    marker_patch AC1 test
+            cp .review-out/mutations/AC1-marker.patch .review-out/mutations/AC1-again.patch
+            cp .review-out/mutations/AC1-marker.test  .review-out/mutations/AC1-again.test ;;
   dirty)    marker_patch AC1 test keep ;;
   badpatch) mkdir -p .review-out/mutations
             printf -- '--- a/nope.txt\n+++ b/nope.txt\n@@ -1 +1 @@\n-this line does not exist\n+so this cannot apply\n' > .review-out/mutations/AC1-bad.patch

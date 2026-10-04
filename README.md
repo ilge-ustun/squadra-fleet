@@ -157,7 +157,11 @@ selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
 The reviewer writes at least one per criterion; the builder writes its own
 as `ACn-tdd-<slug>` — the failing test it observed, handed over instead of
 described. The harness runs every one in a clean tree with the classifier
-in `ts/src/classifier.ts`:
+in `ts/src/classifier.ts`: `git apply --check`, the selector unmutated
+(the pre-run), the patch, the selector again. In a round the tree is the
+same clean HEAD before every patch, so a selector's GREEN pre-run is made
+once and stands for every later patch that names it; its `-pre.log` in
+`.runs/` says whose run it reused (L-39).
 
 | class | meaning | who fixes it |
 |---|---|---|

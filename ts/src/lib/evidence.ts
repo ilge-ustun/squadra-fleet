@@ -50,6 +50,10 @@ export function runMutations(i: MutationsInput): MutRow[] {
   const mdir = join(i.evidenceDir, 'mutations');
   if (!isDir(mdir)) return [];
   const rows: MutRow[] = [];
+  // One map for the round: the tree is the same clean HEAD before every
+  // patch, so a GREEN pre-run of a selector stands for the next patch that
+  // names it (L-39).
+  const preRuns = new Map<string, string>();
   for (const n of readdirSync(mdir).filter((x) => /^AC[\s\S]*-[\s\S]*\.patch$/.test(x)).sort(byCodePoint)) {
     const patch = join(mdir, n);
     const name = n.slice(0, -'.patch'.length);
@@ -61,7 +65,7 @@ export function runMutations(i: MutationsInput): MutRow[] {
     if (sel !== undefined) {
       try {
         const r = classifyMutation({
-          wt: i.wt, patch, kind: sel.kind, selectorFile: sel.file, rawPrefix: i.rawPrefix(name), restore: 'checkout', vitestCmd: i.vitestCmd,
+          wt: i.wt, patch, kind: sel.kind, selectorFile: sel.file, rawPrefix: i.rawPrefix(name), restore: 'checkout', vitestCmd: i.vitestCmd, preRuns,
         });
         cls = r.cls;
         writeResultFile(join(mdir, `${name}.result`), r.cls, r.mutJsonPath);

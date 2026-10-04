@@ -765,5 +765,9 @@ commands it would run are the recorded ones (`reviewedBaseline`); the log
 says `post-merge baseline: SKIPPED — …` and names the round. Anything else
 runs the whole baseline and says why. An epic landing on the integration
 branch, and a story a human lands with `--land`, are always checked whole.
+The same reasoning applies inside a round: the mutation runner restores a
+clean HEAD before every patch, so a selector's GREEN pre-run stands for the
+next patch that names it (`preRuns` in `ts/src/classifier.ts`, case 22b;
+071 ran one 165 s full-suite pre-run twice). A red pre-run is never reused.
 
 **Enforced by:** `case_58b_merge_reuses_the_round`

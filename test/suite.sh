@@ -521,6 +521,18 @@ case_19_mutation_green()    { mutation_case c19 "19 mutation survives → GREEN"
 case_20_mutation_notests()  { mutation_case c20 "20 mutation breaks compilation → NO_TESTS" NO_TESTS     AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=marker-notests; }
 case_21_mutation_badpatch() { mutation_case c21 "21 patch does not apply → PATCH_INVALID"   PATCH_INVALID AC1-bad   FAKE_MUTATIONS=badpatch; }
 case_22_mutation_prered()   { mutation_case c22 "22 instrument already red → PRE_RED"      PRE_RED      AC1-marker FAKE_MUTATIONS=patch    FAKE_VITEST=fail; }
+# L-39. Two mutations in one round name one selector. The tree is the same
+# clean HEAD before each, so the first's GREEN pre-run stands for the second
+# (khaita 071 ran a 165 s full-suite pre-run twice). Red when runMutations
+# stops sharing its cache: the second -pre.log is a run of its own.
+case_22b_mutation_prerun_once() {
+  CASE="22b two mutations, one selector: one pre-run"; fixture c22b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=twice FAKE_VITEST=marker
+  assert_grep '^AC1 +RED +again' "$REPO/.review/$STORY.md" "the first caught"
+  assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "the second caught"
+  assert_grep 'same selector and HEAD as .*AC1-again-pre, GREEN' "$REPO/.runs/$STORY-round1-AC1-marker-pre.log" "the second reused the first's pre-run"
+  assert_not_grep 'same selector' "$REPO/.runs/$STORY-round1-AC1-again-pre.log" "the first ran its own"
+}
 case_23_mutation_cmd()      { mutation_case c23 "23 .cmd selector, non-zero exit → RED"    RED          AC1-marker FAKE_MUTATIONS=cmd; }
 # Phase A3. PRE_RED used to mean two things: an instrument that genuinely
 # fails before the mutation (22, worth a human's attention) and a selector
@@ -3434,7 +3446,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_15_baseline_notests case_16_reviewer_dirty_tree
        case_17_reviewer_output_copied case_18_mutation_red
        case_19_mutation_green case_20_mutation_notests
-       case_21_mutation_badpatch case_22_mutation_prered case_23_mutation_cmd
+       case_21_mutation_badpatch case_22_mutation_prered case_22b_mutation_prerun_once
+       case_23_mutation_cmd
        case_24_veto_green case_25_veto_no_mutation case_26_veto_wrong_ac
        case_27_round2_gets_machine_facts case_28_scope_violation
        case_29_scope_undeclared case_30_scope_elsewhere

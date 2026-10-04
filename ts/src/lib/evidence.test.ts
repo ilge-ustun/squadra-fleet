@@ -93,6 +93,15 @@ describe('runMutations', () => {
     expect(readFileSync(join(wt, 'src/marker.txt'), 'utf8')).not.toMatch(/FLEET_MUTANT_MARKER/);   // restored: checkout
   });
 
+  it('one pre-run per selector for the whole round: three patches naming one selector cost four runs, not six (L-39)', () => {
+    const m = join(ev, 'mutations'); mkdirSync(m);
+    for (const n of ['AC1-a', 'AC1-b', 'AC2-c']) markerPatch(m, n, 'test');
+    const calls = (): number => readFileSync(join(dir, 'trace', 'calls'), 'utf8').split('\n').filter((l) => l.startsWith('vitest')).length;
+    expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log }).map((r) => r.cls)).toEqual(['RED', 'RED', 'RED']);
+    expect(calls()).toBe(4);
+    expect(readFileSync(`${rawPrefix('AC2-c')}-pre.log`, 'utf8')).toMatch(/same selector and HEAD as 900-round1-AC1-a-pre/);
+  });
+
   it('a survivor and a bad patch are classes, not failures', () => {
     const m = join(ev, 'mutations'); mkdirSync(m);
     process.env['FAKE_VITEST'] = 'pass';
