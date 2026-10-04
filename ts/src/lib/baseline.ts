@@ -255,3 +255,25 @@ export function baselineLine(b: Baseline): string {
 export function baselineGreen(b: Baseline): boolean {
   return b.test === 'GREEN' && b.build === 'GREEN' && b.lint === 'GREEN' && (b.e2e === undefined || b.e2e === 'GREEN');
 }
+
+/** review.md's {{BASELINE}}: the harness's own baseline at the head under
+ *  review — the line, the suite's count from test.summary.json (and what
+ *  failed, ten names at most), and where the logs are — so the reviewer
+ *  judges with it instead of spending its minutes running it again (L-39).
+ *  Its results decide either way. */
+export function baselineForReviewer(b: Baseline, summaryText: string | undefined, logsDir: string): string {
+  let count = 'the suite reported no count — see test.log';
+  try {
+    const o = summaryText === undefined ? undefined : (JSON.parse(summaryText) as Record<string, unknown>);
+    const total = o?.['numTotalTests'];
+    const failed = Array.isArray(o?.['failed']) ? (o['failed'] as unknown[]).map(String) : undefined;
+    if (typeof total === 'number' && failed !== undefined) {
+      const named = failed.slice(0, 10).join('; ');
+      const more = failed.length > 10 ? `; and ${failed.length - 10} more` : '';
+      count = `the suite ran ${total} tests, ${failed.length} failed${failed.length > 0 ? `: ${named}${more}` : ''}`;
+    }
+  } catch {
+    // an unreadable summary is the default sentence
+  }
+  return `${baselineLine(b)} — ${count}. Logs: ${logsDir.replace(/\/+$/, '')}/`;
+}

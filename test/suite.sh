@@ -1920,8 +1920,13 @@ case_86_probe_dir() {
 case_84_prompts_carry_the_targets_facts() {
   CASE="84 the reviewer is told the target's commands, not npm's"; fixture c84
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
-  assert_grep "Run: $FLEET/test/fakes/vitest, true, true" "$TRACE/codex-prompt-1" "the config's commands, in order"
+  assert_grep "baseline — $FLEET/test/fakes/vitest, true, true —" "$TRACE/codex-prompt-1" "the config's commands, in order"
   assert_not_grep 'npm test' "$TRACE/codex-prompt-1" "and not khaita's"
+  # L-39: the reviewer is told the harness's result instead of re-running it.
+  # Red while review.md asks it to run them again, or {{BASELINE}} is unfilled.
+  assert_grep 'test GREEN \| build GREEN \| lint GREEN — the suite ran 2 tests, 0 failed\. Logs: .*/\.review/'"$STORY"'/round-1/baseline/' \
+    "$TRACE/codex-prompt-1" "the reviewer is given the baseline's result and its logs"
+  assert_grep 'Do not run the whole suite' "$TRACE/codex-prompt-1" "and asked not to run it again"
 
   CASE="84b REPO_RULES reaches the builder through the rules"; fixture c84b
   printf -- '- Never touch the SENTINEL_RULE_9f3 subsystem.\n' > "$REPO/.fleet/rules.md"
@@ -4395,7 +4400,8 @@ case_152_e2e_baseline() {
   assert_grep 'baseline: test GREEN \| build GREEN \| lint GREEN \| e2e GREEN' "$REPO/.review/$STORY.md" "machine block records the e2e run"
   assert_grep 'E2E_RAN_7c1' "$REPO/.review/$STORY/round-1/baseline/e2e.log" "the command ran in the baseline"
   assert_grep "then true, then echo E2E_RAN_7c1" "$TRACE/claude-prompt-1" "the builder is told to run it"
-  assert_grep "Run: $FLEET/test/fakes/vitest, true, true, then echo E2E_RAN_7c1" "$TRACE/codex-prompt-1" "the reviewer too"
+  assert_grep "baseline — $FLEET/test/fakes/vitest, true, true, then echo E2E_RAN_7c1 —" "$TRACE/codex-prompt-1" "the reviewer too"
+  assert_grep 'lint GREEN \| e2e GREEN — the suite ran' "$TRACE/codex-prompt-1" "with the e2e run's result"
 
   CASE="152c a repo without E2E_CMD keeps the three-run baseline"; fixture c152c
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1

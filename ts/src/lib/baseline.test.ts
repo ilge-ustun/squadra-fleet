@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { E2E_TIMEOUT_DEFAULT, baselineColour, baselineCommands, runBaseline, runMergeBaseline } from './baseline.ts';
+import { E2E_TIMEOUT_DEFAULT, baselineColour, baselineCommands, baselineForReviewer, runBaseline, runMergeBaseline } from './baseline.ts';
 import { readdirSync, realpathSync } from 'node:fs';
 
 // The harness runs the suite, the build and the lint in the clean reviewer
@@ -297,5 +297,30 @@ describe('baselineCommands — what a baseline ran, in one comparable shape', ()
   it('an e2e run carries its bound, the default when none is set', () => {
     expect(baselineCommands({ ...c, e2eCmd: 'npm run e2e' })).toMatchObject({ e2e: 'npm run e2e', e2eTimeoutSec: E2E_TIMEOUT_DEFAULT });
     expect(baselineCommands({ ...c, e2eCmd: 'npm run e2e', e2eTimeoutSec: 60 })).toMatchObject({ e2eTimeoutSec: 60 });
+  });
+});
+
+// review.md's {{BASELINE}}: what the reviewer is told the harness already ran,
+// so it does not spend its minutes running it again (L-39).
+describe('baselineForReviewer', () => {
+  const green = { test: 'GREEN', build: 'GREEN', lint: 'GREEN', e2e: 'GREEN' } as const;
+  const summary = (failed: string[], total = 1545) =>
+    JSON.stringify({ numTotalTests: total, numPassedTests: total - failed.length, numFailedTests: failed.length, success: failed.length === 0, failed });
+
+  it('the line, the suite\'s count, and where the logs are', () => {
+    expect(baselineForReviewer(green, summary([]), '/t/.review/900/round-1/baseline')).toBe(
+      'test GREEN | build GREEN | lint GREEN | e2e GREEN — the suite ran 1545 tests, 0 failed. Logs: /t/.review/900/round-1/baseline/');
+  });
+
+  it('a red suite names what failed, ten at most', () => {
+    const names = Array.from({ length: 12 }, (_, k) => `t${k}`);
+    const s = baselineForReviewer({ ...green, test: 'RED' }, summary(names), '/l');
+    expect(s).toMatch(/^test RED \| build GREEN/);
+    expect(s).toContain('1545 tests, 12 failed: t0; t1; t2; t3; t4; t5; t6; t7; t8; t9; and 2 more.');
+  });
+
+  it('a summary that is an error object, or none, says the suite gave no count', () => {
+    expect(baselineForReviewer({ ...green, test: 'RED' }, '{"error":"vitest wrote no JSON — see test.log"}\n', '/l')).toContain('the suite reported no count — see test.log');
+    expect(baselineForReviewer({ test: 'RED', build: 'RED', lint: 'RED' }, undefined, '/l')).toBe('test RED | build RED | lint RED — the suite reported no count — see test.log. Logs: /l/');
   });
 });

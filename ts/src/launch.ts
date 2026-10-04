@@ -44,7 +44,7 @@ import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSy
 import { join, resolve } from 'node:path';
 import { builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
-import { baselineLine, runBaseline } from './lib/baseline.ts';
+import { baselineForReviewer, baselineLine, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
@@ -464,13 +464,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables the prompts are rendered with, as the round goes on.
-    const state = { rules: '', headSha: '', round: '' };
+    const state = { rules: '', headSha: '', round: '', baseline: '' };
     const render = (file: string): string => {
       const vars: RenderVars = {
         STORY_ID: storyId, RULES: state.rules, REVIEW_TEXT: reviewText, STORY_TEXT: storyText, STORY_BASE: storyBase,
         HEAD_SHA: state.headSha, BASE_SHA: baseSha, ROUND: state.round, REPO_RULES_TEXT: repoRulesText,
         VITEST_CMD: cfg.vitestCmd, BUILD_CMD: cfg.buildCmd, LINT_CMD: cfg.lintCmd, CHECK_MUTATION: checkMutation,
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
+        BASELINE: state.baseline,
       };
       let r;
       try {
@@ -624,6 +625,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
       });
       log(`baseline: ${baselineLine(baseline)}`);
+      const summaryFile = `${evidenceDir}/baseline/test.summary.json`;
+      state.baseline = baselineForReviewer(baseline, isFile(summaryFile) ? readFileSync(summaryFile, 'utf8') : undefined, `${evidenceDir}/baseline`);
       const scope = checkScope({ deny: storyField(root, storyId, 'scope_deny'), changed: changedPaths, storyId });
       writeFileSync(`${evidenceDir}/scope.txt`, scope.fileText);
       log(scope.logLine);

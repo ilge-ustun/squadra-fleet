@@ -31,16 +31,16 @@ function render(file: string, vars: RenderVars): string {
 
 const ALL: RenderVars = {
   STORY_ID: '900', RULES: 'R', REVIEW_TEXT: 'V', STORY_TEXT: 'S', INTENT: 'I', STORY_BASE: 'base', HEAD_SHA: 'h', BASE_SHA: 'b',
-  ROUND: '2', REPO_RULES_TEXT: 'RR', VITEST_CMD: 'vt', BUILD_CMD: 'bd', LINT_CMD: 'lt', CHECK_MUTATION: 'cm',
+  ROUND: '2', REPO_RULES_TEXT: 'RR', VITEST_CMD: 'vt', BUILD_CMD: 'bd', LINT_CMD: 'lt', CHECK_MUTATION: 'cm', BASELINE: 'bl',
 };
 
 describe('renderPrompt', () => {
   it('every placeholder, and a trailing newline stripped as $(cat) strips it', () => {
     const f = prompt(
       'all.md',
-      '{{STORY_ID}} {{RULES}} {{REVIEW_TEXT}} {{STORY}} {{INTENT}} {{STORY_BASE}} {{HEAD_SHA}} {{BASE_SHA}} {{ROUND}} {{REPO_RULES}} {{VITEST_CMD}} {{BUILD_CMD}} {{LINT_CMD}} {{CHECK_MUTATION}}\n\n\n',
+      '{{STORY_ID}} {{RULES}} {{REVIEW_TEXT}} {{STORY}} {{INTENT}} {{STORY_BASE}} {{HEAD_SHA}} {{BASE_SHA}} {{ROUND}} {{REPO_RULES}} {{VITEST_CMD}} {{BUILD_CMD}} {{LINT_CMD}} {{CHECK_MUTATION}} {{BASELINE}}\n\n\n',
     );
-    expect(render(f, ALL)).toBe('900 R V S I base h b 2 RR vt bd lt cm');
+    expect(render(f, ALL)).toBe('900 R V S I base h b 2 RR vt bd lt cm bl');
   });
 
   it('order is the contract: a value inserted early is subject to the later replacements, not the earlier ones', () => {
@@ -99,6 +99,13 @@ describe('renderPrompt', () => {
   it('a prompt that renders to nothing dies', () => {
     const f = prompt('e.md', '{{REPO_RULES}}\n');
     expect(render(f, { REPO_RULES_TEXT: '' })).toBe('XX rendered prompt is empty: e.md\n');
+  });
+
+  it('BASELINE is the last replacement and guarded: the reviewer is never told an empty result (L-39)', () => {
+    const f = prompt('b.md', 'the harness ran: {{BASELINE}}\n');
+    // Last: a placeholder inside the value is not replaced after it (only warned about).
+    expect(render(f, { BASELINE: 'test GREEN {{ROUND}}', ROUND: '2' })).toBe('!! unsubstituted in b.md: {{ROUND}} \nthe harness ran: test GREEN {{ROUND}}');
+    expect(render(f, { BASELINE: '' })).toBe('XX b.md uses {{BASELINE}} but BASELINE is empty\n');
   });
 
   it('a missing prompt file dies', () => {

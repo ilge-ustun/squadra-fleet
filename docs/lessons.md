@@ -769,5 +769,9 @@ The same reasoning applies inside a round: the mutation runner restores a
 clean HEAD before every patch, so a selector's GREEN pre-run stands for the
 next patch that names it (`preRuns` in `ts/src/classifier.ts`, case 22b;
 071 ran one 165 s full-suite pre-run twice). A red pre-run is never reused.
+And the reviewer, which ran the whole suite, the build, the lint and e2e
+again inside its own 594 s although the harness had just run them and its
+results decide (L-15), is now given that result (`{{BASELINE}}` in
+`prompts/review.md`, case 84) and asked to run only what its judgment needs.
 
 **Enforced by:** `case_58b_merge_reuses_the_round`
