@@ -97,6 +97,8 @@ review 9000 'verdict: FAIL' "$(round 1 FAIL 'computed:  FAIL — AC1 GREEN: mark
                             "$(round 2 FAIL 'computed:  FAIL — scope VIOLATION: src/a — b ; AC2 NO_TESTS: guard; ')"
 mkdir -p "$repo/.review/900"
 for n in Round-3 builder.md round-1 round.1 round_1 .hidden; do : > "$repo/.review/900/$n"; done
+# 9000 asked once and was answered: the question file outlives the answer
+# (/answer appends to it), and the BLOCKED note must not (khaita 081, 5 Oct).
 echo 'stuck on the API' > "$repo/.blocked/9000.md"
 mkdir -p "$dir/wt-900" "$dir/wt-9000"
 mkdir -p "$dir/repos"

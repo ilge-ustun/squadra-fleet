@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
-import { DASH, byCodePoint, landingOf, listDir, nextReady, nextToRun, queueHold, storyIds, titleOf } from './status.ts';
+import { DASH, byCodePoint, landingOf, listDir, nextReady, nextToRun, queueHold, questionOpen, storyIds, titleOf } from './status.ts';
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
@@ -30,6 +30,19 @@ describe('landingOf — the table in status.ts\'s header', () => {
     landingOf({ ...base, status: 'done', merged: true, verdict: 'PASS', intoInBase: () => { asked++; return true; } });
     landingOf({ ...base, status: 'done', merged: false, verdict: 'PASS', base: 'epic/x', intoInBase: () => { asked++; return true; } });
     expect(asked).toBe(0);
+  });
+});
+
+describe('questionOpen — the BLOCKED note', () => {
+  it.each([
+    ['blocked, the question file there', 'blocked', true, true],
+    ['blocked, no file: the STATUS column says it, there is nothing to point at', 'blocked', false, false],
+    ['answered and building again: the file outlives the answer', 'in_progress', true, false],
+    ['answered, merged on its epic (khaita 081, 5 Oct)', 'done', true, false],
+    ['ready after /answer, not picked up yet', 'ready', true, false],
+    ['needs_human with an old question file', 'needs_human', true, false],
+  ])('%s', (_name, status, hasFile, expected) => {
+    expect(questionOpen(status, hasFile)).toBe(expected);
   });
 });
 
