@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { E2E_TIMEOUT_DEFAULT, baselineColour, baselineCommands, baselineForReviewer, runBaseline, runMergeBaseline } from './baseline.ts';
+import { E2E_TIMEOUT_DEFAULT, FIX_TAIL_LINES, baselineColour, baselineCommands, baselineForBuilder, baselineForReviewer, redSteps, runBaseline, runMergeBaseline } from './baseline.ts';
 import { readdirSync, realpathSync } from 'node:fs';
 
 // The harness runs the suite, the build and the lint in the clean reviewer
@@ -322,5 +322,53 @@ describe('baselineForReviewer', () => {
   it('a summary that is an error object, or none, says the suite gave no count', () => {
     expect(baselineForReviewer({ ...green, test: 'RED' }, '{"error":"vitest wrote no JSON — see test.log"}\n', '/l')).toContain('the suite reported no count — see test.log');
     expect(baselineForReviewer({ test: 'RED', build: 'RED', lint: 'RED' }, undefined, '/l')).toBe('test RED | build RED | lint RED — the suite reported no count — see test.log. Logs: /l/');
+  });
+});
+
+// The fix loop (launch.ts): a RED baseline goes back to the builder's own
+// session before the reviewer runs, with what the harness saw.
+describe('redSteps', () => {
+  it('the RED runs in the order they ran; none when green', () => {
+    expect(redSteps({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' })).toEqual([]);
+    expect(redSteps({ test: 'RED', build: 'GREEN', lint: 'RED', e2e: 'RED' })).toEqual(['test', 'lint', 'e2e']);
+    expect(redSteps({ test: 'GREEN', build: 'RED', lint: 'GREEN', e2e: 'GREEN' })).toEqual(['build']);
+  });
+});
+
+describe('baselineForBuilder — baseline-fix.md\'s {{BASELINE_RED}}', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fleet-fix-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const commands = baselineCommands({ installCmd: 'npm ci', vitestCmd: 'npx vitest run', buildCmd: 'npm run build', lintCmd: 'npm run lint', e2eCmd: 'npx playwright test' });
+
+  it('the line, then each RED run: its command and the last lines of its log; a GREEN run is not shown', () => {
+    writeFileSync(join(dir, 'build.log'), `${Array.from({ length: 200 }, (_, k) => `line ${k + 1}`).join('\n')}\n`);
+    writeFileSync(join(dir, 'lint.log'), 'lint is fine\n');
+    const s = baselineForBuilder({ test: 'GREEN', build: 'RED', lint: 'GREEN', e2e: 'GREEN' }, { summaryText: undefined, logsDir: `${dir}/`, commands });
+    expect(FIX_TAIL_LINES).toBe(150);
+    expect(s.split('\n')[0]).toBe('test GREEN | build RED | lint GREEN | e2e GREEN');
+    expect(s).toContain(`build RED: npm run build\nThe end of ${dir}/build.log, 150 lines at most:\n----\nline 51\n`);
+    expect(s).toContain('line 200\n----');
+    expect(s).not.toContain('line 50\n');
+    expect(s).not.toContain('lint is fine');
+  });
+
+  it('a RED suite names its count and what failed; e2e names its bound', () => {
+    writeFileSync(join(dir, 'test.log'), 'Error: Transform failed\n');
+    const summary = JSON.stringify({ numTotalTests: 3, numFailedTests: 1, failed: ['suite a'] });
+    const s = baselineForBuilder({ test: 'RED', build: 'GREEN', lint: 'GREEN', e2e: 'RED' }, { summaryText: summary, logsDir: dir, commands, tailLines: 5 });
+    expect(s).toContain('test RED: npx vitest run --reporter json — the suite ran 3 tests, 1 failed: suite a\nThe end of');
+    expect(s).toContain('Error: Transform failed');
+    expect(s).toContain(`e2e RED: npx playwright test (bounded at ${E2E_TIMEOUT_DEFAULT} s)\nThe end of ${dir}/e2e.log, 5 lines at most:\n----\n(no log was written)\n----`);
+  });
+
+  it('an empty log says so', () => {
+    writeFileSync(join(dir, 'lint.log'), '');
+    expect(baselineForBuilder({ test: 'GREEN', build: 'GREEN', lint: 'RED' }, { summaryText: undefined, logsDir: dir, commands }))
+      .toBe(`test GREEN | build GREEN | lint RED\n\nlint RED: npm run lint\nThe end of ${dir}/lint.log, 150 lines at most:\n----\n(the log is empty)\n----`);
   });
 });

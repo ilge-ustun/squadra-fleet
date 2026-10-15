@@ -1943,7 +1943,7 @@ case_84_prompts_carry_the_targets_facts() {
   # 24 Sep: 025's round 1 passed its tests and failed the baseline on a
   # type error that only the build reports; the builder had never been told
   # the build or the lint exist. Red while the rules name only the tests.
-  CASE="84d the builder is told to run the baseline's three commands"; fixture c84d
+  CASE="84d the builder is told the baseline's three commands"; fixture c84d
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_grep "baseline, on your final commit: $FLEET/test/fakes/vitest, then true, then true" "$TRACE/claude-prompt-1" "the target's test, build and lint commands, in the builder prompt"
 }
@@ -3515,7 +3515,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_146_fallback_reviewer_is_claude case_147_no_attribution
        case_148_bot_job_is_its_own_unit case_149_test_deploy
        case_150_bot_testdeploy case_151_refused_push_follows_origin
-       case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded)
+       case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
+       case_155_baseline_fix_in_the_round)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4462,6 +4463,137 @@ case_154_e2e_bounded() {
   assert_eq "$MRC" 1 "exit code (die)"
   assert_grep 'e2e RED' "$MLOG" "the message names the e2e run"
   assert_eq "$(epic_head)" "$before" "the epic is exactly where it was"
+}
+
+# Baseline fixes inside a round (the human's decision, 15 Oct 2026). The
+# builder no longer runs the whole baseline before it hands over: the harness
+# runs it anyway, and in khaita 089–096 the builder's own runs were 10–22 of
+# its 25–40 minutes, never once catching a RED the harness then missed. When
+# the harness's baseline is RED after a builder call, the launcher resumes
+# that builder's session (`--resume <its session_id>`) with
+# prompts/baseline-fix.md — the RED runs, their commands and their logs —
+# before the reviewer runs, BASELINE_FIXES times at most (default 2), and
+# runs the baseline again on the head the fix leaves. Red without the loop in
+# ts/src/launch.ts: 155a's round fails on its RED build and passes only in
+# round 2, after a whole second round; 155c–155g call claude once. 155b pins
+# BASELINE_FIXES=0 as the fleet before the loop, red when the loop ignores
+# the knob; 155h red when the loop runs in a REVIEW_ONLY round, 155i when it
+# runs without a session to resume.
+fix_build() {                         # fix_build → $FX/build.sh: RED on its first run, GREEN on every run after
+  cat > "$FX/build.sh" <<EOF
+n=\$(cat "$FX/builds" 2>/dev/null || echo 0)
+echo \$((n + 1)) > "$FX/builds"
+if [ "\$n" -eq 0 ]; then echo "src/marker.ts(1,7): error TS2322: FAKE_TYPE_ERROR_7f3"; exit 1; fi
+echo "fake build GREEN, run \$((n + 1))"
+EOF
+}
+case_155_baseline_fix_in_the_round() {
+  local tip ev
+  CASE="155a a RED build goes back to the builder's own session, and the round passes"; fixture c155a; fix_build
+  ev="$REPO/.review/$STORY/round-1"
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=red FAKE_REVIEWER=PASS BUILD_CMD="bash $FX/build.sh"
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" done "story status"
+  assert_eq "$(review_line 3)" "verdict: PASS" ".review line 3"
+  assert_eq "$(review_line 4)" "rounds: 1 of 2" "passed in round 1"
+  assert_eq "$(calls claude)" 2 "the builder, then one fix"
+  assert_eq "$(calls codex)" 1 "reviewed once, after the baseline went GREEN"
+  assert_eq "$(cat "$FX/builds" 2>/dev/null)" 2 "the build ran twice: RED, then GREEN on the fix's head"
+  assert_not_grep '^--resume$' "$TRACE/claude-args-1" "the round's builder starts afresh"
+  assert_not_grep 'Run them all yourself' "$TRACE/claude-prompt-1" "the rules no longer send it to run the whole baseline…"
+  assert_grep 'at most 2 time\(s\) a round' "$TRACE/claude-prompt-1" "…they say a RED comes back to it, and how often"
+  assert_eq "$(arg_after --resume "$TRACE/claude-args-2")" fake-session-1 "the fix resumes the builder's own session"
+  assert_eq "$(arg_after --model "$TRACE/claude-args-2")" sonnet "…on the round's model"
+  assert_grep 'baseline RED \(build\) — back to the builder, fix 1 of 2' "$LOG" "the log says so"
+  assert_grep 'FAKE_TYPE_ERROR_7f3' "$TRACE/claude-prompt-2" "the fix prompt carries the RED log"
+  assert_grep "build RED: bash $FX/build.sh" "$TRACE/claude-prompt-2" "…names the RED run"
+  assert_grep 'This is fix 1 of 2' "$TRACE/claude-prompt-2" "…and which fix it is"
+  assert_not_grep 'Implement the story below' "$TRACE/claude-prompt-2" "…and is not the build prompt again"
+  assert_grep 'FAKE_TYPE_ERROR_7f3' "$ev/baseline-red-1/build.log" "the RED run is kept"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/baseline-red-1/build.log" "…and committed"
+  assert_file "$ev/builder-fix-1.json" "the fix call's object is kept"
+  assert_grep 'fake build GREEN, run 2' "$ev/baseline/build.log" "baseline/ is the run on the final head"
+  assert_grep 'baseline: +test GREEN \| build GREEN \| lint GREEN' "$REPO/.review/$STORY.md" "the Machine block records the GREEN"
+  tip="$(git -C "$REPO" rev-parse "story/$STORY")"
+  assert_grep "^head: $tip\$" "$REPO/.review/$STORY.md" "the reviewed head is the fix's"
+  assert_grep '^commits this round: 2$' "$REPO/.review/$STORY.md" "the fix's commit is the round's"
+  assert_grep 'fake builder did: commit \(call 1\)' "$ev/builder.md" "the builder's message…"
+  assert_grep 'baseline fix 1 of 2: the harness.s baseline was RED \(build\)' "$ev/builder.md" "…then the fix, marked as one…"
+  assert_grep 'fake builder did: commit \(call 2\)' "$ev/builder.md" "…and what it said"
+  assert_grep '^AC1 +RED +tdd-fixed' "$REPO/.review/$STORY.md" "the fix's TDD evidence is what ran…"
+  assert_no_file "$ev/mutations/AC1-tdd-observed-red.patch" "…in place of the set made before the fix"
+
+  CASE="155b BASELINE_FIXES=0: a RED baseline fails the round, as before the loop"; fixture c155b; fix_build
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 BUILD_CMD="bash $FX/build.sh" BASELINE_FIXES=0
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
+  assert_grep '^computed: FAIL — .*baseline build RED' "$REPO/.review/$STORY.md" "…and is the reason"
+  assert_eq "$(calls claude)" 1 "the builder once, no fix"
+  assert_eq "$(calls codex)" 1 "reviewed"
+  assert_no_file "$REPO/.review/$STORY/round-1/baseline-red-1/build.log" "nothing moved aside"
+  assert_not_grep 'back to the builder' "$LOG" "nothing said"
+  assert_grep 'at most 0 time\(s\) a round' "$TRACE/claude-prompt-1" "and the rules promise no fix"
+
+  CASE="155c fixes run out: BASELINE_FIXES calls, then the RED fails the round"; fixture c155c
+  ev="$REPO/.review/$STORY/round-1"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 BUILD_CMD=false
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
+  assert_eq "$(calls claude)" 3 "the builder and two fixes"
+  assert_eq "$(arg_after --resume "$TRACE/claude-args-3")" fake-session-1 "the second fix resumes the same session"
+  assert_grep 'back to the builder, fix 2 of 2' "$LOG" "the log counts them"
+  assert_file "$ev/baseline-red-1/build.log" "each RED run is kept"
+  assert_file "$ev/baseline-red-2/build.log" "…both"
+  assert_file "$ev/baseline/build.log" "and baseline/ is the last run"
+  assert_eq "$(calls codex)" 1 "reviewed once, at the end"
+  assert_grep '^commits this round: 3$' "$REPO/.review/$STORY.md" "every fix commit is the round's"
+
+  CASE="155d a fix that commits nothing ends the loop; the RED stands"; fixture c155d
+  ev="$REPO/.review/$STORY/round-1"
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_RESUMED=nocommit FAKE_REVIEWER=PASS MAX_ROUNDS=1 BUILD_CMD=false
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
+  assert_eq "$(calls claude)" 2 "one fix, not two"
+  assert_grep 'baseline fix 1 made no commit — the RED baseline stands' "$LOG" "said"
+  assert_file "$ev/baseline/build.log" "baseline/ is still the head's"
+  assert_file "$ev/baseline-red-1/build.log" "and the RED the fix was given is kept"
+  assert_eq "$(calls codex)" 1 "reviewed"
+
+  CASE="155e a fix that asks a question blocks the story"; fixture c155e
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_RESUMED=blocked FAKE_REVIEWER=PASS BUILD_CMD=false
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(field status)" blocked "story status"
+  assert_file "$REPO/.blocked/$STORY.md" "the question reaches the checkout"
+  assert_eq "$(calls codex)" 0 "nothing reviewed"
+  assert_file "$REPO/.review/$STORY/round-1/builder-fix-1.json" "the fix call's object is kept"
+
+  CASE="155f a fix Claude refuses stops the story; the round is not counted"; fixture c155f
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_RESUMED=limit FAKE_REVIEWER=PASS BUILD_CMD=false
+  assert_eq "$RC" 69 "refused is its own exit code"
+  assert_eq "$(field status)" needs_human "the story stops"
+  assert_eq "$(field round)" 0 "the round is not counted"
+  assert_eq "$(calls codex)" 0 "nothing reviewed"
+  assert_no_file "$REPO/.review/$STORY.md" "no review: nothing was judged"
+
+  CASE="155g a fix that hangs is killed, and the story stops"; fixture c155g
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_RESUMED=hang FAKE_REVIEWER=PASS BUILD_CMD=false AGENT_TIMEOUT=5
+  assert_eq "$RC" 1 "exit code (die)"
+  assert_eq "$(field status)" needs_human "story status"
+  assert_grep "the builder's baseline fix 1 exceeded AGENT_TIMEOUT" "$LOG" "says which call"
+  assert_eq "$(calls codex)" 0 "nothing reviewed"
+
+  CASE="155h REVIEW_ONLY has no builder to send a RED back to"; fixture c155h
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 REVIEW_ONLY=1 BUILD_CMD=false
+  assert_eq "$(calls claude)" 1 "no builder ran, and no fix"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
+  assert_not_grep 'back to the builder' "$LOG" "nothing said"
+  assert_not_grep 'no session to resume' "$LOG" "…not even that there is no session: no builder ran"
+
+  CASE="155i a builder whose output names no session cannot be resumed; the RED stands"; fixture c155i
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_OUTPUT=garbage FAKE_REVIEWER=PASS MAX_ROUNDS=1 BUILD_CMD=false
+  assert_eq "$(calls claude)" 1 "no fix call: a fresh builder is not the one that wrote the code"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
+  assert_grep 'no session to resume' "$LOG" "said"
 }
 
 for c in "${CASES[@]}"; do
