@@ -30,8 +30,9 @@ intent ──fleet write-story──▶ .stories/<id>.md (draft)
        ──fleet lint-story───▶ cited paths exist on the base, ACs are **ACn headed, base: is legal
        ──the coordinator────▶ reads the draft, edits by hand, lints again, commits
        ──a human────────────▶ status: ready   (at a terminal, or /promote from the phone)
-       ──the queue──────────▶ fleet launch: worktree from origin/<base>; builder; baseline; scope;
-                              reviewer; mutation runner; probe runner; computed verdict
+       ──the queue──────────▶ fleet launch: worktree from origin/<base>; builder; baseline (a RED one
+                              back to the builder's session, BASELINE_FIXES times); scope; reviewer;
+                              mutation runner; probe runner; computed verdict
                               → .review/<id>.md, committed with the status
        ──fleet merge────────▶ story → its epic, on a computed PASS (the queue does this)
        ──a human────────────▶ epic → integration branch, or an integration-branch story onto it
@@ -54,7 +55,7 @@ replaceable at that seam.
 | role | runs as | model | does | may not |
 |---|---|---|---|---|
 | story writer | `fleet write-story`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `opus` (alias: the newest Opus) | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
-| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `fleet check-mutation` on it before finishing | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
+| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, runs the tests it wrote or changed (not the whole baseline: the harness runs that), hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `fleet check-mutation` on it before finishing; when the harness's baseline is RED at its head, it is resumed (`--resume`) with the RED logs and fixes them before the reviewer runs | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head, told the harness's baseline result: reads files, runs the tests it needs, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | the launcher: `ts/src/lib/baseline.ts`, `scope.ts`, `evidence.ts` over `ts/src/classifier.ts`, `ts/src/lib/verdict.ts` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
@@ -212,6 +213,28 @@ Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (every patch, selector and `.result`), `probes/`, `reviewer.md`,
 `builder.md`. Raw runner output stays machine-local in the
 target's `.runs/`.
+
+### A RED baseline inside the round
+
+The builder does not run the whole baseline before it hands over; the
+harness runs it at the builder's head anyway, in the clean reviewer tree.
+When that baseline is RED after a builder call, the launcher does not go on
+to scope, reviewer and mutations. It moves `baseline/` to
+`baseline-red-<n>/`, logs `baseline RED (build) — back to the builder, fix
+1 of 2`, and resumes the builder's own session (`claude -p --resume
+<session_id>`, the id from its `builder.json`) with `prompts/baseline-fix.md`:
+which runs were RED, their commands and the end of each log. The fix
+commits, regenerates its `ACn-tdd-*` pairs (they replace the round's set),
+and the launcher makes the reviewer tree afresh at the new head and runs the
+baseline again — `BASELINE_FIXES` times at most (default 2; 0 is the fleet
+without the loop). A RED left after that, a fix that commits nothing, or a
+builder output with no session to resume, fails the round as a RED baseline
+always has. The fix call is the builder's call in every other way — a
+timeout, a refusal, a `.blocked/` question end it the same — and leaves
+`builder-fix-<n>.json` beside `builder.json` and its words after the
+builder's in `builder.md`. Not in REVIEW_ONLY or resumed-review rounds,
+which have no builder. The Machine block keeps its lines; its builder and
+baseline seconds add up every call and every run.
 
 ## Watching it
 
@@ -428,6 +451,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEWER_MODEL` | empty | empty keeps codex's own default; set, `codex exec -m`; recorded as `reviewer:` in the Machine block |
 | `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
+| `BASELINE_FIXES` | 2 | times a round's RED baseline goes back to its builder's session with the RED logs before the reviewer runs; 0 fails the round on it at once |
 | `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
