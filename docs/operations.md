@@ -133,6 +133,8 @@ deploys — belongs to that target, not here.
   peak RSS under 1.2 GB per lane (one lane peaked at 1.8 GB on 25 Sep). A
   second lane needs a second slot in the lock and a claim under the fleet
   lock — two launchers could then pass the status check together.
+  Lanes across repos are planned (15 Oct 2026, a second project, a Tauri
+  app): `docs/handoff-parallel-tauri.md` is the brief.
 - **`fleet reset` and `fleet status` look only at `wt-<id>`.** `reset
   --force` during a review removes the branch under a live launcher, and
   `RUNNING` misses the review phase. `reset` should take the launch lock.
