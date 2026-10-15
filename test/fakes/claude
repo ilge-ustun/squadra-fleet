@@ -57,6 +57,14 @@
 # FAKE_BUILDER_USED=<model> adds `modelUsage` naming it — the model the
 # requested alias resolved to.
 #
+# Sessions, as the real CLI has them: every object carries `session_id`,
+# `fake-session-N` for the Nth builder call, and `--resume <id>` continues
+# that session, so the object then names <id> again. A resumed call is the
+# launcher's baseline fix (launch.ts): it does what FAKE_BUILDER_RESUMED
+# says (default: FAKE_BUILDER), and its TDD evidence, when
+# FAKE_BUILDER_MUTATIONS asks for some, is slugged `tdd-fixed` instead of
+# `tdd-observed-red`, so a case can tell which call handed over the set.
+#
 set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
@@ -66,10 +74,12 @@ set -euo pipefail
 # rerun) or, for older callers, as the value after -p. A `-p` followed by
 # another flag has no value.
 prompt=""
+resume=""
 ARGV=("$@")                           # before the loop below consumes them
 while (($#)); do
   case "$1" in
     -p) if [[ -n "${2:-}" && "${2:-}" != -* ]]; then prompt="$2"; shift 2; else shift; fi ;;
+    --resume) resume="${2:?fleet/test/fakes/claude: --resume needs a session id}"; shift 2 ;;
     *)  shift ;;
   esac
 done
@@ -110,8 +120,11 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 # The argv too, one flag per line: which model the launcher chose is visible
 # nowhere else.
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
+session="${resume:-fake-session-$n}"
+mode="$FAKE_BUILDER"; slug=tdd-observed-red
+if [[ -n "$resume" ]]; then mode="${FAKE_BUILDER_RESUMED:-$FAKE_BUILDER}"; slug=tdd-fixed; fi
 
-case "$FAKE_BUILDER" in
+case "$mode" in
   limit)    limit_json; exit 1 ;;
   commit-then-limit) git commit -q --allow-empty -m "fake(builder): round $n, then the limit"; limit_json; exit 1 ;;
   commit)   git commit -q --allow-empty -m "fake(builder): round $n" ;;
@@ -131,7 +144,7 @@ case "$FAKE_BUILDER" in
               printf -- '---\nstatus: draft\nround: 0\n---\n# Story: fake\n## Acceptance criteria\n**AC1 - a bounded claim.** Goes red when removed.\n## Known weakness\nNone.\n## Out of scope\n- nothing\n' \
                 > ".stories/${FAKE_STORY_ID:?FAKE_STORY_ID must be set}.md"
             fi ;;
-  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER='$FAKE_BUILDER'" >&2; exit 2 ;;
+  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER='$mode'" >&2; exit 2 ;;
 esac
 
 # TDD evidence, written after the commit so the tree is clean apart from
@@ -140,22 +153,22 @@ case "${FAKE_BUILDER_MUTATIONS:-none}" in
   none) : ;;
   red)   mkdir -p .review-out/mutations
          printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
-         git diff -- src/marker.txt > .review-out/mutations/AC1-tdd-observed-red.patch
+         git diff -- src/marker.txt > ".review-out/mutations/AC1-$slug.patch"
          git checkout -q -- src/marker.txt
-         printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
+         printf 'fake.test.tsx\n' > ".review-out/mutations/AC1-$slug.test" ;;
   green) mkdir -p .review-out/mutations
          printf '\n# a comment the suite cannot see\n' >> src/marker.txt
-         git diff -- src/marker.txt > .review-out/mutations/AC1-tdd-observed-red.patch
+         git diff -- src/marker.txt > ".review-out/mutations/AC1-$slug.patch"
          git checkout -q -- src/marker.txt
-         printf 'fake.test.tsx\n' > .review-out/mutations/AC1-tdd-observed-red.test ;;
+         printf 'fake.test.tsx\n' > ".review-out/mutations/AC1-$slug.test" ;;
   *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
 esac
 
 case "${FAKE_BUILDER_OUTPUT:-json}" in
   json)    if [[ -n "${FAKE_BUILDER_USED:-}" ]]; then   # the model an alias resolved to, as modelUsage reports it
-             printf '{"is_error":false,"result":"fake builder did: %s (call %s)","modelUsage":{"claude-haiku-side":{"costUSD":0.01},"%s":{"costUSD":1.5}}}\n' "$FAKE_BUILDER" "$n" "$FAKE_BUILDER_USED"
+             printf '{"is_error":false,"result":"fake builder did: %s (call %s)","session_id":"%s","modelUsage":{"claude-haiku-side":{"costUSD":0.01},"%s":{"costUSD":1.5}}}\n' "$mode" "$n" "$session" "$FAKE_BUILDER_USED"
            else
-             printf '{"is_error":false,"result":"fake builder did: %s (call %s)"}\n' "$FAKE_BUILDER" "$n"
+             printf '{"is_error":false,"result":"fake builder did: %s (call %s)","session_id":"%s"}\n' "$mode" "$n" "$session"
            fi ;;
   garbage) printf 'not json {\n' ;;
   shape)   printf '{"unexpected":"shape"}\n' ;;
