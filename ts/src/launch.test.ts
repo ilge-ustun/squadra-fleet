@@ -114,6 +114,17 @@ describe('readKnobs — the ${X:-default} knobs', () => {
   });
 });
 
+describe('BASELINE_FIXES — how often a RED baseline goes back to the builder in its round', () => {
+  it('2 by default, 0 when set to 0 (the fleet before the loop), a die when not a whole number', () => {
+    expect(readKnobs({}, '/f').baselineFixes).toBe(2);
+    expect(readKnobs({ BASELINE_FIXES: '' }, '/f').baselineFixes).toBe(2);
+    expect(readKnobs({ BASELINE_FIXES: '0' }, '/f').baselineFixes).toBe(0);
+    expect(readKnobs({ BASELINE_FIXES: '5' }, '/f').baselineFixes).toBe(5);
+    expect(() => readKnobs({ BASELINE_FIXES: 'two' }, '/f')).toThrow(/BASELINE_FIXES/);
+    expect(() => readKnobs({ BASELINE_FIXES: '1.5' }, '/f')).toThrow(/BASELINE_FIXES/);
+  });
+});
+
 describe('REVIEWER_RETRY_MIN — when a refused reviewer is tried again if nobody named a time', () => {
   it('60 minutes by default, a number when set, a die when not a number', () => {
     expect(readKnobs({}, '/f').reviewerRetryMin).toBe(60);

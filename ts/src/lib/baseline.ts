@@ -256,12 +256,9 @@ export function baselineGreen(b: Baseline): boolean {
   return b.test === 'GREEN' && b.build === 'GREEN' && b.lint === 'GREEN' && (b.e2e === undefined || b.e2e === 'GREEN');
 }
 
-/** review.md's {{BASELINE}}: the harness's own baseline at the head under
- *  review — the line, the suite's count from test.summary.json (and what
- *  failed, ten names at most), and where the logs are — so the reviewer
- *  judges with it instead of spending its minutes running it again (L-39).
- *  Its results decide either way. */
-export function baselineForReviewer(b: Baseline, summaryText: string | undefined, logsDir: string): string {
+/** The suite's count from test.summary.json, and what failed, ten names at
+ *  most; a sentence saying there is none when the summary has no count. */
+function suiteCount(summaryText: string | undefined): string {
   let count = 'the suite reported no count — see test.log';
   try {
     const o = summaryText === undefined ? undefined : (JSON.parse(summaryText) as Record<string, unknown>);
@@ -275,5 +272,57 @@ export function baselineForReviewer(b: Baseline, summaryText: string | undefined
   } catch {
     // an unreadable summary is the default sentence
   }
-  return `${baselineLine(b)} — ${count}. Logs: ${logsDir.replace(/\/+$/, '')}/`;
+  return count;
+}
+
+/** review.md's {{BASELINE}}: the harness's own baseline at the head under
+ *  review — the line, the suite's count from test.summary.json (and what
+ *  failed, ten names at most), and where the logs are — so the reviewer
+ *  judges with it instead of spending its minutes running it again (L-39).
+ *  Its results decide either way. */
+export function baselineForReviewer(b: Baseline, summaryText: string | undefined, logsDir: string): string {
+  return `${baselineLine(b)} — ${suiteCount(summaryText)}. Logs: ${logsDir.replace(/\/+$/, '')}/`;
+}
+
+/** The runs that are RED, in the order they ran: the fix loop's log line. */
+export function redSteps(b: Baseline): string[] {
+  return (['test', 'build', 'lint', 'e2e'] as const).filter((k) => b[k] === 'RED');
+}
+
+/** How many log lines of each RED run baseline-fix.md carries. */
+export const FIX_TAIL_LINES = 150;
+
+/** The last `n` lines of a log, or a sentence saying there are none. */
+function logTail(file: string, n: number): string {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return '(no log was written)';
+  }
+  const lines = text.replace(/\n+$/, '').split('\n');
+  if (lines.length === 1 && lines[0] === '') return '(the log is empty)';
+  return lines.slice(-n).join('\n');
+}
+
+/** baseline-fix.md's {{BASELINE_RED}}: the harness's baseline that was RED
+ *  at the builder's head, handed back to the builder that wrote the code, in
+ *  its own session, before anyone reviews it — the line, the suite's count,
+ *  and for each RED run the command it was and the last `tailLines` lines
+ *  of its log, so the builder starts from the failure instead of running
+ *  the whole baseline again to find it. */
+export function baselineForBuilder(b: Baseline, o: { summaryText: string | undefined; logsDir: string; commands: BaselineCommands; tailLines?: number }): string {
+  const dir = o.logsDir.replace(/\/+$/, '');
+  const n = o.tailLines ?? FIX_TAIL_LINES;
+  const run: Record<string, string> = {
+    test: `${o.commands.test} --reporter json — ${suiteCount(o.summaryText)}`,
+    build: o.commands.build,
+    lint: o.commands.lint,
+    e2e: `${o.commands.e2e ?? ''} (bounded at ${o.commands.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT} s)`,
+  };
+  const parts = [baselineLine(b)];
+  for (const step of redSteps(b)) {
+    parts.push(`${step} RED: ${run[step]}\nThe end of ${dir}/${step}.log, ${n} lines at most:\n----\n${logTail(`${dir}/${step}.log`, n)}\n----`);
+  }
+  return parts.join('\n\n');
 }

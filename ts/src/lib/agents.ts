@@ -18,9 +18,14 @@ export const ALLOWED_TOOLS = 'Read,Write,Edit,Grep,Glob,Bash';
  *  model stays recorded in the Machine block and the round evidence. */
 export const NO_ATTRIBUTION = '{"attribution":{"commit":"","pr":"","sessionUrl":false}}';
 
-export function builderArgv(o: { model: string; maxTurns: string; allowedTools?: string }): string[] {
-  return ['-p', '--model', o.model, '--max-turns', o.maxTurns, '--allowedTools', o.allowedTools ?? ALLOWED_TOOLS, '--output-format', 'json',
+/** `resume`, a session id from an earlier call's object (builderSessionId),
+ *  continues that session — the launcher's baseline fix goes back to the
+ *  builder that wrote the code, with everything it already read, instead of
+ *  a fresh one that must read it all again. Empty or absent starts afresh. */
+export function builderArgv(o: { model: string; maxTurns: string; allowedTools?: string; resume?: string }): string[] {
+  const a = ['-p', '--model', o.model, '--max-turns', o.maxTurns, '--allowedTools', o.allowedTools ?? ALLOWED_TOOLS, '--output-format', 'json',
     '--settings', NO_ATTRIBUTION];
+  return o.resume ? [...a, '--resume', o.resume] : a;
 }
 
 /** --sandbox danger-full-access: bwrap cannot create network namespaces on
@@ -48,7 +53,7 @@ export interface BuilderRun {
   output: string;
 }
 
-export async function runBuilder(o: AgentCall & { model: string; maxTurns: string }): Promise<BuilderRun> {
+export async function runBuilder(o: AgentCall & { model: string; maxTurns: string; resume?: string }): Promise<BuilderRun> {
   const r = await run('claude', builderArgv(o), {
     cwd: o.wt, input: o.prompt, timeoutSec: o.timeoutSec, graceSec: o.graceSec ?? 30, stderr: 'merge',
     ...(o.env !== undefined ? { env: o.env } : {}),
@@ -229,6 +234,22 @@ export function reviewerMessages(jsonl: string): ReviewerMessages {
     texts.push(typeof t === 'string' ? t : JSON.stringify(t, null, 2));
   });
   return { text: texts.join('\n').replace(/\n+$/, ''), noise };
+}
+
+/** The session a `claude -p --output-format json` call ran as: its object's
+ *  `session_id` (the CLI's own schema), which `--resume` takes. '' when the
+ *  output is not that object or names none — then there is nothing to
+ *  resume. */
+export function builderSessionId(output: string): string {
+  let v: unknown;
+  try {
+    v = JSON.parse(output);
+  } catch {
+    return '';
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return '';
+  const id = (v as Record<string, unknown>)['session_id'];
+  return typeof id === 'string' ? id : '';
 }
 
 /** 24 Sep: the fleet names aliases (`sonnet`, `opus`), so what a round ran

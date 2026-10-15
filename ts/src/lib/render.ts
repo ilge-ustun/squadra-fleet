@@ -16,7 +16,8 @@ export class RenderError extends Error {}
  *  REPO_RULES_TEXT {{REPO_RULES}}; the rest share their placeholder's name. */
 export type RenderVar =
   | 'STORY_ID' | 'RULES' | 'REVIEW_TEXT' | 'STORY_TEXT' | 'INTENT' | 'STORY_BASE' | 'HEAD_SHA' | 'BASE_SHA' | 'ROUND'
-  | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'E2E_STEP' | 'CHECK_MUTATION' | 'BASELINE';
+  | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'E2E_STEP' | 'CHECK_MUTATION' | 'BASELINE_FIXES' | 'BASELINE'
+  | 'BASELINE_RED';
 
 export type RenderVars = Partial<Record<RenderVar, string>>;
 
@@ -27,9 +28,13 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
   ['REPO_RULES', 'REPO_RULES_TEXT'], ['VITEST_CMD', 'VITEST_CMD'], ['BUILD_CMD', 'BUILD_CMD'], ['LINT_CMD', 'LINT_CMD'],
   ['E2E_STEP', 'E2E_STEP'],
   ['CHECK_MUTATION', 'CHECK_MUTATION'],
-  // Last: the harness's own baseline report, with test names in it, is
-  // inserted after every other replacement and is subject to none.
+  ['BASELINE_FIXES', 'BASELINE_FIXES'],
+  // Last: the harness's own baseline reports, with test names and log lines
+  // in them, are inserted after every other replacement. BASELINE (review.md)
+  // and BASELINE_RED (baseline-fix.md) never share a prompt, so neither is
+  // subject to any replacement.
   ['BASELINE', 'BASELINE'],
+  ['BASELINE_RED', 'BASELINE_RED'],
 ];
 
 /** The names whose empty value is a die when the SOURCE uses `{{<name>}}`.
@@ -38,7 +43,7 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
  *  rules), and so is E2E_STEP (', then <E2E_CMD>', empty when the repo runs none). Kept as it is, pinned by a test. */
 const GUARDED: readonly RenderVar[] = [
   'STORY_ID', 'RULES', 'REVIEW_TEXT', 'STORY_TEXT', 'INTENT', 'STORY_BASE', 'HEAD_SHA', 'BASE_SHA', 'ROUND',
-  'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION', 'BASELINE',
+  'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION', 'BASELINE_FIXES', 'BASELINE', 'BASELINE_RED',
 ];
 
 export interface Rendered {

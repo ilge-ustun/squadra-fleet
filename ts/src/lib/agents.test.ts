@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
+  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -26,6 +26,14 @@ describe('the argv the CLIs get', () => {
     ]);
     expect(ALLOWED_TOOLS).toBe('Read,Write,Edit,Grep,Glob,Bash');
     expect(JSON.parse(NO_ATTRIBUTION)).toEqual({ attribution: { commit: '', pr: '', sessionUrl: false } });
+  });
+
+  it('builder resumed: the same argv, then --resume and the session id (a baseline fix, case 155)', () => {
+    expect(builderArgv({ model: 'sonnet', maxTurns: '60', resume: 'b1f0c2de-0000-4000-8000-000000000001' })).toEqual([
+      '-p', '--model', 'sonnet', '--max-turns', '60', '--allowedTools', ALLOWED_TOOLS, '--output-format', 'json',
+      '--settings', NO_ATTRIBUTION, '--resume', 'b1f0c2de-0000-4000-8000-000000000001',
+    ]);
+    expect(builderArgv({ model: 'sonnet', maxTurns: '60', resume: '' })).not.toContain('--resume');
   });
 
   it('reviewer: codex exec --json, no sandbox, -m only when a model is named (cases 103, 103b)', () => {
@@ -170,6 +178,26 @@ describe('runBuilder / runReviewer with test/fakes/claude and test/fakes/codex',
     }
   });
 
+  it('builder resumed: --resume and the id reach the CLI, and the session it continued comes back', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
+    const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
+    mkdirSync(trace); mkdirSync(wt);
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_BUILDER: 'nocommit' }, 'claude');
+    try {
+      const first = await runBuilder({ wt, prompt: 'build it', model: 'm', maxTurns: '7', timeoutSec: 30, env });
+      const id = builderSessionId(first.output);
+      expect(id).toBe('fake-session-1');
+      const second = await runBuilder({ wt, prompt: 'fix the baseline', model: 'm', maxTurns: '7', timeoutSec: 30, env, resume: id });
+      expect(readFileSync(join(trace, 'claude-args-1'), 'utf8').split('\n')).not.toContain('--resume');
+      const args = readFileSync(join(trace, 'claude-args-2'), 'utf8').split('\n');
+      expect(args[args.indexOf('--resume') + 1]).toBe('fake-session-1');
+      expect(readFileSync(join(trace, 'claude-prompt-2'), 'utf8')).toBe('fix the baseline');
+      expect(builderSessionId(second.output)).toBe('fake-session-1');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reviewer: stderr to the file, the JSONL on stdout, -m when named', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
     const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
@@ -233,6 +261,23 @@ describe('runReviewer keeps the exit status, for the record', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// claude -p --output-format json's object names the session it ran as
+// session_id (the CLI's own schema); --resume <it> continues that session.
+describe('builderSessionId — the session a baseline fix resumes', () => {
+  it('the session_id of the CLI\'s object', () => {
+    expect(builderSessionId(JSON.stringify({ type: 'result', is_error: false, result: 'x', session_id: 'b1f0c2de-0000-4000-8000-000000000001' }))).toBe('b1f0c2de-0000-4000-8000-000000000001');
+    expect(builderSessionId('  {"is_error":true,"session_id":"s"}\n')).toBe('s');
+  });
+  it('none, not a string, not an object, not JSON → empty: there is nothing to resume', () => {
+    expect(builderSessionId('{"is_error":false,"result":"x"}')).toBe('');
+    expect(builderSessionId('{"session_id":42}')).toBe('');
+    expect(builderSessionId('{"session_id":""}')).toBe('');
+    expect(builderSessionId('["session_id"]')).toBe('');
+    expect(builderSessionId('null')).toBe('');
+    expect(builderSessionId('not json {')).toBe('');
   });
 });
 

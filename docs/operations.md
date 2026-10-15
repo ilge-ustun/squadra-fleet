@@ -121,10 +121,10 @@ deploys — belongs to that target, not here.
 
 ## Harness gaps still open
 
-- **Pre-commit hooks in the builder session.** A `PreToolUse` hook on
-  `git commit` running `VITEST_CMD` would have saved at least one round
-  (baseline test and build RED). Decide once enough stories show whether
-  giving the builder the reviewer's checks already brought rounds down.
+- **Pre-commit hooks in the builder session** were the open answer to a
+  round lost on a RED baseline. The baseline fix loop (below, 15 Oct) now
+  sends a RED back to the builder inside the round; a hook is only worth
+  weighing again if fixes keep running out.
 - **`.blocked/` has never fired from a builder**; the writer escalates
   instead. The mechanism is tested (case 3), never exercised by a real agent
   (L-24).
@@ -212,9 +212,36 @@ deploys — belongs to that target, not here.
   commands match (`baseline/commands.json`); a selector's GREEN pre-run is
   made once per round; the reviewer is given the baseline (`{{BASELINE}}`)
   and runs only what its judgment needs. What stays: fresh worktrees and
-  installs (L-01, L-09), the builder's own baseline runs (025's
-  `next build`-only failure), and one thing at a time on a 2-CPU,
-  3.8 GiB box (L-37).
+  installs (L-01, L-09) and one thing at a time on a 2-CPU, 3.8 GiB box
+  (L-37). The builder's own baseline runs, kept here for 025's
+  `next build`-only failure, went on 15 Oct (the next entry).
+- **A RED baseline goes back to the builder, inside the round (15 Oct).**
+  Measured on khaita 089–096: a round took 45–60 min — builder 25–40 (only
+  4–13 of it model time), baseline ~11½, mutations 5–14, reviewer ~2. The
+  rules told the builder to run the whole baseline before it finished, so in
+  most rounds 10–22 of its minutes were the very commands the harness ran
+  again straight after, on a clean tree; and in 44 rounds since khaita 062
+  the harness's baseline was never once RED. The human approved replacing
+  the duplicate with a loop in the harness. Now the builder runs only the
+  tests it wrote or changed and a spec or two its change could break; when
+  the harness's baseline is RED after a builder call, the launcher resumes
+  that builder's own session (`claude -p --resume <session_id>`) with
+  `prompts/baseline-fix.md` — which runs were RED, their commands and the
+  last 150 lines of each log — before scope, reviewer or mutations, and runs
+  the baseline again on the head the fix leaves, `BASELINE_FIXES` times at
+  most (default 2; 0 is the fleet before the loop). Why a harness loop beats
+  the builder's own run: the harness's run is the only one that counts,
+  clean tree and fresh install, so the builder's copy proved less and cost
+  every round, where the loop costs only in a RED one; the resumed session
+  already holds the code and the story, so a fix is minutes, not a new
+  round; and the fix comes before the reviewer and the mutations, so a RED
+  costs a call and a baseline instead of a whole 45–60 min round. A fix
+  that commits nothing ends the loop and the RED fails the round as before.
+  The record is the round's evidence — `baseline-red-<n>/` beside
+  `baseline/`, `builder-fix-<n>.json`, the fix's words after the builder's
+  in `builder.md` — and the log; the Machine block's lines are unchanged,
+  its builder and baseline seconds summing every call and every run (case
+  155).
 - **A bot job that outlives the poll is a unit of its own.** `/merge`
   starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
   child forked inside the poll was killed with the poll's cgroup, seconds

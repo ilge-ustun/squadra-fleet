@@ -22,9 +22,13 @@ Rules that override anything you infer:
   but RED is a finding you still own — fix the test, the patch or the
   selector, commit, regenerate the patch, run it again.
 - The harness runs these commands as the baseline, on your final commit: {{VITEST_CMD}}, then {{BUILD_CMD}}, then {{LINT_CMD}}{{E2E_STEP}}.
-  Run them all yourself before you finish. A build, lint or end-to-end run that goes RED
-  fails the round however green the tests are: a type error the test runner
-  never type-checks is the usual way.
+  It runs them when you hand over, so do not run the whole set yourself: that
+  is minutes the round spends twice. While you work, run the tests you wrote
+  or changed, and a spec or two your change could break. If a run is RED, the
+  harness gives you its log in this same session, before the reviewer runs —
+  at most {{BASELINE_FIXES}} time(s) a round — and a RED left after that fails the round
+  however green the tests are. A type error the test runner never
+  type-checks is the usual RED: the build catches it, the suite does not.
 - An instrument must assert what the acceptance criterion claims. If deleting the
   behaviour under test leaves the suite green, the instrument is absent.
 - Before you hand over, attack your own work the way the reviewer will. It

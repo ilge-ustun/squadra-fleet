@@ -26,6 +26,11 @@
 // prompt, then reviewed again. After MAX_ROUNDS failures the story stops at
 // needs_human. A stopped story does NOT stop the queue.
 //
+// BASELINE FIXES: within a round, a RED baseline goes back to the builder
+// that wrote the code, in its own session, before the reviewer runs —
+// BASELINE_FIXES times at most (default 2; 0 never) — and the baseline is
+// run again on the head it leaves.
+//
 // Status changes are committed and pushed so the queue is visible from a
 // phone. .runs/<id>.json is machine-local (gitignored).
 //
@@ -40,11 +45,11 @@
 // goes to .review/<id>/round-N/ and is committed. See prompts/README.md,
 // "The verdict contract". test/suite.sh exercises every path with fake agents.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { builderModelUsed, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
+import { builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
-import { baselineForReviewer, baselineLine, runBaseline } from './lib/baseline.ts';
+import { baselineCommands, baselineForBuilder, baselineForReviewer, baselineGreen, baselineLine, redSteps, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
@@ -58,6 +63,7 @@ import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
+import type { Baseline } from './lib/types.ts';
 import { computeVerdict } from './lib/verdict.ts';
 import { byCodePoint, nextToRun } from './status.ts';
 
@@ -199,10 +205,14 @@ export interface Knobs {
   reviewerRetryMin: number;
   /** The model Claude reviews with after a human's /fallback. */
   fallbackReviewerModel: string;
+  /** How many times a round's RED baseline goes back to its builder, in the
+   *  builder's own session, before the reviewer runs. 0: never — the RED
+   *  fails the round at once. */
+  baselineFixes: number;
 }
 
-/** `${X:-default}`: unset or empty means the default. The three numbers
- *  must be numbers: a name or `30m` is a die — pinned. */
+/** `${X:-default}`: unset or empty means the default. The numbers must be
+ *  numbers: a name or `30m` is a die — pinned. */
 export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
   const v = (k: string, d: string): string => env[k] || d;
   const num = (k: string, raw: string, re: RegExp): number => {
@@ -226,6 +236,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
     notifyCmd: v('FLEET_NOTIFY_CMD', `bash ${fleetHome}/fleet telegram send`),
     reviewerRetryMin: num('REVIEWER_RETRY_MIN', v('REVIEWER_RETRY_MIN', '60'), /^[0-9]+$/),
     fallbackReviewerModel: v('FALLBACK_REVIEWER_MODEL', 'opus'),
+    baselineFixes: num('BASELINE_FIXES', v('BASELINE_FIXES', '2'), /^[0-9]+$/),
   };
 }
 
@@ -464,14 +475,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables the prompts are rendered with, as the round goes on.
-    const state = { rules: '', headSha: '', round: '', baseline: '' };
+    const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '' };
     const render = (file: string): string => {
       const vars: RenderVars = {
         STORY_ID: storyId, RULES: state.rules, REVIEW_TEXT: reviewText, STORY_TEXT: storyText, STORY_BASE: storyBase,
         HEAD_SHA: state.headSha, BASE_SHA: baseSha, ROUND: state.round, REPO_RULES_TEXT: repoRulesText,
         VITEST_CMD: cfg.vitestCmd, BUILD_CMD: cfg.buildCmd, LINT_CMD: cfg.lintCmd, CHECK_MUTATION: checkMutation,
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
-        BASELINE: state.baseline,
+        BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed,
       };
       let r;
       try {
@@ -493,6 +504,86 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     writeFileSync(newFile, (roundStart > 0 || resumeAtReview) && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
     let verdict = '';
     let round = roundStart;
+
+    /** One builder call and what follows it, the same for the round's call
+     *  and for a baseline fix that resumes its session: a timeout is a
+     *  needs_human die; Claude refusing the call stops the story with the
+     *  round not counted (EXIT_AGENT_REFUSED); a question in .blocked/
+     *  blocks it (exit 0). Otherwise its object is kept as `json` in the
+     *  round's evidence, and the TDD evidence it handed over is copied to
+     *  round-N/mutations — beside what is there, or for a fix in place of
+     *  it: a fix moves the head, and patches made before it do not apply. */
+    type BuilderCall =
+      | { stop: true; code: number }
+      | { stop: false; secs: number; isError: string; message: string; used: string; sessionId: string; handedOver: boolean };
+    const builderCall = async (o: {
+      round: number; evidenceDir: string; prompt: string; model: string; resume?: string; replaceMutations?: boolean;
+      /** In the die and the warnings: `the builder`, `the builder's baseline fix 1`. */
+      who: string;
+      /** In the shorter lines: `builder`, `baseline fix 1`. */
+      tag: string;
+      json: string;
+    }): Promise<BuilderCall> => {
+      const t0 = secs();
+      const b = await runBuilder({
+        wt: builderWt, prompt: o.prompt, model: o.model, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout,
+        ...(o.resume !== undefined ? { resume: o.resume } : {}),
+      });
+      const took = secs() - t0;
+      if (b.timedOut) {
+        setStatus(storyId, 'needs_human');
+        throw new Die(`round ${o.round}: ${o.who} exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
+      }
+      const buildOut = capture(b.output);
+      const parsed = parseBuilderOutput(buildOut);
+      // The whole object, not just the two fields read here: what the CLI
+      // reports about cost and duration is in there.
+      writeFileSync(`${o.evidenceDir}/${o.json}`, `${parsed.evidence}\n`);
+
+      // Claude refused the call (a usage limit): the human decided that a
+      // message is all that follows. The round is not counted; anything
+      // committed before the refusal stays on the branch, unreviewed — a
+      // half-built round is not a round. The review file is untouched.
+      const refused = claudeRefusal(buildOut);
+      if (refused !== undefined) {
+        warn(`round ${o.round}: Claude refused ${o.who} — ${refused}`);
+        rmSync(newFile, { force: true });
+        setStoryField(root, storyId, 'round', String(o.round - 1));
+        setStatus(storyId, 'needs_human', builderRefusedMessage({ repo: cfg.name, id: storyId, refusal: refused }));
+        writeFileSync(runFile, runFileEnd(storyId, 'BUILDER_REFUSED', o.round - 1));
+        return { stop: true, code: EXIT_AGENT_REFUSED };
+      }
+      if (parsed.isError === 'parse-failed') {
+        warn(`${o.tag} output was not JSON — first 20 lines of raw output:`);
+        out(head20(buildOut));
+      }
+
+      if (isFile(`${builderWt}/.blocked/${storyId}.md`)) {
+        copyFileSync(`${builderWt}/.blocked/${storyId}.md`, `${root}/.blocked/${storyId}.md`);
+        warn('BLOCKED — agent asked a question:');
+        out(readFileSync(`${root}/.blocked/${storyId}.md`, 'utf8'));
+        setStatus(storyId, 'blocked');
+        rmSync(newFile, { force: true });
+        out('\n');
+        out(`answer by editing .stories/${storyId}.md, then set status back to ready\n`);
+        return { stop: true, code: 0 };
+      }
+
+      // The builder's own TDD evidence, in the reviewer's format, copied
+      // before the reviewer runs so one runner judges both.
+      let handedOver = false;
+      if (isDir(`${builderWt}/.review-out/mutations`)) {
+        if (o.replaceMutations === true) rmSync(`${o.evidenceDir}/mutations`, { recursive: true, force: true });
+        mkdirSync(`${o.evidenceDir}/mutations`, { recursive: true });
+        cpSync(`${builderWt}/.review-out/mutations`, `${o.evidenceDir}/mutations`, { recursive: true });
+        rmSync(`${builderWt}/.review-out`, { recursive: true, force: true });
+        handedOver = true;
+        log(`${o.tag} handed over TDD evidence`);
+      }
+      return {
+        stop: false, secs: took, isError: parsed.isError, message: parsed.message, used: builderModelUsed(buildOut), sessionId: builderSessionId(buildOut), handedOver,
+      };
+    };
 
     while (round < roundCeiling) {
       round += 1;
@@ -518,6 +609,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let buildErr: string;
       let builderUsed = '';
       let buildMsg: string;
+      let sessionId = '';
       // The first round of a resumed story reviews what its builder left
       // before the refusal; what that builder said is in this round's
       // evidence already, and so is its TDD handover.
@@ -535,65 +627,18 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         log('REVIEW_ONLY: skipping the builder');
       } else {
         log(`builder: ${roundModel}`);
-        let t0 = secs();
-        const b = await runBuilder({ wt: builderWt, prompt: buildPrompt, model: roundModel, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
-        tBuild = secs() - t0;
-        t0 = 0;
-        if (b.timedOut) {
-          setStatus(storyId, 'needs_human');
-          throw new Die(`round ${round}: the builder exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
-        }
-        const buildOut = capture(b.output);
-        builderUsed = builderModelUsed(buildOut);
-        const parsed = parseBuilderOutput(buildOut);
-        buildErr = parsed.isError;
-        buildMsg = parsed.message;
-        // The whole object, not just the two fields read here: what the CLI
-        // reports about cost and duration is in there.
-        writeFileSync(`${evidenceDir}/builder.json`, `${parsed.evidence}\n`);
-
-        // Claude refused the call (a usage limit): the human decided that a
-        // message is all that follows. The round is not counted; anything
-        // committed before the refusal stays on the branch, unreviewed — a
-        // half-built round is not a round. The review file is untouched.
-        const refused = claudeRefusal(buildOut);
-        if (refused !== undefined) {
-          warn(`round ${round}: Claude refused the builder — ${refused}`);
-          rmSync(newFile, { force: true });
-          setStoryField(root, storyId, 'round', String(round - 1));
-          setStatus(storyId, 'needs_human', builderRefusedMessage({ repo: cfg.name, id: storyId, refusal: refused }));
-          writeFileSync(runFile, runFileEnd(storyId, 'BUILDER_REFUSED', round - 1));
-          return EXIT_AGENT_REFUSED;
-        }
-        if (buildErr === 'parse-failed') {
-          warn('builder output was not JSON — first 20 lines of raw output:');
-          out(head20(buildOut));
-        }
-
-        if (isFile(`${builderWt}/.blocked/${storyId}.md`)) {
-          copyFileSync(`${builderWt}/.blocked/${storyId}.md`, `${root}/.blocked/${storyId}.md`);
-          warn('BLOCKED — agent asked a question:');
-          out(readFileSync(`${root}/.blocked/${storyId}.md`, 'utf8'));
-          setStatus(storyId, 'blocked');
-          rmSync(newFile, { force: true });
-          out('\n');
-          out(`answer by editing .stories/${storyId}.md, then set status back to ready\n`);
-          return 0;
-        }
-
-        // The builder's own TDD evidence, in the reviewer's format, copied
-        // before the reviewer runs so one runner judges both.
-        if (isDir(`${builderWt}/.review-out/mutations`)) {
-          mkdirSync(`${evidenceDir}/mutations`, { recursive: true });
-          cpSync(`${builderWt}/.review-out/mutations`, `${evidenceDir}/mutations`, { recursive: true });
-          rmSync(`${builderWt}/.review-out`, { recursive: true, force: true });
-          builderHandedOver = true;
-          log('builder handed over TDD evidence');
-        }
+        const c = await builderCall({ round, evidenceDir, prompt: buildPrompt, model: roundModel, who: 'the builder', tag: 'builder', json: 'builder.json' });
+        if (c.stop) return c.code;
+        tBuild = c.secs;
+        builderUsed = c.used;
+        buildErr = c.isError;
+        buildMsg = c.message;
+        sessionId = c.sessionId;
+        builderHandedOver = c.handedOver;
       }
 
-      const headSha = revParse(builderWt, 'HEAD');
-      const roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
+      let headSha = revParse(builderWt, 'HEAD');
+      let roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
       const totalCommits = revListCount(builderWt, `${baseSha}..${headSha}`);
 
       // Postcondition, not self-report: a round is productive if it produced
@@ -605,32 +650,86 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       log(`builder: ${roundCommits} commit(s) this round, ${totalCommits} total, head ${headSha.slice(0, 8)}`);
 
       // ── reviewer: clean worktree at the builder's head ─────────────────
+      // The baseline runs in it before the reviewer is asked anything; the
+      // tree is made afresh at every head the baseline checks.
 
-      cleanupReviewer();
-      log(`reviewer worktree at ${headSha.slice(0, 8)}`);
-      if (worktreeAdd(root, reviewerWt, { detach: headSha }) !== 0) throw new Die('reviewer worktree failed');
-      seedEnv(reviewerWt);
-      if (runBashTo(cfg.installCmd, { cwd: reviewerWt, logFile: `${root}/.runs/${storyId}-install-reviewer.log` }) !== 0) {
-        throw new Die(`install failed in the reviewer tree (${cfg.installCmd}) — see .runs/${storyId}-install-reviewer.log`);
+      const baselineAt = (sha: string): Baseline => {
+        cleanupReviewer();
+        log(`reviewer worktree at ${sha.slice(0, 8)}`);
+        if (worktreeAdd(root, reviewerWt, { detach: sha }) !== 0) throw new Die('reviewer worktree failed');
+        seedEnv(reviewerWt);
+        if (runBashTo(cfg.installCmd, { cwd: reviewerWt, logFile: `${root}/.runs/${storyId}-install-reviewer.log` }) !== 0) {
+          throw new Die(`install failed in the reviewer tree (${cfg.installCmd}) — see .runs/${storyId}-install-reviewer.log`);
+        }
+        const t = secs();
+        const b = runBaseline({
+          wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`, installCmd: cfg.installCmd,
+          vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
+          ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
+          ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
+        });
+        tBase += secs() - t;
+        log(`baseline: ${baselineLine(b)}`);
+        return b;
+      };
+      let baseline = baselineAt(headSha);
+
+      // A RED baseline after a builder call goes back to that builder, in
+      // its own session (--resume), before anyone reviews the round — at
+      // most BASELINE_FIXES times. The harness runs the baseline on every
+      // head anyway, so the builder no longer runs the whole of it before
+      // handing over (rules.md); this loop is how a RED still reaches it in
+      // time. The RED run is kept as baseline-red-<n>/, the call's object
+      // as builder-fix-<n>.json, and what it said follows the builder's
+      // message in builder.md and the round's section. A fix that commits
+      // nothing ends the loop, and the RED fails the round as it always has.
+      let fixes = 0;
+      while (!reviewOnlyRound && !baselineGreen(baseline) && fixes < knobs.baselineFixes) {
+        if (sessionId === '') {
+          warn('baseline RED — the builder\'s output named no session to resume, so it cannot fix it; the RED stands');
+          break;
+        }
+        fixes += 1;
+        const red = `${evidenceDir}/baseline-red-${fixes}`;
+        rmSync(red, { recursive: true, force: true });
+        renameSync(`${evidenceDir}/baseline`, red);
+        const steps = redSteps(baseline).join(', ');
+        log(`baseline RED (${steps}) — back to the builder, fix ${fixes} of ${knobs.baselineFixes}`);
+        const redSummary = `${red}/test.summary.json`;
+        state.baselineRed = `This is fix ${fixes} of ${knobs.baselineFixes}.\n\n${baselineForBuilder(baseline, {
+          summaryText: isFile(redSummary) ? readFileSync(redSummary, 'utf8') : undefined, logsDir: red, commands: baselineCommands(cfg),
+        })}`;
+        const before = headSha;
+        const c = await builderCall({
+          round, evidenceDir, prompt: render('baseline-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
+          who: `the builder's baseline fix ${fixes}`, tag: `baseline fix ${fixes}`, json: `builder-fix-${fixes}.json`,
+        });
+        if (c.stop) return c.code;
+        tBuild += c.secs;
+        if (c.sessionId !== '') sessionId = c.sessionId;
+        if (c.handedOver) builderHandedOver = true;
+        buildMsg = `${buildMsg}\n\n(baseline fix ${fixes} of ${knobs.baselineFixes}: the harness's baseline was RED (${steps}) at ${before.slice(0, 8)}; the builder, resumed, said:)\n${c.message}`;
+        headSha = revParse(builderWt, 'HEAD');
+        if (headSha === before) {
+          warn(`baseline fix ${fixes} made no commit — the RED baseline stands`);
+          cpSync(red, `${evidenceDir}/baseline`, { recursive: true });
+          break;
+        }
+        roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
+        log(`baseline fix ${fixes}: ${roundCommits} commit(s) this round, head ${headSha.slice(0, 8)}`);
+        baseline = baselineAt(headSha);
       }
 
-      // What this round changed, computed once: the baseline and the scope
-      // check read the same answer.
+      // What this round changed, at the head the reviewer reviews: the scope
+      // check reads it.
       const changedPaths = diffNameOnly(builderWt, `${baseSha}..${headSha}`);
       let t0 = secs();
-      const baseline = runBaseline({
-        wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`, installCmd: cfg.installCmd,
-        vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
-        ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
-        ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
-      });
-      log(`baseline: ${baselineLine(baseline)}`);
       const summaryFile = `${evidenceDir}/baseline/test.summary.json`;
       state.baseline = baselineForReviewer(baseline, isFile(summaryFile) ? readFileSync(summaryFile, 'utf8') : undefined, `${evidenceDir}/baseline`);
       const scope = checkScope({ deny: storyField(root, storyId, 'scope_deny'), changed: changedPaths, storyId });
       writeFileSync(`${evidenceDir}/scope.txt`, scope.fileText);
       log(scope.logLine);
-      tBase = secs() - t0;
+      tBase += secs() - t0;
 
       state.headSha = headSha;
       const reviewPrompt = render('review.md');

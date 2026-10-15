@@ -9,10 +9,11 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 | file | placeholders |
 |---|---|
-| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` |
+| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` |
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
+| `baseline-fix.md` | `{{BASELINE_RED}}` `{{CHECK_MUTATION}}` `{{STORY_ID}}` |
 | `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` |
 | `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
 
@@ -22,9 +23,21 @@ Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 `{{BASELINE}}` is the harness's own baseline at the head under review —
 its line, the suite's count and failed names, and where its logs are
 (`baselineForReviewer` in `ts/src/lib/baseline.ts`) — so the reviewer does
-not spend minutes re-running what the harness already ran (L-39). It is the
-last replacement, so nothing in it is substituted, and it is guarded: a
-review prompt is never rendered without it.
+not spend minutes re-running what the harness already ran (L-39). It is
+replaced last but for `{{BASELINE_RED}}`, which no review prompt uses, so
+nothing in it is substituted, and it is guarded: a review prompt is never
+rendered without it.
+
+`baseline-fix.md` goes to the round's builder in its own session
+(`claude -p --resume <session_id>`) when the harness's baseline is RED at
+its head, before the reviewer runs, `BASELINE_FIXES` times at most (default
+2). It carries no story and no rules — that session holds both already.
+`{{BASELINE_RED}}` is which fix this is, the baseline line, and for each RED
+run its command and the last 150 lines of its log (`baselineForBuilder` in
+`ts/src/lib/baseline.ts`); like `{{BASELINE}}` it is replaced last and
+guarded. `{{BASELINE_FIXES}}` is the knob's value, so `rules.md` can tell the
+builder how often a RED comes back to it instead of asking it to run the
+whole baseline itself.
 
 ## The verdict contract
 
@@ -100,9 +113,11 @@ nothing, or a shell command in a `.test` file), `PATCH_INVALID`,
                            each with a ### Machine block before the prose
 .review/<id>/round-N/      committed with the status
   baseline/                test.summary.json (trimmed by ts/src/lib/baseline.ts), build.log, lint.log
+  baseline-red-N/          the RED baseline the N-th baseline fix was given, as baseline/ was
+  builder-fix-N.json       that fix call's object, as builder.json
   mutations/               the reviewer's files, plus a .result per mutation
   reviewer.md              the reviewer's prose, verbatim
-  builder.md               the builder's result message
+  builder.md               the builder's result message, then each baseline fix's
 .runs/                     raw vitest JSON and logs — machine-local, gitignored,
                            re-derivable from patch + HEAD SHA
 ```

@@ -20,6 +20,7 @@ cd ~/work/fleet
 ./fleet status <repo> <id>                       # the latest round's Machine block
 sed -n 1,40p <target>/.review/<id>.md            # header, verdict (line 3), the block
 ls <target>/.review/<id>/round-N/                # baseline/ mutations/ probes/ reviewer.md builder.md
+                                                 # baseline-red-N/ builder-fix-N.json: a RED the builder was sent back to fix
 ```
 
 The block, per round:
@@ -37,7 +38,7 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
 
 | on `computed:` | meaning | who fixes it |
 |---|---|---|
-| `baseline test/build/lint RED` | red at the builder's head | the builder, next round |
+| `baseline test/build/lint RED` | red at the builder's head, after the builder was sent its log `BASELINE_FIXES` times in the round (`baseline-red-N/`, `builder-fix-N.json`, the fix's words in `builder.md`) — or its fix committed nothing | the builder, next round |
 | `scope VIOLATION: <paths>` | a `scope_deny` path changed | the builder — or the story, if the deny was wrong |
 | `ACn <slug> GREEN` | the mutation survived: no instrument asserts that behaviour | the builder: a real test |
 | `ACn <slug> PRE_RED` | the selector fails before the mutation | the builder's test is broken, or the base is |
