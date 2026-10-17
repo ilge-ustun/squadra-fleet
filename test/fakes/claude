@@ -65,6 +65,10 @@
 # FAKE_BUILDER_MUTATIONS asks for some, is slugged `tdd-fixed` instead of
 # `tdd-observed-red`, so a case can tell which call handed over the set.
 #
+# FAKE_BUILDER_SEQ="commit blocked" gives the fresh (not resumed) calls one
+# mode each, in order, the last word for every call after; FAKE_BUILDER is
+# still required, and is what a resumed call falls back to.
+#
 set -euo pipefail
 : "${FAKE_BUILDER:?FAKE_BUILDER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
@@ -122,6 +126,11 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
 session="${resume:-fake-session-$n}"
 mode="$FAKE_BUILDER"; slug=tdd-observed-red
+if [[ -n "${FAKE_BUILDER_SEQ:-}" && -z "$resume" ]]; then
+  read -r -a seq <<< "$FAKE_BUILDER_SEQ"
+  fresh="$({ grep -L -- '^--resume$' "$FAKE_TRACE_DIR"/claude-args-* || true; } | wc -l)"   # this call's argv is written
+  mode="${seq[$(( fresh <= ${#seq[@]} ? fresh - 1 : ${#seq[@]} - 1 ))]}"
+fi
 if [[ -n "$resume" ]]; then mode="${FAKE_BUILDER_RESUMED:-$FAKE_BUILDER}"; slug=tdd-fixed; fi
 
 case "$mode" in

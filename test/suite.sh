@@ -3539,7 +3539,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_148_bot_job_is_its_own_unit case_149_test_deploy
        case_150_bot_testdeploy case_151_refused_push_follows_origin
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
-       case_155_baseline_fix_in_the_round)
+       case_155_baseline_fix_in_the_round
+       case_158_review_keeps_rounds_across_a_stop)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4617,6 +4618,33 @@ case_155_baseline_fix_in_the_round() {
   assert_eq "$(calls claude)" 1 "no fix call: a fresh builder is not the one that wrote the code"
   assert_eq "$(review_line 3)" "verdict: FAIL" "the RED vetoes"
   assert_grep 'no session to resume' "$LOG" "said"
+}
+
+# Red when the launcher writes .review/<id>.md only at the end of a launch:
+# a round that stops the launch early — a question in .blocked/, here —
+# took every section the launch had written with it, and the next launch
+# then read no prior FAIL, so its builder got the round-1 prompt without
+# the findings (khaita 114: round 1 FAILed, round 2 blocked, and its review
+# showed Round 3 alone).
+case_158_review_keeps_rounds_across_a_stop() {
+  CASE="158 a round-2 question keeps round 1's section and findings"; fixture c158
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_SEQ="commit blocked" FAKE_REVIEWER=FAIL
+  assert_eq "$(field status)" blocked "round 2 asked a question"
+  assert_file "$REPO/.review/$STORY.md" "the review file is written"
+  assert_grep '^## Round 1 — FAIL$' "$REPO/.review/$STORY.md" "round 1's section is in it"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "line 3 is the last computed verdict"
+  assert_eq "$(review_line 4)" "rounds: 1 of 2" "and the rounds judged so far"
+  assert_grep '^## Round 1 — FAIL$' <(git -C "$REPO" show HEAD:.review/$STORY.md) "committed with the blocked status"
+
+  # The answer: ready again, and the question gone from the worktree, as
+  # the real builder removes it (khaita 114, round 3).
+  set_ready; rm -f "$FX/wt-$STORY/.blocked/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$(field status)" done "the answered story passes"
+  assert_grep 'REJECTED' "$TRACE/claude-prompt-3" "round 3's builder is told round 1 was rejected…"
+  assert_grep '^## Round 1 — FAIL$' "$TRACE/claude-prompt-3" "…and given its findings"
+  assert_grep '^## Round 1 — FAIL$' "$REPO/.review/$STORY.md" "the final review keeps round 1"
+  assert_grep '^## Round 3 — PASS$' "$REPO/.review/$STORY.md" "and adds round 3"
 }
 
 for c in "${CASES[@]}"; do
