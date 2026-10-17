@@ -66,6 +66,9 @@
 # `tdd-observed-red`, so a case can tell which call handed over the set.
 # FAKE_BUILDER_MUTATIONS_RESUMED (default: FAKE_BUILDER_MUTATIONS) is the
 # evidence a resumed call hands over — a tdd fix that makes a green pair red.
+# Round 2 on resumes the round before's session too (launch.ts), and is
+# the same kind of call. FAKE_BUILDER_RESUME=fail is a session the CLI
+# cannot find: one line of text instead of its object, exit 1, nothing done.
 #
 # FAKE_BUILDER_SEQ="commit blocked" gives the fresh (not resumed) calls one
 # mode each, in order, the last word for every call after; FAKE_BUILDER is
@@ -127,6 +130,10 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 # nowhere else.
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
 session="${resume:-fake-session-$n}"
+if [[ -n "$resume" && "${FAKE_BUILDER_RESUME:-}" == fail ]]; then
+  echo "No conversation found with session ID: $resume"
+  exit 1
+fi
 mode="$FAKE_BUILDER"; slug=tdd-observed-red
 evidence="${FAKE_BUILDER_MUTATIONS:-none}"
 if [[ -n "${FAKE_BUILDER_SEQ:-}" && -z "$resume" ]]; then

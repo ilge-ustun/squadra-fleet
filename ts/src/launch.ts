@@ -26,6 +26,13 @@
 // prompt, then reviewed again. After MAX_ROUNDS failures the story stops at
 // needs_human. A stopped story does NOT stop the queue.
 //
+// SESSIONS: within one launch, round 2 on resumes the builder's session and
+// the reviewer's thread from the round before — both have read the story and
+// the code already — and each still gets its full prompt, so a session that
+// cannot be taken up is started afresh with nothing lost. The reviewer
+// reviews the whole story again either way. The Machine block's sessions:
+// line says which ran.
+//
 // BASELINE FIXES: within a round, a RED baseline goes back to the builder
 // that wrote the code, in its own session, before the reviewer runs —
 // BASELINE_FIXES times at most (default 2; 0 never) — and the baseline is
@@ -52,7 +59,9 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
+import {
+  builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, reviewerThreadId, reviewerTurnStarted, runBuilder, runReviewer,
+} from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
 import { baselineCommands, baselineForBuilder, baselineForReviewer, baselineGreen, baselineLine, redSteps, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -111,6 +120,32 @@ export const isHaiku = (m: string): boolean => m === 'haiku' || m.startsWith('cl
 export function builderModelForRound(model: string, round: number, fallback: string): string {
   if (round <= 1 || !isHaiku(model)) return model;
   return isHaiku(fallback) ? 'sonnet' : fallback;
+}
+
+/** A session an agent ran in, and the model it ran on. */
+export interface PrevSession {
+  id: string;
+  model: string;
+}
+
+/** Which session a round's agent takes up: the one the round before ran
+ *  in, when there was one, it was named, and the model is the same (haiku
+ *  builds one round; a session is not carried across models). The note is
+ *  the Machine block's word for it. */
+export function sessionToResume(prev: PrevSession | undefined, model: string): { resume?: string; note: string } {
+  if (prev === undefined) return { note: 'fresh' };
+  if (prev.id === '') return { note: 'fresh (no session recorded)' };
+  if (prev.model !== model) return { note: `fresh (model changed: ${prev.model} → ${model})` };
+  return { resume: prev.id, note: 'resumed' };
+}
+
+/** A resumed builder call that did nothing: no clean finish, no commit, no
+ *  handover — the session could not be taken up (`claude --resume` on an id
+ *  it cannot find prints a line, not its object). The round's builder then
+ *  starts afresh, as every round did before. A call that committed or
+ *  handed over ran, whatever it reported; the round judges that. */
+export function builderResumeFailed(o: { isError: string; commits: number; handedOver: boolean }): boolean {
+  return o.isError !== 'false' && o.commits === 0 && !o.handedOver;
 }
 
 /** `grep -qE '^verdict: (FAIL|UNPARSEABLE|SPEC)'` — any line. */
@@ -489,14 +524,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables the prompts are rendered with, as the round goes on.
-    const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '', tddRed: '' };
+    const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '', tddRed: '', reviewedSha: '' };
     const render = (file: string): string => {
       const vars: RenderVars = {
         STORY_ID: storyId, RULES: state.rules, REVIEW_TEXT: reviewText, STORY_TEXT: storyText, STORY_BASE: storyBase,
         HEAD_SHA: state.headSha, BASE_SHA: baseSha, ROUND: state.round, REPO_RULES_TEXT: repoRulesText,
         VITEST_CMD: cfg.vitestCmd, BUILD_CMD: cfg.buildCmd, LINT_CMD: cfg.lintCmd, CHECK_MUTATION: checkMutation,
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
-        BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed,
+        BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed, REVIEWED_SHA: state.reviewedSha,
         TDD_FIXES: String(knobs.tddFixes), TDD_RED: state.tddRed,
       };
       let r;
@@ -609,6 +644,11 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       };
     };
 
+    // The sessions the round before ran in, for this launch only: nothing
+    // outside this process remembers them, so a relaunch starts afresh.
+    let prevBuilder: PrevSession | undefined;
+    let prevReviewer: (PrevSession & { head: string }) | undefined;
+
     while (round < roundCeiling) {
       round += 1;
       setStoryField(root, storyId, 'round', String(round));
@@ -634,6 +674,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let builderUsed = '';
       let buildMsg: string;
       let sessionId = '';
+      let builderNote = 'none';
       // The first round of a resumed story reviews what its builder left
       // before the refusal; what that builder said is in this round's
       // evidence already, and so is its TDD handover.
@@ -650,10 +691,26 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         buildMsg = '(REVIEW_ONLY: no builder ran this round; reviewing the existing head)';
         log('REVIEW_ONLY: skipping the builder');
       } else {
-        log(`builder: ${roundModel}`);
-        const c = await builderCall({ round, evidenceDir, prompt: buildPrompt, model: roundModel, who: 'the builder', tag: 'builder', json: 'builder.json' });
+        // Round 2 on: the builder of the round before, in its own session,
+        // with the full round-2 prompt. A session that cannot be taken up is
+        // started afresh — what every round did before.
+        const take = sessionToResume(prevBuilder, roundModel);
+        log(`builder: ${roundModel}${take.resume !== undefined ? `, resuming round ${round - 1}'s session` : prevBuilder !== undefined ? ` — ${take.note}` : ''}`);
+        let c = await builderCall({
+          round, evidenceDir, prompt: buildPrompt, model: roundModel, ...(take.resume !== undefined ? { resume: take.resume } : {}), who: 'the builder', tag: 'builder', json: 'builder.json',
+        });
         if (c.stop) return c.code;
         tBuild = c.secs;
+        builderNote = take.note;
+        if (take.resume !== undefined && builderResumeFailed({ isError: c.isError, commits: revListCount(builderWt, `${roundStartSha}..HEAD`), handedOver: c.handedOver })) {
+          warn(`round ${round}: the builder's resumed session did nothing (is_error=${c.isError}) — a fresh session builds the round; that call's output is kept as builder-resume-failed.json`);
+          renameSync(`${evidenceDir}/builder.json`, `${evidenceDir}/builder-resume-failed.json`);
+          const fresh = await builderCall({ round, evidenceDir, prompt: buildPrompt, model: roundModel, who: 'the builder', tag: 'builder', json: 'builder.json' });
+          if (fresh.stop) return fresh.code;
+          c = fresh;
+          tBuild += c.secs;
+          builderNote = 'fresh (resume failed)';
+        }
         builderUsed = c.used;
         buildErr = c.isError;
         buildMsg = c.message;
@@ -820,6 +877,10 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         tddEntries.push(`fix ${tddFixes}`);
       }
 
+      // The session the next round's builder takes up: this round's, as its
+      // last baseline fix left it.
+      if (!reviewOnlyRound) prevBuilder = { id: sessionId, model: roundModel };
+
       // What this round changed, at the head the reviewer reviews: the scope
       // check reads it.
       const changedPaths = diffNameOnly(builderWt, `${baseSha}..${headSha}`);
@@ -839,7 +900,12 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const reviewerCli = fallbackReviewer ? 'claude' : 'codex';
       const reviewerModelAsked = fallbackReviewer ? knobs.fallbackReviewerModel : knobs.reviewerModel;
       const codexHome = process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex');
-      log(fallbackReviewer ? `reviewer: claude ${reviewerModelAsked} (fallback)` : `reviewer: codex${reviewerModelAsked !== '' ? ` ${reviewerModelAsked}` : ''}`);
+      // codex takes up its thread from the round before: the whole review
+      // again, at this head, prefaced by what carries over (review-resumed.md).
+      const reviewerTake = fallbackReviewer ? { note: 'fresh' } : sessionToResume(prevReviewer, reviewerModelAsked);
+      let reviewerNote = reviewerTake.note;
+      log(fallbackReviewer ? `reviewer: claude ${reviewerModelAsked} (fallback)` : `reviewer: codex${reviewerModelAsked !== '' ? ` ${reviewerModelAsked}` : ''}${
+        reviewerTake.resume !== undefined ? `, resuming round ${round - 1}'s thread` : prevReviewer !== undefined ? ` — ${reviewerTake.note}` : ''}`);
       t0 = secs();
       let reviewerUsed: string;
       let refusal: string | undefined;
@@ -862,9 +928,26 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         reviewerSaid = parsed.isError === '' || parsed.message === 'no result field' ? '' : parsed.message;
       } else {
         const reviewerStartMs = Date.now();
-        const rv = await runReviewer({
-          wt: reviewerWt, prompt: reviewPrompt, model: reviewerModelAsked, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
+        let resumedPrompt = reviewPrompt;
+        if (reviewerTake.resume !== undefined && prevReviewer !== undefined) {
+          state.reviewedSha = prevReviewer.head;
+          resumedPrompt = `${render('review-resumed.md')}\n\n${reviewPrompt}`;
+        }
+        let rv = await runReviewer({
+          wt: reviewerWt, prompt: resumedPrompt, model: reviewerModelAsked, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
+          ...(reviewerTake.resume !== undefined ? { resume: reviewerTake.resume } : {}),
         });
+        // A thread codex cannot take up never starts a turn — not a refusal,
+        // which starts one and fails it, and not the reviewer's silence. A
+        // fresh session reviews instead.
+        if (reviewerTake.resume !== undefined && !rv.timedOut && !reviewerTurnStarted(rv.stdout)) {
+          warn(`round ${round}: codex could not resume the reviewer's thread (exit ${rv.status ?? 'by signal'}) — a fresh session reviews; its stderr is kept as reviewer-resume-failed.stderr`);
+          renameSync(`${evidenceDir}/reviewer.stderr`, `${evidenceDir}/reviewer-resume-failed.stderr`);
+          rv = await runReviewer({
+            wt: reviewerWt, prompt: reviewPrompt, model: reviewerModelAsked, timeoutSec: knobs.agentTimeout, stderrFile: `${evidenceDir}/reviewer.stderr`,
+          });
+          reviewerNote = 'fresh (resume failed)';
+        }
         tReview = secs() - t0;
         reviewerUsed = reviewerModelUsed({ codexHome, cwd: resolve(reviewerWt), sinceMs: reviewerStartMs });
         if (rv.timedOut) {
@@ -872,6 +955,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
           throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
         }
         reviewRaw = capture(rv.stdout);
+        prevReviewer = { id: reviewerThreadId(reviewRaw), model: reviewerModelAsked, head: headSha };
         refusal = reviewerRefusal(reviewRaw);
         refusalNote = `(reviewer unavailable, codex exit ${rv.status ?? 'by signal'})`;
         if (refusal !== undefined) writeFileSync(`${evidenceDir}/reviewer.unavailable.jsonl`, `${reviewRaw}\n`);
@@ -900,7 +984,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         appendFileSync(newFile, renderRoundSection({
           round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(now),
           baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-          builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+          builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed,
+          sessions: `builder ${builderNote} | reviewer ${reviewerNote}`, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
           ...(tddEntries.length > 0 ? { tdd: tddEntries.join(' | ') } : {}),
           model: 'UNAVAILABLE', computed: 'UNAVAILABLE', reasons: [`reviewer unavailable: ${refusal}`], mutRows: [], probeRows: [],
           builderText: readFileSync(`${evidenceDir}/builder.md`), reviewerText: readFileSync(`${evidenceDir}/reviewer.md`),
@@ -970,7 +1055,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       appendFileSync(newFile, renderRoundSection({
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
-        builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed,
+        sessions: `builder ${builderNote} | reviewer ${reviewerNote}`, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
         ...(tddEntries.length > 0 ? { tdd: tddEntries.join(' | ') } : {}),
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));

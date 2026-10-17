@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  Die, acIds, builderModelForRound, capture, builderRefusedMessage, chooseBuildPrompt, clockTime, dropTrailingUnavailable, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
-  runFileStart, splitCommand,
+  Die, acIds, builderModelForRound, builderResumeFailed, capture, builderRefusedMessage, chooseBuildPrompt, clockTime, dropTrailingUnavailable, finalReviewHeader, pausedMessage, head20, keepEarlierRounds, priorFailingReview, readKnobs, runFileEnd,
+  runFileStart, sessionToResume, splitCommand,
 } from './launch.ts';
 
 // The launcher's pure parts. The loop itself is proven by test/suite.sh's
@@ -205,5 +205,32 @@ describe('builderModelForRound — a haiku story gets one round (24 Sep)', () =>
   it('other models keep their model every round', () => {
     expect(builderModelForRound('opus', 2, 'sonnet')).toBe('opus');
     expect(builderModelForRound('sonnet', 5, 'sonnet')).toBe('sonnet');
+  });
+});
+
+describe('sessionToResume — round 2 on takes up the session the round before ran in (case 157)', () => {
+  it('the first round of a launch has none: fresh', () => {
+    expect(sessionToResume(undefined, 'sonnet')).toEqual({ note: 'fresh' });
+  });
+  it('the round before ran on the same model and named its session: resumed', () => {
+    expect(sessionToResume({ id: 'fake-session-1', model: 'sonnet' }, 'sonnet')).toEqual({ resume: 'fake-session-1', note: 'resumed' });
+    expect(sessionToResume({ id: 't1', model: '' }, '')).toEqual({ resume: 't1', note: 'resumed' });
+  });
+  it('no session recorded, or another model (haiku builds one round): fresh, and why', () => {
+    expect(sessionToResume({ id: '', model: 'sonnet' }, 'sonnet')).toEqual({ note: 'fresh (no session recorded)' });
+    expect(sessionToResume({ id: 'fake-session-1', model: 'haiku' }, 'sonnet')).toEqual({ note: 'fresh (model changed: haiku → sonnet)' });
+  });
+});
+
+describe('builderResumeFailed — a resumed builder call that did nothing is started again afresh', () => {
+  it('an error, no commit and nothing handed over: failed — the session could not be taken up', () => {
+    expect(builderResumeFailed({ isError: '', commits: 0, handedOver: false })).toBe(true);
+    expect(builderResumeFailed({ isError: 'true', commits: 0, handedOver: false })).toBe(true);
+    expect(builderResumeFailed({ isError: 'parse-failed', commits: 0, handedOver: false })).toBe(true);
+  });
+  it('a clean finish, a commit, or a handover: it ran — whatever else happened is the round\'s to judge', () => {
+    expect(builderResumeFailed({ isError: 'false', commits: 0, handedOver: false })).toBe(false);
+    expect(builderResumeFailed({ isError: 'true', commits: 1, handedOver: false })).toBe(false);
+    expect(builderResumeFailed({ isError: 'true', commits: 0, handedOver: true })).toBe(false);
   });
 });

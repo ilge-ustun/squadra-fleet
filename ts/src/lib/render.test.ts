@@ -32,7 +32,7 @@ function render(file: string, vars: RenderVars): string {
 const ALL: RenderVars = {
   STORY_ID: '900', RULES: 'R', REVIEW_TEXT: 'V', STORY_TEXT: 'S', INTENT: 'I', STORY_BASE: 'base', HEAD_SHA: 'h', BASE_SHA: 'b',
   ROUND: '2', REPO_RULES_TEXT: 'RR', VITEST_CMD: 'vt', BUILD_CMD: 'bd', LINT_CMD: 'lt', CHECK_MUTATION: 'cm', BASELINE_FIXES: '2', BASELINE: 'bl',
-  BASELINE_RED: 'br', TDD_FIXES: '3', TDD_RED: 'tr',
+  BASELINE_RED: 'br', REVIEWED_SHA: 'r', TDD_FIXES: '3', TDD_RED: 'tr',
 };
 
 describe('renderPrompt', () => {
@@ -128,6 +128,12 @@ describe('renderPrompt', () => {
     expect(render(f, { TDD_FIXES: '', TDD_RED: 'x' })).toBe('XX tdd.md uses {{TDD_FIXES}} but TDD_FIXES is empty\n');
   });
 
+  it('REVIEWED_SHA is substituted and guarded: a resumed review is never told an empty range (case 157)', () => {
+    const f = prompt('rv.md', 'since {{REVIEWED_SHA}}..{{HEAD_SHA}}\n');
+    expect(render(f, { REVIEWED_SHA: 'aaa', HEAD_SHA: 'bbb' })).toBe('since aaa..bbb');
+    expect(render(f, { REVIEWED_SHA: '', HEAD_SHA: 'bbb' })).toBe('XX rv.md uses {{REVIEWED_SHA}} but REVIEWED_SHA is empty\n');
+  });
+
   it('a missing prompt file dies', () => {
     expect(render('nope.md', ALL)).toBe('XX prompt not found: nope.md\n');
   });
@@ -135,7 +141,7 @@ describe('renderPrompt', () => {
   it('the real prompt files render with fixture-like values and leave no placeholder unsubstituted', () => {
     const real = resolve(import.meta.dirname, '../../../prompts');
     const vars: RenderVars = { ...ALL, RULES: 'RULES-TEXT', REVIEW_TEXT: 'REVIEW', STORY_TEXT: '# Story 900\n\n**AC1 — a**' };
-    for (const f of ['rules.md', 'build-round1.md', 'build-round2.md', 'build-after-spec.md', 'review.md', 'write-story.md', 'baseline-fix.md']) {
+    for (const f of ['rules.md', 'build-round1.md', 'build-round2.md', 'build-after-spec.md', 'review.md', 'review-resumed.md', 'write-story.md', 'baseline-fix.md']) {
       const r = renderPrompt(real, f, vars);
       expect(r.leftover, f).toEqual([]);
     }

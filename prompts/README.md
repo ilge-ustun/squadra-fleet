@@ -16,6 +16,7 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 | `baseline-fix.md` | `{{BASELINE_RED}}` `{{STORY_ID}}` |
 | `tdd-fix.md` | `{{TDD_RED}}` `{{STORY_ID}}` |
 | `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` |
+| `review-resumed.md` | `{{REVIEWED_SHA}}` `{{ROUND}}` `{{HEAD_SHA}}` |
 | `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
@@ -49,6 +50,18 @@ selector and the last 60 lines of the log that shows why (`tddForBuilder` in
 `ts/src/lib/tdd-check.ts`); it is replaced last and guarded. `{{TDD_FIXES}}`
 is the knob's value, so `rules.md` can tell the builder the harness runs its
 pairs and hands back what is not RED, instead of asking it to run them.
+
+`review-resumed.md` prefaces `review.md`, never replaces it: from round 2
+on, within one launch, codex's thread from the round before is resumed
+(`codex exec resume <thread_id> -`) with this preface and then the round's
+whole `review.md`. It says the checkout is new and last round's
+`.review-out/` files count for nothing, names the commits since the head it
+last reviewed (`{{REVIEWED_SHA}}..{{HEAD_SHA}}`, guarded) as where to look
+first, and asks for the whole story again. A thread codex cannot take up
+(no `turn.started` in its stream) is reviewed afresh with `review.md`
+alone. The builder's round 2 resumes its session the same way, with the
+whole `build-round2.md`; no preface — that prompt already says it was
+rejected.
 
 ## The verdict contract
 

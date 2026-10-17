@@ -3541,7 +3541,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_148_bot_job_is_its_own_unit case_149_test_deploy
        case_150_bot_testdeploy case_151_refused_push_follows_origin
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
-       case_155_baseline_fix_in_the_round
+       case_155_baseline_fix_in_the_round case_157_round_two_resumes_both_sessions
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real)
 
@@ -4745,6 +4745,94 @@ case_159_tdd_pairs_run_once_by_the_harness() {
   assert_grep 'Do not run the classifier over your pairs before you hand over' "$TRACE/claude-prompt-1" "the rules say so"
   assert_grep 'at most 3 time\(s\) a round — and one still not RED' "$TRACE/claude-prompt-1" "with the knob's value"
   assert_not_grep 'tdd check' "$LOG" "no pairs handed over: no check"
+}
+
+# 17 Oct. A round-2 builder started a fresh session and read the story
+# and the code again before it touched a finding — khaita 113's round-2
+# builder took 493 s for a missing assertion — and a fresh reviewer re-read
+# them as well. Within one launch, round 2 on now resumes the builder's
+# session (`--resume`, the baseline fix's seam) and codex's thread (`codex
+# exec resume`), each with its full prompt; the reviewer is told what
+# carries over and reviews the whole story again. Red without the resume in
+# ts/src/launch.ts: 157a's round 2 starts both afresh and the block has no
+# sessions: line; 157b/157c red when a session that cannot be taken up
+# stops the round (or, for codex, reads as a refusal) instead of starting
+# afresh; 157d/157e when a session is carried across models or invented;
+# 157f pins that a relaunch starts afresh.
+heads() { grep '^head: ' "$REPO/.review/$STORY.md" | awk '{print $2}'; }
+case_157_round_two_resumes_both_sessions() {
+  local h1 h2 ev
+  CASE="157a round 2 resumes the builder's session and the reviewer's thread; the reviewer reviews it all again"; fixture c157a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_eq "$(calls claude)" 2 "two builder calls"
+  assert_eq "$(calls codex)" 2 "two reviews"
+  assert_not_grep '^--resume$' "$TRACE/claude-args-1" "round 1's builder starts afresh"
+  assert_eq "$(arg_after --resume "$TRACE/claude-args-2")" fake-session-1 "round 2's builder resumes round 1's session"
+  assert_grep 'REJECTED' "$TRACE/claude-prompt-2" "…with the full round-2 prompt"
+  assert_grep 'behaviour under test outright' "$TRACE/claude-prompt-2" "…rules included"
+  assert_grep "resuming round 1's session" "$LOG" "the log says so"
+  assert_not_grep '^resume$' "$TRACE/codex-args-1" "round 1's reviewer starts afresh"
+  assert_grep '^resume$' "$TRACE/codex-args-2" "round 2's reviewer resumes…"
+  assert_eq "$(arg_after '-c' "$TRACE/codex-args-2")" 'sandbox_mode="danger-full-access"' "…in the same sandbox…"
+  assert_eq "$(tail -n 2 "$TRACE/codex-args-2" | head -n 1)" fake-thread-1 "…round 1's thread"
+  assert_eq "$(tail -n 1 "$TRACE/codex-args-2")" - "…the prompt on stdin"
+  assert_grep "resuming round 1's thread" "$LOG" "the log says so"
+  h1="$(heads | sed -n 1p)"; h2="$(heads | sed -n 2p)"
+  assert_not_grep 'You reviewed this story earlier' "$TRACE/codex-prompt-1" "round 1's review prompt is the plain one"
+  assert_grep 'This is review round 2' "$TRACE/codex-prompt-2" "the resumed reviewer is told which round"
+  assert_grep "$h1\.\.$h2" "$TRACE/codex-prompt-2" "…and the commits since the head it reviewed"
+  assert_grep 'write every criterion.s mutations again' "$TRACE/codex-prompt-2" "…that its old mutations count for nothing"
+  assert_grep '=== STORY ===' "$TRACE/codex-prompt-2" "…and gets the whole contract again: the story"
+  assert_grep '^VERDICT: SPEC' "$TRACE/codex-prompt-2" "…and the verdict lines"
+  assert_eq "$(grep -c '^sessions: builder fresh | reviewer fresh$' "$REPO/.review/$STORY.md")" 1 "round 1's block: both fresh"
+  assert_eq "$(grep -c '^sessions: builder resumed | reviewer resumed$' "$REPO/.review/$STORY.md")" 1 "round 2's block: both resumed"
+
+  CASE="157b a builder session that cannot be taken up: a fresh one builds the round"; fixture c157b
+  ev="$REPO/.review/$STORY/round-2"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_BUILDER_RESUME=fail
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(calls claude)" 3 "round 1, the failed resume, the fresh call"
+  assert_eq "$(arg_after --resume "$TRACE/claude-args-2")" fake-session-1 "the resume was tried"
+  assert_not_grep '^--resume$' "$TRACE/claude-args-3" "then a fresh session"
+  assert_grep 'REJECTED' "$TRACE/claude-prompt-3" "…with the same round-2 prompt"
+  assert_grep "the builder's resumed session did nothing" "$LOG" "said"
+  assert_grep 'No conversation found' "$ev/builder-resume-failed.json" "the failed call's output is kept"
+  assert_grep 'fake builder did: commit \(call 3\)' "$ev/builder.json" "builder.json is the fresh call's"
+  assert_eq "$(review_line 4)" "rounds: 2 of 2" "both rounds ran"
+  assert_grep '^sessions: builder fresh \(resume failed\) \| reviewer resumed$' "$REPO/.review/$STORY.md" "the block says so"
+
+  CASE="157c a thread codex cannot take up is not a refusal: a fresh reviewer reviews"; fixture c157c
+  ev="$REPO/.review/$STORY/round-2"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_REVIEWER_RESUME=fail
+  assert_eq "$RC" 0 "exit code"
+  assert_eq "$(calls codex)" 3 "round 1, the failed resume, the fresh review"
+  assert_not_grep '^resume$' "$TRACE/codex-args-3" "a fresh thread"
+  assert_not_grep 'You reviewed this story earlier' "$TRACE/codex-prompt-3" "…with the plain review prompt"
+  assert_grep "could not resume the reviewer's thread" "$LOG" "said"
+  assert_grep 'fake-thread-1' "$ev/reviewer-resume-failed.stderr" "codex's words are kept"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the round was reviewed: not UNPARSEABLE from an empty stream, not UNAVAILABLE"
+  assert_eq "$(field status)" needs_human "the ceiling, as two FAILs reach it"
+  assert_grep '^sessions: builder resumed \| reviewer fresh \(resume failed\)$' "$REPO/.review/$STORY.md" "the block says so"
+
+  CASE="157d a session is not carried across models: haiku's round 2 starts afresh"; fixture c157d
+  sed -i '2a model: haiku' "$REPO/.stories/$STORY.md"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL
+  assert_not_grep '^--resume$' "$TRACE/claude-args-2" "sonnet does not take up haiku's session"
+  assert_grep '^sessions: builder fresh \(model changed: haiku → sonnet\) \| reviewer resumed$' "$REPO/.review/$STORY.md" "the block says why"
+
+  CASE="157e a builder whose output named no session: round 2 starts afresh"; fixture c157e
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_OUTPUT=garbage FAKE_REVIEWER=FAIL
+  assert_eq "$(calls claude)" 2 "two builder calls"
+  assert_not_grep '^--resume$' "$TRACE/claude-args-2" "nothing to resume"
+  assert_grep '^sessions: builder fresh \(no session recorded\) \| reviewer resumed$' "$REPO/.review/$STORY.md" "the block says why"
+
+  CASE="157f a relaunch starts both afresh: nothing outside the launch remembers a session"; fixture c157f
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  set_ready
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL MAX_ROUNDS=1
+  assert_not_grep '^--resume$' "$TRACE/claude-args-2" "the builder starts afresh"
+  assert_not_grep '^resume$' "$TRACE/codex-args-2" "so does the reviewer"
+  assert_eq "$(grep -c '^sessions: builder fresh | reviewer fresh$' "$REPO/.review/$STORY.md")" 2 "both rounds' blocks say so"
 }
 
 for c in "${CASES[@]}"; do

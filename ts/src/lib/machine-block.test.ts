@@ -70,6 +70,17 @@ describe('the row parsers — awk $1 $2 $3 and `read -r ac cls slug` agree on th
     }).toString('utf8');
     expect(out).toContain('\nAC1  GREEN         my\n');
   });
+  it('sessions: one line after reviewer:, when the launcher says which sessions ran (case 157); absent, the block is as before', () => {
+    const base = {
+      round: '2', headSha: 'h', roundCommits: '1', reviewedAt: 't', baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN' } as Baseline,
+      timing: { build: '0', base: '0', review: '0', mut: '0', total: '0' }, builderModel: 'sonnet', reviewerModel: '',
+      acIds: ['AC1'], scope: 'CLEAN', scopeHits: [], model: 'PASS' as const, computed: 'PASS' as const, reasons: [], mutRows: [], probeRows: [],
+      builderText: Buffer.from('b\n'), reviewerText: Buffer.from('r\n'),
+    };
+    const out = renderRoundSection({ ...base, sessions: 'builder resumed | reviewer fresh (resume failed)' }).toString('utf8');
+    expect(out).toContain('\nbuilder:  sonnet\nreviewer: codex\nsessions: builder resumed | reviewer fresh (resume failed)\nacs:      AC1 \n');
+    expect(renderRoundSection(base).toString('utf8')).toContain('\nreviewer: codex\nacs:      AC1 \n');
+  });
   it('parseProbeRows, including a row with an empty class', () => {
     expect(parseProbeRows('probe-green.test.tsx GREEN\nprobe-red.test.tsx RED\n')).toEqual([
       { name: 'probe-green.test.tsx', cls: 'GREEN' }, { name: 'probe-red.test.tsx', cls: 'RED' },
