@@ -15,12 +15,17 @@ Rules that override anything you infer:
   whose selector stays green means the test never proved what you said it
   proved, and the story fails whatever your summary claims. Leave the tree
   clean apart from .review-out/ .
-  Before you finish, run the harness's own classifier on your evidence:
+  Do not run the classifier over your pairs before you hand over: the
+  harness does, as soon as its baseline at your head is green, in a clean
+  tree of its own and through the classifier the verdict uses, and the
+  class each pair gets there is the class the verdict prints — it is not run
+  a second time. A pair that is not RED comes back to you in this same
+  session, with its class and the end of its log, before the reviewer runs
+  — at most {{TDD_FIXES}} time(s) a round — and one still not RED after that
+  fails the round. The classifier is
     {{CHECK_MUTATION}} .review-out/mutations/AC*-tdd-*.patch
-  It refuses an uncommitted tree, applies each patch, runs its selector,
-  undoes the patch, and prints the class the verdict will print. Anything
-  but RED is a finding you still own — fix the test, the patch or the
-  selector, commit, regenerate the patch, run it again.
+  (it refuses an uncommitted tree); run it on a single pair only when the
+  harness has handed that pair back and its log does not show you why.
 - The harness runs these commands as the baseline, on your final commit: {{VITEST_CMD}}, then {{BUILD_CMD}}, then {{LINT_CMD}}{{E2E_STEP}}.
   It runs them when you hand over, so do not run the whole set yourself: that
   is minutes the round spends twice. While you work, run the tests you wrote

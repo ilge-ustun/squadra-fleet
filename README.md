@@ -31,8 +31,9 @@ intent ──fleet write-story──▶ .stories/<id>.md (draft)
        ──the coordinator────▶ reads the draft, edits by hand, lints again, commits
        ──a human────────────▶ status: ready   (at a terminal, or /promote from the phone)
        ──the queue──────────▶ fleet launch: worktree from origin/<base>; builder; baseline (a RED one
-                              back to the builder's session, BASELINE_FIXES times); scope; reviewer;
-                              mutation runner; probe runner; computed verdict
+                              back to the builder's session, BASELINE_FIXES times); tdd check (the
+                              builder's pairs; one not RED back to its session, TDD_FIXES times);
+                              scope; reviewer; mutation runner; probe runner; computed verdict
                               → .review/<id>.md, committed with the status
        ──fleet merge────────▶ story → its epic, on a computed PASS (the queue does this)
        ──a human────────────▶ epic → integration branch, or an integration-branch story onto it
@@ -55,7 +56,7 @@ replaceable at that seam.
 | role | runs as | model | does | may not |
 |---|---|---|---|---|
 | story writer | `fleet write-story`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `opus` (alias: the newest Opus) | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
-| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, runs the tests it wrote or changed (not the whole baseline: the harness runs that), hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/`, runs `fleet check-mutation` on it before finishing; when the harness's baseline is RED at its head, it is resumed (`--resume`) with the RED logs and fixes them before the reviewer runs | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
+| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, runs the tests it wrote or changed (not the whole baseline: the harness runs that), hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/` (the harness runs them: the tdd check); when the harness's baseline is RED at its head, or a pair is not RED in the tdd check, it is resumed (`--resume`) with the logs and fixes them before the reviewer runs | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head, told the harness's baseline result: reads files, runs the tests it needs, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | the launcher: `ts/src/lib/baseline.ts`, `scope.ts`, `evidence.ts` over `ts/src/classifier.ts`, `ts/src/lib/verdict.ts` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
@@ -204,9 +205,10 @@ classifier on a tree someone is still working in — the builder's worktree,
 or a human's checkout. It refuses an uncommitted tree, applies each patch,
 runs its selector, undoes the patch with `git apply -R`, prints the class
 the verdict would print, and exits 0 only when every patch is RED. The
-builder's rules tell it to run this on `.review-out/mutations/AC*-tdd-*.patch`
-before finishing, so an invalid selector or a stale patch is found before
-the round ends, not after. `prompts/README.md` is the full contract.
+builder no longer runs it over its pairs before finishing: the harness's tdd
+check does that once, in a clean tree, and hands back what is not RED
+(L-42); the builder's rules keep it for a single pair the harness handed
+back whose log does not show why. `prompts/README.md` is the full contract.
 
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
@@ -235,6 +237,26 @@ timeout, a refusal, a `.blocked/` question end it the same — and leaves
 builder's in `builder.md`. Not in REVIEW_ONLY or resumed-review rounds,
 which have no builder. The Machine block keeps its lines; its builder and
 baseline seconds add up every call and every run.
+
+The builder does not run its own `ACn-tdd-*` pairs through `fleet
+check-mutation` either (L-42). Once the baseline is GREEN, the launcher runs
+them itself — the tdd check — in the reviewer tree at the head, through the
+verdict's runner, before scope and the reviewer, and keeps each class as
+`tdd-check-<k>.txt`. When a pair is not RED it resumes the builder's session
+with `prompts/tdd-fix.md`: every pair's class, and for each one not RED what
+the class means, its selector and the end of its log. The fix hands over the
+whole set again (it replaces the round's set); when it commits, the baseline
+runs again on the new head before the pairs do, and when it does not, the
+pairs run again at the same head — only those whose patch or selector
+changed. `TDD_FIXES` times at most (default 2; 0 hands nothing back). A
+pair still not RED after that stands: the round goes on and the verdict
+reads it. The mutation phase takes the class of every pair the check ran,
+by digest — head, patch bytes, selector — and runs only the rest: the
+reviewer's mutations, and a pair the reviewer changed. The Machine block
+gains a line, `tdd: check 1: 1 RED 1 GREEN (25s) | fix 1 | check 2: 2 RED
+(9s)`; the check's seconds count in `mutations`. A fix call leaves
+`builder-tdd-fix-<n>.json`; it ends on a timeout, a refusal or a question as
+the builder's call does. Not in REVIEW_ONLY or resumed-review rounds.
 
 ## Watching it
 
@@ -452,6 +474,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `MAX_TURNS` | 60 | the builder's and writer's turn ceiling |
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
 | `BASELINE_FIXES` | 2 | times a round's RED baseline goes back to its builder's session with the RED logs before the reviewer runs; 0 fails the round on it at once |
+| `TDD_FIXES` | 2 | times the tdd check hands the builder's pairs that are not RED back to its session before the reviewer runs; 0 hands nothing back, and the verdict reads them |
 | `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |

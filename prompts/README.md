@@ -9,11 +9,12 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 | file | placeholders |
 |---|---|
-| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` |
+| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` `{{TDD_FIXES}}` |
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
-| `baseline-fix.md` | `{{BASELINE_RED}}` `{{CHECK_MUTATION}}` `{{STORY_ID}}` |
+| `baseline-fix.md` | `{{BASELINE_RED}}` `{{STORY_ID}}` |
+| `tdd-fix.md` | `{{TDD_RED}}` `{{STORY_ID}}` |
 | `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` |
 | `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
 
@@ -38,6 +39,16 @@ run its command and the last 150 lines of its log (`baselineForBuilder` in
 guarded. `{{BASELINE_FIXES}}` is the knob's value, so `rules.md` can tell the
 builder how often a RED comes back to it instead of asking it to run the
 whole baseline itself.
+
+`tdd-fix.md` goes to the same session when the baseline is GREEN but the
+tdd check — the harness running the builder's own tdd- pairs before the
+reviewer, through the verdict's classifier — finds a pair that is not RED,
+`TDD_FIXES` times at most (default 2; L-42). `{{TDD_RED}}` is which fix this
+is, every pair's class, and for each one not RED what the class means, its
+selector and the last 60 lines of the log that shows why (`tddForBuilder` in
+`ts/src/lib/tdd-check.ts`); it is replaced last and guarded. `{{TDD_FIXES}}`
+is the knob's value, so `rules.md` can tell the builder the harness runs its
+pairs and hands back what is not RED, instead of asking it to run them.
 
 ## The verdict contract
 

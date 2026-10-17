@@ -5,7 +5,7 @@
 //   ## Round N — VERDICT            the computed verdict, after any veto
 //   head / commits this round / reviewed
 //   ### Machine
-//   baseline: … timing: … builder: … reviewer: … acs: … scope: … model: … computed: …
+//   baseline: … timing: … builder: … reviewer: … [tdd: …] acs: … scope: … model: … computed: …
 //   mutations: / probes: tables     each only when it has rows
 //   ### Builder said / ### Reviewer the two texts, verbatim
 //
@@ -25,6 +25,7 @@ export const LABELS = {
   timing: 'timing:',
   builder: 'builder:',
   reviewer: 'reviewer:',
+  tdd: 'tdd:',
   acs: 'acs:',
   scope: 'scope:',
   model: 'model:',
@@ -58,6 +59,10 @@ export interface RoundSection {
   reviewerModel: string;
   /** What codex actually ran on (its session file); '' or absent when unknown. */
   reviewerModelUsed?: string;
+  /** The tdd check's runs and the fixes between them (L-42):
+   *  `check 1: 1 RED 1 GREEN (12s) | fix 1 | check 2: 2 RED (9s)`. Absent,
+   *  no check ran and the block has no such line. */
+  tdd?: string;
   acIds: string[];
   scope: string;
   scopeHits: string[];
@@ -144,6 +149,7 @@ export function renderRoundSection(s: RoundSection): Buffer {
     `${label('timing')}builder ${t.build}s | baseline ${t.base}s | reviewer ${t.review}s | mutations ${t.mut}s | total ${t.total}s\n` +
     `${label('builder')}${s.builderModel}${resolved(s.builderModel, s.builderModelUsed)}\n` +
     `${label('reviewer')}${s.reviewerCli === 'claude' ? `claude ${s.reviewerModel} (fallback)` : `codex${s.reviewerModel === '' ? '' : ` ${s.reviewerModel}`}`}${resolved(s.reviewerModel, s.reviewerModelUsed)}\n` +
+    (s.tdd === undefined ? '' : `${label('tdd')}${s.tdd}\n`) +
     `${label('acs')}${s.acIds.map((a) => `${a} `).join('')}\n` +
     `${label('scope')}${s.scope}${hits === '' ? '' : ` ${hits}`}\n` +
     `${label('model')}${s.model}\n` +

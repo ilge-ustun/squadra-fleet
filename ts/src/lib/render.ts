@@ -17,7 +17,7 @@ export class RenderError extends Error {}
 export type RenderVar =
   | 'STORY_ID' | 'RULES' | 'REVIEW_TEXT' | 'STORY_TEXT' | 'INTENT' | 'STORY_BASE' | 'HEAD_SHA' | 'BASE_SHA' | 'ROUND'
   | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'E2E_STEP' | 'CHECK_MUTATION' | 'BASELINE_FIXES' | 'BASELINE'
-  | 'BASELINE_RED';
+  | 'BASELINE_RED' | 'TDD_FIXES' | 'TDD_RED';
 
 export type RenderVars = Partial<Record<RenderVar, string>>;
 
@@ -29,12 +29,14 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
   ['E2E_STEP', 'E2E_STEP'],
   ['CHECK_MUTATION', 'CHECK_MUTATION'],
   ['BASELINE_FIXES', 'BASELINE_FIXES'],
-  // Last: the harness's own baseline reports, with test names and log lines
-  // in them, are inserted after every other replacement. BASELINE (review.md)
-  // and BASELINE_RED (baseline-fix.md) never share a prompt, so neither is
-  // subject to any replacement.
+  ['TDD_FIXES', 'TDD_FIXES'],
+  // Last: the harness's own reports, with test names and log lines in them,
+  // are inserted after every other replacement. BASELINE (review.md),
+  // BASELINE_RED (baseline-fix.md) and TDD_RED (tdd-fix.md) never share a
+  // prompt, so none is subject to any replacement.
   ['BASELINE', 'BASELINE'],
   ['BASELINE_RED', 'BASELINE_RED'],
+  ['TDD_RED', 'TDD_RED'],
 ];
 
 /** The names whose empty value is a die when the SOURCE uses `{{<name>}}`.
@@ -43,7 +45,7 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
  *  rules), and so is E2E_STEP (', then <E2E_CMD>', empty when the repo runs none). Kept as it is, pinned by a test. */
 const GUARDED: readonly RenderVar[] = [
   'STORY_ID', 'RULES', 'REVIEW_TEXT', 'STORY_TEXT', 'INTENT', 'STORY_BASE', 'HEAD_SHA', 'BASE_SHA', 'ROUND',
-  'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION', 'BASELINE_FIXES', 'BASELINE', 'BASELINE_RED',
+  'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION', 'BASELINE_FIXES', 'BASELINE', 'BASELINE_RED', 'TDD_FIXES', 'TDD_RED',
 ];
 
 export interface Rendered {

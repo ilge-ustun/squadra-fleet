@@ -293,7 +293,7 @@ export function redSteps(b: Baseline): string[] {
 export const FIX_TAIL_LINES = 150;
 
 /** The last `n` lines of a log, or a sentence saying there are none. */
-function logTail(file: string, n: number): string {
+export function logTail(file: string, n: number): string {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');

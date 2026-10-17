@@ -16,9 +16,9 @@ same rules as before. Nothing else: no new work, no clean-ups.
 2. Then regenerate EVERY ACn-tdd-<slug>.patch and .test pair after your
    final commit into .review-out/mutations/, as the rules say: the harness
    applies them to the head this fix ends on, and the pairs you handed over
-   before were made against a head that no longer exists. Run
-     {{CHECK_MUTATION}} .review-out/mutations/AC*-tdd-*.patch
-   Anything but RED is still yours to fix.
+   before were made against a head that no longer exists. Do not run the
+   classifier over them: the harness runs them on your new head as soon as
+   its baseline there is green, and hands back any that is not RED.
 3. Do not run the whole baseline yourself. The harness runs it again on your
    new head as soon as you finish, and if a run is still RED it hands you
    the log again, in this session, until its fixes are spent.

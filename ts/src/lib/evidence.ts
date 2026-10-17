@@ -5,10 +5,16 @@
 // of the machinery — a dirty tree, a runner that could not start — is a
 // RunnerError the launcher turns into two XX lines: the classifier's
 // message, then its own.
-import { copyFileSync, existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+//
+// The same runner is the tdd check (L-42): right after a green baseline the
+// launcher runs the builder's tdd- pairs alone, records what each came to,
+// and the round's mutation phase takes those classes for every pair whose
+// head, patch and selector are unchanged instead of running it a second time.
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { classifyMutation, findSelector, runSelector as classifierRunSelector, type RunSelectorInput } from '../classifier.ts';
-import { porcelain } from './git.ts';
+import { classifyMutation, findSelector, runSelector as classifierRunSelector, type RunSelectorInput, type Selector } from '../classifier.ts';
+import { porcelain, revParse } from './git.ts';
 import { resultSummaryLine } from './result-summary.ts';
 import type { MutRow, ProbeRow, RunClass } from './types.ts';
 import { readVitestJson } from './vitest-json.ts';
@@ -34,6 +40,26 @@ const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 const isDir = (p: string): boolean => existsSync(p) && statSync(p).isDirectory();
 const describe = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/** What a mutation's class stands on, and the class. */
+export interface KnownRun {
+  digest: string;
+  cls: string;
+}
+
+/** The run, exactly: the HEAD the clean tree is at, the patch's bytes, and
+ *  the selector's kind and bytes. Two runs with one digest are the same run. */
+export function mutationDigest(head: string, patch: string, sel: Selector | undefined): string {
+  const h = createHash('sha256');
+  h.update(`${head}\0`);
+  h.update(readFileSync(patch));
+  h.update('\0');
+  if (sel !== undefined) {
+    h.update(`${sel.kind}\0`);
+    h.update(readFileSync(sel.file));
+  }
+  return h.digest('hex');
+}
+
 export interface MutationsInput {
   wt: string;
   evidenceDir: string;
@@ -41,6 +67,14 @@ export interface MutationsInput {
   rawPrefix: (name: string) => string;
   vitestCmd: string;
   log: (msg: string) => void;
+  /** Runs already made, by name — the tdd check's. A patch whose digest is
+   *  the one recorded keeps its class and is not run again. */
+  known?: ReadonlyMap<string, KnownRun>;
+  /** Filled with every patch this call classifies, by name. */
+  record?: Map<string, KnownRun>;
+  /** GREEN pre-runs to share with another call at the same HEAD (L-39);
+   *  a map of its own when absent. */
+  preRuns?: Map<string, string>;
 }
 
 /** `AC*-*.patch` in glob order (code point), `ac` before the first `-`,
@@ -53,7 +87,8 @@ export function runMutations(i: MutationsInput): MutRow[] {
   // One map for the round: the tree is the same clean HEAD before every
   // patch, so a GREEN pre-run of a selector stands for the next patch that
   // names it (L-39).
-  const preRuns = new Map<string, string>();
+  const preRuns = i.preRuns ?? new Map<string, string>();
+  const head = i.known !== undefined || i.record !== undefined ? revParse(i.wt, 'HEAD') : '';
   for (const n of readdirSync(mdir).filter((x) => /^AC[\s\S]*-[\s\S]*\.patch$/.test(x)).sort(byCodePoint)) {
     const patch = join(mdir, n);
     const name = n.slice(0, -'.patch'.length);
@@ -61,6 +96,15 @@ export function runMutations(i: MutationsInput): MutRow[] {
     const ac = name.slice(0, dash);
     const slug = name.slice(dash + 1);
     const sel = findSelector(patch);
+    const digest = head === '' ? '' : mutationDigest(head, patch, sel);
+    const seen = i.known?.get(name);
+    if (seen !== undefined && seen.digest === digest) {
+      if (!existsSync(join(mdir, `${name}.result`))) writeFileSync(join(mdir, `${name}.result`), `${seen.cls}\n`);
+      i.record?.set(name, seen);
+      rows.push({ ac, cls: seen.cls, slug });
+      i.log(`mutation ${name}: ${seen.cls} (run by the tdd check at this head)`);
+      continue;
+    }
     let cls: string;
     if (sel !== undefined) {
       try {
@@ -76,6 +120,7 @@ export function runMutations(i: MutationsInput): MutRow[] {
       cls = 'NO_SELECTOR';
       writeFileSync(join(mdir, `${name}.result`), `${cls}\n`);
     }
+    i.record?.set(name, { digest, cls });
     rows.push({ ac, cls, slug });
     i.log(`mutation ${name}: ${cls}`);
   }

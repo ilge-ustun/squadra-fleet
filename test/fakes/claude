@@ -64,6 +64,8 @@
 # says (default: FAKE_BUILDER), and its TDD evidence, when
 # FAKE_BUILDER_MUTATIONS asks for some, is slugged `tdd-fixed` instead of
 # `tdd-observed-red`, so a case can tell which call handed over the set.
+# FAKE_BUILDER_MUTATIONS_RESUMED (default: FAKE_BUILDER_MUTATIONS) is the
+# evidence a resumed call hands over — a tdd fix that makes a green pair red.
 #
 # FAKE_BUILDER_SEQ="commit blocked" gives the fresh (not resumed) calls one
 # mode each, in order, the last word for every call after; FAKE_BUILDER is
@@ -126,12 +128,13 @@ printf '%s' "$prompt" > "$FAKE_TRACE_DIR/claude-prompt-$n"
 printf '%s\n' "${ARGV[@]}" > "$FAKE_TRACE_DIR/claude-args-$n"
 session="${resume:-fake-session-$n}"
 mode="$FAKE_BUILDER"; slug=tdd-observed-red
+evidence="${FAKE_BUILDER_MUTATIONS:-none}"
 if [[ -n "${FAKE_BUILDER_SEQ:-}" && -z "$resume" ]]; then
   read -r -a seq <<< "$FAKE_BUILDER_SEQ"
   fresh="$({ grep -L -- '^--resume$' "$FAKE_TRACE_DIR"/claude-args-* || true; } | wc -l)"   # this call's argv is written
   mode="${seq[$(( fresh <= ${#seq[@]} ? fresh - 1 : ${#seq[@]} - 1 ))]}"
 fi
-if [[ -n "$resume" ]]; then mode="${FAKE_BUILDER_RESUMED:-$FAKE_BUILDER}"; slug=tdd-fixed; fi
+if [[ -n "$resume" ]]; then mode="${FAKE_BUILDER_RESUMED:-$FAKE_BUILDER}"; slug=tdd-fixed; evidence="${FAKE_BUILDER_MUTATIONS_RESUMED:-$evidence}"; fi
 
 case "$mode" in
   limit)    limit_json; exit 1 ;;
@@ -158,19 +161,29 @@ esac
 
 # TDD evidence, written after the commit so the tree is clean apart from
 # .review-out/ — the same contract the reviewer is held to.
-case "${FAKE_BUILDER_MUTATIONS:-none}" in
+red_pair() {      # red_pair <name>: a patch the fake vitest catches
+  mkdir -p .review-out/mutations
+  printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
+  git diff -- src/marker.txt > ".review-out/mutations/$1.patch"
+  git checkout -q -- src/marker.txt
+  printf 'fake.test.tsx\n' > ".review-out/mutations/$1.test"
+}
+green_pair() {    # green_pair <name>: a patch nothing catches
+  mkdir -p .review-out/mutations
+  printf '\n# a comment the suite cannot see\n' >> src/marker.txt
+  git diff -- src/marker.txt > ".review-out/mutations/$1.patch"
+  git checkout -q -- src/marker.txt
+  printf 'fake.test.tsx\n' > ".review-out/mutations/$1.test"
+}
+# kept+red / kept+green: AC1-tdd-kept, a red pair made the same way at every
+# call — the same bytes while the head stands — beside the call's own pair.
+case "$evidence" in
   none) : ;;
-  red)   mkdir -p .review-out/mutations
-         printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
-         git diff -- src/marker.txt > ".review-out/mutations/AC1-$slug.patch"
-         git checkout -q -- src/marker.txt
-         printf 'fake.test.tsx\n' > ".review-out/mutations/AC1-$slug.test" ;;
-  green) mkdir -p .review-out/mutations
-         printf '\n# a comment the suite cannot see\n' >> src/marker.txt
-         git diff -- src/marker.txt > ".review-out/mutations/AC1-$slug.patch"
-         git checkout -q -- src/marker.txt
-         printf 'fake.test.tsx\n' > ".review-out/mutations/AC1-$slug.test" ;;
-  *) echo "fleet/test/fakes/claude: unknown FAKE_BUILDER_MUTATIONS='$FAKE_BUILDER_MUTATIONS'" >&2; exit 2 ;;
+  red)   red_pair "AC1-$slug" ;;
+  green) green_pair "AC1-$slug" ;;
+  kept+red)   red_pair AC1-tdd-kept; red_pair "AC1-$slug" ;;
+  kept+green) red_pair AC1-tdd-kept; green_pair "AC1-$slug" ;;
+  *) echo "fleet/test/fakes/claude: unknown TDD evidence mode '$evidence'" >&2; exit 2 ;;
 esac
 
 case "${FAKE_BUILDER_OUTPUT:-json}" in

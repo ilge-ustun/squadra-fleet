@@ -125,6 +125,16 @@ describe('BASELINE_FIXES — how often a RED baseline goes back to the builder i
   });
 });
 
+describe('TDD_FIXES — how often the tdd check hands pairs that are not RED back to the builder (L-42)', () => {
+  it('2 by default, 0 a value, a non-number a die', () => {
+    expect(readKnobs({}, '/f').tddFixes).toBe(2);
+    expect(readKnobs({ TDD_FIXES: '' }, '/f').tddFixes).toBe(2);
+    expect(readKnobs({ TDD_FIXES: '0' }, '/f').tddFixes).toBe(0);
+    expect(readKnobs({ TDD_FIXES: '3' }, '/f').tddFixes).toBe(3);
+    expect(() => readKnobs({ TDD_FIXES: 'two' }, '/f')).toThrow(/TDD_FIXES/);
+  });
+});
+
 describe('REVIEWER_RETRY_MIN — when a refused reviewer is tried again if nobody named a time', () => {
   it('60 minutes by default, a number when set, a die when not a number', () => {
     expect(readKnobs({}, '/f').reviewerRetryMin).toBe(60);
