@@ -30,10 +30,11 @@ intent ──fleet write-story──▶ .stories/<id>.md (draft)
        ──fleet lint-story───▶ cited paths exist on the base, ACs are **ACn headed, base: is legal
        ──the coordinator────▶ reads the draft, edits by hand, lints again, commits
        ──a human────────────▶ status: ready   (at a terminal, or /promote from the phone)
-       ──the queue──────────▶ fleet launch: worktree from origin/<base>; builder; baseline (a RED one
-                              back to the builder's session, BASELINE_FIXES times); tdd check (the
-                              builder's pairs; one not RED back to its session, TDD_FIXES times);
-                              scope; reviewer; mutation runner; probe runner; computed verdict
+       ──the queue──────────▶ fleet launch: worktree from origin/<base>; builder (round 2 on: the
+                              round before's session); baseline (a RED one back to the builder's
+                              session, BASELINE_FIXES times); tdd check (the builder's pairs; one
+                              not RED back to its session, TDD_FIXES times); scope; reviewer
+                              (round 2 on: its thread); mutation runner; probe runner; computed verdict
                               → .review/<id>.md, committed with the status
        ──fleet merge────────▶ story → its epic, on a computed PASS (the queue does this)
        ──a human────────────▶ epic → integration branch, or an integration-branch story onto it
@@ -56,7 +57,7 @@ replaceable at that seam.
 | role | runs as | model | does | may not |
 |---|---|---|---|---|
 | story writer | `fleet write-story`: `claude -p`, tools Read/Grep/Glob/Bash/Write | `STORY_MODEL`, default `opus` (alias: the newest Opus) | reads the epic's tip in a throwaway worktree, verifies the premise, writes `.stories/<id>.md` at `status: draft` | commit, implement, touch any other file |
-| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, runs the tests it wrote or changed (not the whole baseline: the harness runs that), hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/` (the harness runs them: the tdd check); when the harness's baseline is RED at its head, or a pair is not RED in the tdd check, it is resumed (`--resume`) with the logs and fixes them before the reviewer runs | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
+| builder | the launcher (`ts/src/launch.ts`, through `lib/agents.ts`): `claude -p`, tools Read/Write/Edit/Grep/Glob/Bash | `BUILDER_MODEL`, default `sonnet` (alias: the newest Sonnet); a story's `model:` overrides it | implements the story under mandatory TDD in `../wt-<id>`, commits per task, runs the tests it wrote or changed (not the whole baseline: the harness runs that), hands `ACn-tdd-*.patch` + `.test` to `.review-out/mutations/` (the harness runs them: the tdd check); when the harness's baseline is RED at its head, or a pair is not RED in the tdd check, it is resumed (`--resume`) with the logs and fixes them before the reviewer runs; round 2 on, within a launch, it is the round before's session, resumed | write under `.fleet/` or a `scope_deny` path; guess at a decision the story does not make (it writes `.blocked/<id>.md` and stops) |
 | reviewer | the launcher: `codex exec --json` | codex's default, or `REVIEWER_MODEL` | in a clean worktree at the builder's head, told the harness's baseline result: reads files, runs the tests it needs, writes one mutation per AC and optional probes, ends with `VERDICT: PASS\|FAIL\|SPEC` | leave the tree dirty (the run stops) |
 | the machine | the launcher: `ts/src/lib/baseline.ts`, `scope.ts`, `evidence.ts` over `ts/src/classifier.ts`, `ts/src/lib/verdict.ts` | none | baseline, scope, applies every mutation, runs every probe, computes the verdict | grant a PASS the reviewer did not give |
 | the coordinator (optional) | an interactive agent session on any harness, guided by `skills/` | any | intent, draft review, hand edits, reading verdicts, deciding what follows, maintaining the harness | promote, land, launch, deploy, touch tokens |
@@ -257,6 +258,25 @@ gains a line, `tdd: check 1: 1 RED 1 GREEN (25s) | fix 1 | check 2: 2 RED
 (9s)`; the check's seconds count in `mutations`. A fix call leaves
 `builder-tdd-fix-<n>.json`; it ends on a timeout, a refusal or a question as
 the builder's call does. Not in REVIEW_ONLY or resumed-review rounds.
+
+### Round 2 resumes both sessions
+
+Within one launch, a round after the first takes up the sessions the round
+before ran in: the builder's (`claude -p --resume`, the id the last call of
+that round named) with the whole `build-round2.md`, and codex's thread
+(`codex exec resume <thread_id> -`, the id from its stream's
+`thread.started`) with `prompts/review-resumed.md` and then the whole
+`review.md`. The reviewer reviews the whole story again and writes every
+mutation again: its checkout is new. Each starts afresh instead, and says
+why, when there is no session to take up (the first round of a launch, a
+builder output that named none), when the model changed (haiku builds one
+round), or when the session cannot be taken up — a builder call that
+reports an error, commits nothing and hands nothing over, kept as
+`builder-resume-failed.json`; a codex stream with no `turn.started`, its
+stderr kept as `reviewer-resume-failed.stderr`. The fallback Claude reviewer
+always starts afresh. A relaunch does too: nothing outside the process
+remembers a session. The Machine block's `sessions:` line says which ran,
+e.g. `sessions: builder resumed | reviewer fresh (resume failed)`.
 
 ## Watching it
 

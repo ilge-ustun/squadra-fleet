@@ -258,6 +258,29 @@ deploys — belongs to that target, not here.
   pairs, not another baseline. The saving is the duplicate less that resumed
   call: about 45 s a round on average, about 4 min on a round of browser
   pairs (case 159).
+- **Round 2 resumes the builder's session and the reviewer's thread (17
+  Oct).** Within one launch, a round after the first resumes the builder's
+  session with the whole round-2 prompt and codex's thread (`codex exec
+  resume`) with `prompts/review-resumed.md` before the whole review prompt;
+  the reviewer still reviews the whole story and writes every mutation
+  again (the human, 17 Oct: "Reviewer should re-read the fix"). What it
+  saves was measured before it ran, and it is small: in six fresh round-2
+  builder sessions (khaita 107 r2–r4, 111 r2, 113 r2, 115 r2) the model's
+  own time was 35–59 s; the rest was tools, chiefly `fleet check-mutation`
+  over every tdd- pair (113 r2: 447 of 487 s, all e2e) and tests. A
+  resumed builder skips at most part of that minute; the reviewer took
+  71–187 s a round (346 s once), of which re-reading is a part. Open:
+  (1) `codex exec resume`'s argv is from `codex exec resume --help`
+  (codex-cli 0.162.1), never a real run — resume takes no `--sandbox`, so
+  the sandbox goes in as `-c sandbox_mode="danger-full-access"`; a thread
+  that never starts a turn is reviewed afresh, but a resumed session that
+  starts one under another sandbox would not be noticed by that check, and
+  the first real round 2 should be read with that in mind; (2) a relaunch
+  (a blocked story answered, `needs_human` set back to ready) starts both
+  afresh; (3) a resumed session carries round 1's whole context into every
+  turn of round 2 — cached, but larger. The record is the Machine block's
+  `sessions:` line and, on a failed resume, `builder-resume-failed.json` or
+  `reviewer-resume-failed.stderr` (case 157).
 - **A bot job that outlives the poll is a unit of its own.** `/merge`
   starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
   child forked inside the poll was killed with the poll's cgroup, seconds
