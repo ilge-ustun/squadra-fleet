@@ -194,6 +194,14 @@ export interface LandingInput {
   intoInBase: () => boolean;
 }
 
+/** Whether a story's question is still open: it says `blocked` and its
+ *  question file is there. The file alone marks nothing — /answer appends to
+ *  .blocked/<id>.md and keeps it (suite case 139), so an answered story that
+ *  went on to PASS showed BLOCKED on its epic (khaita 081, 5 Oct). */
+export function questionOpen(status: string, hasFile: boolean): boolean {
+  return status === 'blocked' && hasFile;
+}
+
 /** A story with no branch and no record has nothing that
  *  could be merged, so it is not awaiting one. */
 export function landingOf(i: LandingInput): string {
@@ -283,7 +291,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
       status, merged, verdict, branch, base, baseBranch: cfg.baseBranch,
       intoInBase: () => isAncestor(root, into, baseRef),
     });
-    const blocked = existsSync(`${root}/.blocked/${id}.md`);
+    const blocked = questionOpen(status, existsSync(`${root}/.blocked/${id}.md`));
     if (blocked) notes.push(`BLOCKED: see .blocked/${id}.md`);
     if (reasons !== '') notes.push(reasons);
 

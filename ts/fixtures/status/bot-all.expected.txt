@@ -33,7 +33,7 @@ epic/test
 -------
 9000 Über long title, ümlauts and — dashes
 → base | in_progress | R2 | FAIL
-! worktree, BLOCKED: see .blocked/9000.md, scope VIOLATION: src/a
+! worktree, scope VIOLATION: src/a
 -------
 900 fixture story
 → base | awaiting merge | R1 | PASS

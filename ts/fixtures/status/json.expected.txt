@@ -44,7 +44,7 @@
     "ahead": 1,
     "worktree": true,
     "live": false,
-    "blocked": true,
+    "blocked": false,
     "reasons": "scope VIOLATION: src/a"
   },
   {
