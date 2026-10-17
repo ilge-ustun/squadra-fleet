@@ -54,6 +54,12 @@
 #
 # Records calls in $FAKE_TRACE_DIR/calls and the prompt as codex-prompt-N.
 #
+# Threads, as the real CLI has them: every stream opens with
+# thread.started, `fake-thread-N` for the Nth call, and `codex exec resume
+# … <id> -` continues that thread, so the stream names <id> again (the
+# launcher's round 2 on, launch.ts). FAKE_REVIEWER_RESUME=fail is a thread
+# codex cannot find: an error on stderr, nothing on stdout, exit 1 — no turn.
+#
 set -euo pipefail
 : "${FAKE_REVIEWER:?FAKE_REVIEWER must be set}"
 : "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
@@ -72,6 +78,16 @@ if [[ -n "${FAKE_REVIEWER_USED:-}" ]]; then
 fi
 printf '%s' "$prompt" > "$FAKE_TRACE_DIR/codex-prompt-$n"
 printf '%s\n' "$@" > "$FAKE_TRACE_DIR/codex-args-$n"
+# `exec resume [options] <id> -`: the id is the word before the last.
+thread="fake-thread-$n"
+if [[ "${1:-}" == exec && "${2:-}" == resume ]]; then
+  args=("$@")
+  thread="${args[$# - 2]}"
+  if [[ "${FAKE_REVIEWER_RESUME:-}" == fail ]]; then
+    echo "Error: no rollout found for thread id $thread" >&2
+    exit 1
+  fi
+fi
 
 if [[ "$FAKE_REVIEWER" == limit ]]; then
   if [[ -n "${FAKE_CODEX_RESETS_AT:-}" ]]; then
@@ -145,10 +161,12 @@ esac
 # Output shaped like real codex 0.153 (read from a real run, 17 Sep):
 #   stderr  "Reading prompt from stdin..." when stdin is not a TTY (this text since at least 22 Sep; "Reading additional input from stdin..." on 17 Sep) —
 #           always on, because that is what every unattended run sees
-#   stdout  JSON Lines: thread.started, command_execution items (no .text),
-#           then the agent_message that carries the verdict, then turn.completed
+#   stdout  JSON Lines: thread.started, turn.started (as khaita 007's raw
+#           stream has it), command_execution items (no .text), then the
+#           agent_message that carries the verdict, then turn.completed
 echo "Reading prompt from stdin..." >&2
-jq -cn '{type:"thread.started", thread_id:"fake"}'
+jq -cn --arg t "$thread" '{type:"thread.started", thread_id:$t}'
+jq -cn '{type:"turn.started"}'
 jq -cn '{type:"item.started",   item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\""}}'
 jq -cn '{type:"item.completed", item:{id:"item_1", type:"command_execution", command:"/bin/bash -lc \"npm test\"", exit_code:0}}'
 [[ "$FAKE_REVIEWER" == silent ]] || jq -cn --arg t "$text" '{type:"item.completed", item:{id:"item_2", type:"agent_message", text:$t}}'

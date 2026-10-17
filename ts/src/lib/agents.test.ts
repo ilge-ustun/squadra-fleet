@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
+  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, reviewerThreadId,
+  reviewerTurnStarted, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -39,6 +40,46 @@ describe('the argv the CLIs get', () => {
   it('reviewer: codex exec --json, no sandbox, -m only when a model is named (cases 103, 103b)', () => {
     expect(reviewerArgv({ model: '' })).toEqual(['exec', '--json', '--sandbox', 'danger-full-access']);
     expect(reviewerArgv({ model: 'fleet-test-reviewer' })).toEqual(['exec', '--json', '--sandbox', 'danger-full-access', '-m', 'fleet-test-reviewer']);
+  });
+
+  it('reviewer resumed: codex exec resume, the same sandbox as a config override (resume takes no --sandbox), the id, then - for stdin (case 157)', () => {
+    expect(reviewerArgv({ model: '', resume: '01a149a7-8000-7761-8432-c2cfc7b3bd35' })).toEqual([
+      'exec', 'resume', '--json', '-c', 'sandbox_mode="danger-full-access"', '01a149a7-8000-7761-8432-c2cfc7b3bd35', '-',
+    ]);
+    expect(reviewerArgv({ model: 'fleet-test-reviewer', resume: 't1' })).toEqual([
+      'exec', 'resume', '--json', '-c', 'sandbox_mode="danger-full-access"', '-m', 'fleet-test-reviewer', 't1', '-',
+    ]);
+    expect(reviewerArgv({ model: '', resume: '' })).toEqual(['exec', '--json', '--sandbox', 'danger-full-access']);
+  });
+});
+
+// codex exec --json opens its stream with the thread it runs as
+// ({"type":"thread.started","thread_id":…}, read from real runs, khaita 007
+// and 015); `codex exec resume <it>` continues that thread.
+describe('reviewerThreadId — the thread a later round resumes', () => {
+  it('the first thread.started event\'s thread_id', () => {
+    expect(reviewerThreadId('{"type":"thread.started","thread_id":"01a0f788-9e8e-73d1-b40a-24296258bbb6"}\n{"type":"turn.started"}\n')).toBe('01a0f788-9e8e-73d1-b40a-24296258bbb6');
+    expect(reviewerThreadId('noise\n{"type":"thread.started","thread_id":"a"}\n{"type":"thread.started","thread_id":"b"}\n')).toBe('a');
+  });
+  it('none, not a string, not JSON → empty: there is nothing to resume', () => {
+    expect(reviewerThreadId('{"type":"turn.started"}\n')).toBe('');
+    expect(reviewerThreadId('{"type":"thread.started","thread_id":7}\n')).toBe('');
+    expect(reviewerThreadId('{"type":"thread.started","thread_id":""}\n')).toBe('');
+    expect(reviewerThreadId('Error: thread not found\n')).toBe('');
+    expect(reviewerThreadId('')).toBe('');
+  });
+});
+
+describe('reviewerTurnStarted — did codex get as far as a turn', () => {
+  it('a turn.started event anywhere: it did — a refusal starts its turn too (the 21 Sep stream)', () => {
+    expect(reviewerTurnStarted('{"type":"thread.started","thread_id":"t"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n')).toBe(true);
+    expect(reviewerTurnStarted('{"type":"thread.started","thread_id":"t"}\n{"type":"turn.started"}\n{"type":"error","message":"limit"}\n')).toBe(true);
+  });
+  it('no turn: nothing at all, a plain error, a thread that never started one', () => {
+    expect(reviewerTurnStarted('')).toBe(false);
+    expect(reviewerTurnStarted('Error: no rollout found for thread id t\n')).toBe(false);
+    expect(reviewerTurnStarted('{"type":"thread.started","thread_id":"t"}\n{"type":"error","message":"x"}\n')).toBe(false);
+    expect(reviewerTurnStarted('["turn.started"]\n')).toBe(false);
   });
 });
 
@@ -244,6 +285,44 @@ describe('claudeRefusal — Claude refused the call (a usage limit)', () => {
   it('not JSON, or not an object: not a refusal', () => {
     expect(claudeRefusal('not json {')).toBeUndefined();
     expect(claudeRefusal('[1]')).toBeUndefined();
+  });
+});
+
+describe('runReviewer resumed, with test/fakes/codex', () => {
+  it('exec resume reaches the CLI with the thread, the prompt on stdin, and the same thread comes back', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
+    const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
+    mkdirSync(trace); mkdirSync(wt);
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_REVIEWER: 'FAIL', FAKE_MUTATIONS: 'none' }, 'codex');
+    try {
+      const first = await runReviewer({ wt, prompt: 'review it', model: '', timeoutSec: 30, stderrFile: join(dir, 'r1.stderr'), env });
+      const id = reviewerThreadId(first.stdout);
+      expect(id).toBe('fake-thread-1');
+      const second = await runReviewer({ wt, prompt: 'review it again', model: '', timeoutSec: 30, stderrFile: join(dir, 'r2.stderr'), env, resume: id });
+      expect(readFileSync(join(trace, 'codex-args-2'), 'utf8')).toBe('exec\nresume\n--json\n-c\nsandbox_mode="danger-full-access"\nfake-thread-1\n-\n');
+      expect(readFileSync(join(trace, 'codex-prompt-2'), 'utf8')).toBe('review it again');
+      expect(reviewerThreadId(second.stdout)).toBe('fake-thread-1');
+      expect(reviewerTurnStarted(second.stdout)).toBe(true);
+      expect(reviewerMessages(second.stdout).text).toMatch(/VERDICT: FAIL$/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a thread codex cannot resume: no stream, no turn — what the launcher retries afresh', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-agents-'));
+    const trace = join(dir, 'trace'); const wt = join(dir, 'wt');
+    mkdirSync(trace); mkdirSync(wt);
+    const env = shadowed({ ...process.env, PATH: `${FAKES}:${process.env['PATH'] ?? ''}`, FAKE_TRACE_DIR: trace, FAKE_REVIEWER: 'PASS', FAKE_REVIEWER_RESUME: 'fail' }, 'codex');
+    try {
+      const r = await runReviewer({ wt, prompt: 'review it again', model: '', timeoutSec: 30, stderrFile: join(dir, 'r.stderr'), env, resume: 'gone' });
+      expect(r.stdout).toBe('');
+      expect(r.status).toBe(1);
+      expect(reviewerTurnStarted(r.stdout)).toBe(false);
+      expect(readFileSync(join(dir, 'r.stderr'), 'utf8')).toContain('gone');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

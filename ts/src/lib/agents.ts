@@ -31,10 +31,17 @@ export function builderArgv(o: { model: string; maxTurns: string; allowedTools?:
 /** --sandbox danger-full-access: bwrap cannot create network namespaces on
  *  the host, so codex's own sandbox fails before it reads anything;
  *  isolation is the detached worktree and the unprivileged user. `-m` only
- *  when a model is named — empty means codex's configured default. */
-export function reviewerArgv(o: { model: string }): string[] {
-  const a = ['exec', '--json', '--sandbox', 'danger-full-access'];
-  return o.model !== '' ? [...a, '-m', o.model] : a;
+ *  when a model is named — empty means codex's configured default.
+ *
+ *  `resume`, a thread id from an earlier call's stream (reviewerThreadId),
+ *  continues that thread: `codex exec resume`, which takes no --sandbox
+ *  (codex-cli 0.162's help), so the same sandbox goes in as the config key
+ *  it sets; the id, then `-` — resume reads the prompt from stdin only when
+ *  told to. Empty or absent starts afresh. */
+export function reviewerArgv(o: { model: string; resume?: string }): string[] {
+  const m = o.model !== '' ? ['-m', o.model] : [];
+  if (o.resume) return ['exec', 'resume', '--json', '-c', 'sandbox_mode="danger-full-access"', ...m, o.resume, '-'];
+  return ['exec', '--json', '--sandbox', 'danger-full-access', ...m];
 }
 
 export interface AgentCall {
@@ -74,7 +81,7 @@ export interface ReviewerRun {
 /** stderr goes to `stderrFile` (round-N/reviewer.stderr): codex prints
  *  "Reading prompt from stdin..." there on every unattended run (the text changes between codex versions),
  *  and merged into the stream it once broke the extraction (L-17). */
-export async function runReviewer(o: AgentCall & { model: string; stderrFile: string }): Promise<ReviewerRun> {
+export async function runReviewer(o: AgentCall & { model: string; stderrFile: string; resume?: string }): Promise<ReviewerRun> {
   const fd = openSync(o.stderrFile, 'w');
   try {
     const r = await run('codex', reviewerArgv(o), {
@@ -250,6 +257,41 @@ export function builderSessionId(output: string): string {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return '';
   const id = (v as Record<string, unknown>)['session_id'];
   return typeof id === 'string' ? id : '';
+}
+
+/** The JSON objects of a codex stream, one per line that is one; other
+ *  lines are skipped. */
+function streamObjects(jsonl: string): Record<string, unknown>[] {
+  const objs: Record<string, unknown>[] = [];
+  for (const line of jsonl.split('\n')) {
+    let v: unknown;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) objs.push(v as Record<string, unknown>);
+  }
+  return objs;
+}
+
+/** The thread a `codex exec --json` call ran as: its stream opens with
+ *  `{"type":"thread.started","thread_id":…}` (read from real runs), and
+ *  `codex exec resume` takes that id. The first one; '' when there is none —
+ *  then there is nothing to resume. */
+export function reviewerThreadId(jsonl: string): string {
+  const t = streamObjects(jsonl).find((o) => o['type'] === 'thread.started');
+  const id = t?.['thread_id'];
+  return typeof id === 'string' ? id : '';
+}
+
+/** Whether codex got as far as a turn: a `turn.started` event. A provider
+ *  refusal starts its turn and then fails it (the 21 Sep stream), so it
+ *  is not this; a resume that never found its thread is — the launcher
+ *  then starts the reviewer afresh rather than read a missing review as a
+ *  refusal or as the reviewer's silence. */
+export function reviewerTurnStarted(jsonl: string): boolean {
+  return streamObjects(jsonl).some((o) => o['type'] === 'turn.started');
 }
 
 /** 24 Sep: the fleet names aliases (`sonnet`, `opus`), so what a round ran
