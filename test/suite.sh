@@ -2599,6 +2599,28 @@ case_102_builder_sees_the_reviewers_attack() {
   done
 }
 
+# L-40 (17 Oct). Each criterion's "Goes red when" list is what the reviewer
+# writes its mutations from, and the builder never applied one: khaita 113
+# round 1 failed on a locator its test created and never asserted, which
+# the story's own item would have shown red in seconds; 114 round 1 failed
+# on an item no implementation could make red, which the builder found only
+# in round 2 and then blocked on. The rules now have it apply one item per
+# criterion, see the test go red, undo it, and block when the story's own
+# instrument cannot show the item. Red while rules.md does not say so.
+case_156_builder_checks_the_storys_red_list() {
+  CASE="156 the builder's rules have it apply one of each criterion's Goes-red items"; fixture c156
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=FAIL FAKE_VITEST=pass
+  assert_eq "$(calls claude)" 2 "two rounds ran"
+  local n
+  for n in 1 2; do
+    assert_grep 'take ONE item per criterion' "$TRACE/claude-prompt-$n" "round $n: one item per criterion"
+    assert_grep 'not the change your tdd- patch for' "$TRACE/claude-prompt-$n" "round $n: one the tdd- patch does not already prove"
+    assert_grep 'cheapest to run' "$TRACE/claude-prompt-$n" "round $n: the cheapest of the rest"
+    assert_grep 'undo the change .*Commit nothing from' "$TRACE/claude-prompt-$n" "round $n: nothing committed from it"
+    assert_grep 'the story claims more than that$' "$TRACE/claude-prompt-$n" "round $n: and a story that claims too much is a question"
+  done
+}
+
 # A4 (22 Sep). The reviewer ran on whatever ~/.codex/config.toml defaulted
 # to; nothing could name a model for it, so a quota outage on that one
 # model stranded every story. REVIEWER_MODEL is the seam, recorded in the
@@ -3489,6 +3511,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_97_bot_repo_list case_98_lint_cites_resolve_against_base
        case_99_bot_merge_detaches case_100_check_mutation
        case_101_builder_told_to_check_evidence case_102_builder_sees_the_reviewers_attack
+       case_156_builder_checks_the_storys_red_list
        case_103_reviewer_model case_104_install_skills
        case_105_fixture_excludes_node_modules case_106_one_classifier
        case_107_probe_runner_failure_is_not_a_pass case_108_one_verdict
