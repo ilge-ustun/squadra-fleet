@@ -55,6 +55,19 @@ Rules that override anything you infer:
     ACn <slug> NO_TESTS            the mutation broke compilation
     ACn has no mutation            no patch at all for that criterion
     probe <name> RED               the reviewer's probe found a regression
+- The story says, under each criterion, which changes make its instrument go
+  red ("Goes red when …"). The reviewer writes its mutations from that list,
+  so an item your tests do not catch is the FAIL it will find. Before you
+  hand over, take ONE item per criterion: not the change your tdd- patch for
+  it already records, when the list has another, and of the rest the
+  cheapest to run, one a vitest test catches over one that needs a browser
+  spec. Make that change in your tree, run that criterion's test, see it go
+  red, and undo the change (`git checkout -- <files>`). Commit nothing from
+  this check. If the item stays green, your test does not assert what the
+  criterion claims: fix the test. If it stays green with the instrument
+  exactly as the story prescribes it, the story claims more than that
+  instrument can show, which is a decision the story does not answer: write
+  .blocked/{{STORY_ID}}.md.
 - One task, one commit.
 - Before branching on a value to decide which of two mechanisms delivers an
   outcome, check the value tells the cases apart. One that is absent both when

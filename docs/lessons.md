@@ -775,3 +775,36 @@ results decide (L-15), is now given that result (`{{BASELINE}}` in
 `prompts/review.md`, case 84) and asked to run only what its judgment needs.
 
 **Enforced by:** `case_58b_merge_reuses_the_round`
+
+### L-40 — the builder had the reviewer's mutations in its prompt and never tried one
+
+Between khaita 083 and 115, six rounds failed on a mutation that survived.
+In four of them the surviving change was one the story itself listed under
+the criterion's "Goes red when": 092 round 1 (AC1, `onClick={() => {}}` on
+the footer's `div`), 096 round 2 (AC1, reverse entry by `iframe.focus()`),
+107 round 1 (AC3, "Link copied" shown before `writeText` resolves) and 114
+round 1 (AC5, `aria-hidden="true"` on the menu link). The builder had each
+of those changes in its prompt. The reviewer writes its mutations from that
+list, the builder's rules only asked it to delete the behaviour outright and
+hand that over as its tdd- patch, and a deletion is the one change every
+test catches. 114 is the costly kind: no instrument the story prescribed
+could show its item red, which the builder found only in round 2, after a
+whole round, and then blocked on, as it should have in round 1.
+
+**Lesson:** the story's red list is the reviewer's attack, written down in
+advance. A builder that never applies one of its items hands over tests
+proven against the easiest change only.
+
+**Prevention:** `prompts/rules.md` has the builder, before it hands over,
+apply ONE item per criterion, not the change its tdd- patch already records
+when the list has another, and of the rest the cheapest to run (a vitest
+test over a browser spec), see the criterion's test go red, undo it, and
+commit nothing from the check. An item that stays green is its test to fix;
+one the story's own instrument cannot show red is a question
+(`.blocked/<id>.md`), in round 1. One item per criterion is bounded on
+purpose: an item costs the builder a minute of turns, a browser item more,
+and the four lists above held two to seven items each, so the check finds
+a surviving item only when it is the one tried. It is not a substitute for
+the reviewer, which still writes its own mutations from the whole list.
+
+**Enforced by:** `case_156_builder_checks_the_storys_red_list`
