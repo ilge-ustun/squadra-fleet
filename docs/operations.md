@@ -125,9 +125,13 @@ deploys — belongs to that target, not here.
   round lost on a RED baseline. The baseline fix loop (below, 15 Oct) now
   sends a RED back to the builder inside the round; a hook is only worth
   weighing again if fixes keep running out.
-- **`.blocked/` has never fired from a builder**; the writer escalates
-  instead. The mechanism is tested (case 3), never exercised by a real agent
-  (L-24).
+- **`.blocked/` fires from real builders now** (khaita 086, 091, 104, 114),
+  where L-24 recorded it had never fired. A relaunch after an answer found
+  the old question still in the worktree and blocked on it again unless the
+  builder deleted it; the launcher now moves it to the round's evidence and
+  gives the first build prompt the question with its answer (L-44, case
+  161). Open: an answer that changes what an AC demands must still be
+  written into the story (`skills/fleet-verdict`, L-43) — nothing checks it.
 - **Lanes.** One, and enforced: the launch lock is the lane (L-31). The
   trigger for a second, stated in advance: ≥3 stories `ready` for a day and
   peak RSS under 1.2 GB per lane (one lane peaked at 1.8 GB on 25 Sep). A

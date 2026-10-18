@@ -216,6 +216,20 @@ Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 `builder.md`. Raw runner output stays machine-local in the
 target's `.runs/`.
 
+### A question, answered
+
+A builder that needs a decision the story does not make writes
+`.blocked/<id>.md` and stops; the launcher copies it to the checkout and the
+story is `blocked` until `/answer` appends the answer there and sets it
+`ready`. The relaunch takes the same worktree, which still holds the
+builder's file. Before any builder runs, the launcher moves it to
+`.review/<id>/round-<n>/question.md` (n, the round about to run), so the
+file the launcher looks for after a builder call can only be a question
+asked in this launch. The first build prompt opens with
+`prompts/answered.md` and the checkout's `.blocked/<id>.md` — the question,
+the answer under it — and the story itself, which may have been edited to
+carry the answer, wins where the two differ (L-44).
+
 ### A RED baseline inside the round
 
 The builder does not run the whole baseline before it hands over; the
