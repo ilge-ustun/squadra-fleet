@@ -4650,7 +4650,9 @@ case_155_baseline_fix_in_the_round() {
 # showed Round 3 alone).
 case_158_review_keeps_rounds_across_a_stop() {
   CASE="158 a round-2 question keeps round 1's section and findings"; fixture c158
-  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_SEQ="commit blocked" FAKE_REVIEWER=FAIL
+  # Round 2 resumes round 1's builder session: its question comes from the
+  # resumed builder, so FAKE_BUILDER_RESUMED carries it.
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_RESUMED=blocked FAKE_REVIEWER=FAIL
   assert_eq "$(field status)" blocked "round 2 asked a question"
   assert_file "$REPO/.review/$STORY.md" "the review file is written"
   assert_grep '^## Round 1 — FAIL$' "$REPO/.review/$STORY.md" "round 1's section is in it"
