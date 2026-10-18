@@ -808,3 +808,30 @@ a surviving item only when it is the one tried. It is not a substitute for
 the reviewer, which still writes its own mutations from the whole list.
 
 **Enforced by:** `case_156_builder_checks_the_storys_red_list`
+
+### L-41 — a round that stopped the launch took the judged rounds with it
+
+khaita 114 failed round 1 on a surviving mutation, and its round-2 builder
+blocked on a question. The answer sent it back to the queue, round 3 passed,
+and `.review/114.md` showed Round 3 alone, although `round-1/` and
+`round-2/` held their evidence. The launcher built the review in
+`.review/<id>.md.new`, section by section, and wrote `.review/<id>.md` only
+when the launch ended normally. A stop inside a later round — a question in
+`.blocked/`, Claude refusing the builder — deleted the `.new` file, and a
+die (a timeout, no commits) left it unread. Worse than the missing section:
+the next launch looks in `.review/<id>.md` for a prior FAIL to start its
+builder from (L-05), found none, and gave 114's round-3 builder the round-1
+prompt with no findings at all.
+
+**Lesson:** state that the next launch reads must be on disk when the round
+that made it ends, not when the launch does.
+
+**Prevention:** `writeReviewFile` in `ts/src/launch.ts` writes
+`.review/<id>.md` — the header with the last computed verdict and the rounds
+judged so far, then every section — after each judged round, and again at
+the end. Line 3 of a story that stops in a later round is therefore the last
+verdict the machine computed, and `fleet status` shows it beside `blocked`.
+A launch that judged no round still leaves the file as it found it (case
+155f).
+
+**Enforced by:** `case_158_review_keeps_rounds_across_a_stop`

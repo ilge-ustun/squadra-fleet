@@ -504,6 +504,15 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     writeFileSync(newFile, (roundStart > 0 || resumeAtReview) && isFile(reviewFile) ? keepEarlierRounds(readFileSync(reviewFile, 'utf8')) : '');
     let verdict = '';
     let round = roundStart;
+    /** .review/<id>.md as it stands: the header naming the last computed
+     *  verdict, then every section so far. Written after each judged round,
+     *  not only when the launch ends, so a later round that stops it early —
+     *  a question in .blocked/, a refused or timed-out builder — cannot take
+     *  the judged rounds with it, and the next launch reads their findings
+     *  (L-41). */
+    const writeReviewFile = (): void => {
+      writeFileSync(reviewFile, Buffer.concat([Buffer.from(finalReviewHeader({ storyId, verdict, round, ceiling: roundCeiling, baseSha })), readFileSync(newFile)]));
+    };
 
     /** One builder call and what follows it, the same for the round's call
      *  and for a baseline fix that resumes its session: a timeout is a
@@ -873,6 +882,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;
+      writeReviewFile();
       if (v.model === 'PASS' && verdict === 'FAIL') warn(`machine veto: ${v.reasons.map((r) => `${r}${REASON_END}`).join('')}`);
 
       // What the next round's builder reads is the review so far — exactly
@@ -894,8 +904,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
     // ── outcome ──────────────────────────────────────────────────────────
 
-    const body = readFileSync(newFile);
-    writeFileSync(reviewFile, Buffer.concat([Buffer.from(finalReviewHeader({ storyId, verdict, round, ceiling: roundCeiling, baseSha })), body]));
+    writeReviewFile();
     rmSync(newFile, { force: true });
 
     if (verdict === 'PASS') {
