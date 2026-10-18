@@ -121,3 +121,12 @@ criteria passed first time. If the draft is wide, split it: ids are cheap.
 If the writer says the request is already true on the base, believe the
 Evidence, check it, and tell the human the story is not needed — that is a
 result, not a failure.
+
+If instead the writer finds the *premise* was wrong — not "already fixed"
+but "never a defect" (khaita 049: the flagged lookup was deliberate,
+load-bearing design; narrowing it broke 9 of 64 tests) — tell the human;
+declining is theirs (`ts/src/status.ts`). On their word, set `status:
+declined` rather than leaving it `draft`. It stays in `.stories/` for its
+Evidence and citations, is never picked up by the queue (it isn't
+`ready`), and `fleet status --bot` hides it by default like `landed`/`done`
+(squadra-fleet PR #25). Commit it declined; do not promote it.
