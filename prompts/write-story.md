@@ -36,7 +36,7 @@ design-heavy or diagnose-first work (a state machine, a service worker,
 several interacting files, a cause not yet known). Do not use `haiku` —
 it is retired, and the lint refuses it.
 
-## The four things that have actually cost this fleet rounds
+## The five things that have actually cost this fleet rounds
 
 **1. An unbounded domain.** Every acceptance criterion must range over a set
 you name. "Every stub in the worker global" cost a story two rounds, because
@@ -64,6 +64,19 @@ is not a formality. State what these criteria do *not* establish: what is
 mocked, what only a human in a browser can see, which scenario was never
 observed. A reviewer that finds a weakness you did not state will fail the
 story for it.
+
+**5. A red that was never going to happen.** Ask two questions of each
+"Goes red when". First: would the instrument already pass on the base, in the
+environment it runs in? If so, the criterion proves nothing. A headless desktop
+browser can already render correctly what a phone's browser gets wrong, and
+jsdom does no layout at all. Assert the property that makes it right
+everywhere (which element spans what, which rule applies), not only the
+outcome the instrument's own environment already shows. Second: is the red a
+claim about someone else's code, "the audit reports X", "the browser fires
+Y"? You have not seen it happen. Prefer an assertion the test makes itself
+(the attribute is absent, the element is the last child). If the criterion
+must rely on the tool, cite where the tool does it, or state the claim under
+Known weakness as not observed.
 
 ## Also
 

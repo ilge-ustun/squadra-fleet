@@ -22,6 +22,12 @@ writer will surface it under Evidence and the story waits for the answer.
 State what is out of scope when you know it. Name the previous story when
 this one continues it. Do not paste code into an intent.
 
+Point the writer at the code: name the files, and the `path:line`s you
+already found. Tell it to read the code, not to build, run or measure. A
+writer that sets out to measure, or is given a wide brief, runs out of turns
+before it writes the file (L-43). One concern per intent: a wish with three
+concerns is three stories.
+
 ## 2. The draft
 
 ```bash
@@ -74,6 +80,15 @@ checkout, which is usually `develop`):
    rewrites, state machines, an unknown cause). `fable` only after a trial
    is recorded in `docs/COORDINATORS.md` (Trials). `haiku` is retired: in
    both of its trials the cheap tier cost a round instead of saving one.
+
+10. **Red on the base, for the reason stated.** For each AC, would its
+   instrument fail on the base, in the environment it runs in? Headless
+   Chromium is not a phone's Safari, and jsdom has no layout. If the base
+   already passes, the AC proves nothing: rewrite it to require the
+   structural property that makes it right everywhere. Check every
+   "Goes red when" that rests on a third party's behaviour (an audit rule
+   firing, a browser quirk): measure it yourself, or have the AC assert the
+   thing directly. Each has cost a round (L-43).
 
 Hand-edit what the review found. Keep the writer's citations unless you
 verified a replacement. After any edit:
