@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runSync } from './proc.ts';
-import { RunnerError, runMutations, runProbes, writeResultFile } from './evidence.ts';
+import { RunnerError, mutationDigest, runMutations, runProbes, writeResultFile, type KnownRun } from './evidence.ts';
 
 // runMutations and runProbes: the reviewer's files under round-N/mutations
 // and round-N/probes, run by the harness in the reviewer's worktree, a
@@ -100,6 +100,53 @@ describe('runMutations', () => {
     expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log }).map((r) => r.cls)).toEqual(['RED', 'RED', 'RED']);
     expect(calls()).toBe(4);
     expect(readFileSync(`${rawPrefix('AC2-c')}-pre.log`, 'utf8')).toMatch(/same selector and HEAD as 900-round1-AC1-a-pre/);
+  });
+
+  it('the tdd check, then the mutation phase: a pair known at this head with the same files is not run again; a changed one is (L-42)', () => {
+    const m = join(ev, 'mutations'); mkdirSync(m);
+    markerPatch(m, 'AC1-tdd-a', 'test');
+    markerPatch(m, 'AC2-tdd-b', 'test');
+    const calls = (): number => readFileSync(join(dir, 'trace', 'calls'), 'utf8').split('\n').filter((l) => l.startsWith('vitest')).length;
+    const record = new Map<string, KnownRun>();
+    const preRuns = new Map<string, string>();
+    expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, record, preRuns }).map((r) => r.cls)).toEqual(['RED', 'RED']);
+    expect([...record.keys()]).toEqual(['AC1-tdd-a', 'AC2-tdd-b']);
+    expect(record.get('AC1-tdd-a')?.cls).toBe('RED');
+    expect(calls()).toBe(3);
+    // The reviewer adds one of its own and rewrites the selector of another.
+    markerPatch(m, 'AC1-reviewer', 'test');
+    writeFileSync(join(m, 'AC2-tdd-b.test'), 'fake.test.tsx -t "b"\n');
+    logged.length = 0;
+    const rows = runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, known: record, preRuns });
+    expect(rows).toEqual([{ ac: 'AC1', cls: 'RED', slug: 'reviewer' }, { ac: 'AC1', cls: 'RED', slug: 'tdd-a' }, { ac: 'AC2', cls: 'RED', slug: 'tdd-b' }]);
+    // reviewer: its pre-run stands on the tdd check's GREEN one (same selector, same HEAD), its mutated run is one;
+    // tdd-a: nothing; tdd-b: a new selector, pre-run and mutated run.
+    expect(calls()).toBe(3 + 1 + 2);
+    expect(logged).toContain('mutation AC1-tdd-a: RED (run by the tdd check at this head)');
+    expect(readFileSync(join(m, 'AC1-tdd-a.result'), 'utf8')).toMatch(/^RED\n/);
+  });
+
+  it('a known pair at another head is run again', () => {
+    const m = join(ev, 'mutations'); mkdirSync(m);
+    markerPatch(m, 'AC1-tdd-a', 'test');
+    const known = new Map<string, KnownRun>([['AC1-tdd-a', { digest: mutationDigest('0'.repeat(40), join(m, 'AC1-tdd-a.patch'), { kind: 'test', file: join(m, 'AC1-tdd-a.test') }), cls: 'GREEN' }]]);
+    expect(runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, known }).map((r) => r.cls)).toEqual(['RED']);
+  });
+
+  it('mutationDigest: the head, the patch, the selector kind and its bytes each change it', () => {
+    const m = join(ev, 'mutations'); mkdirSync(m);
+    markerPatch(m, 'AC1-x', 'test');
+    const p = join(m, 'AC1-x.patch'); const t = join(m, 'AC1-x.test');
+    const h = 'a'.repeat(40);
+    const d = mutationDigest(h, p, { kind: 'test', file: t });
+    expect(mutationDigest(h, p, { kind: 'test', file: t })).toBe(d);
+    expect(mutationDigest('b'.repeat(40), p, { kind: 'test', file: t })).not.toBe(d);
+    expect(mutationDigest(h, p, { kind: 'cmd', file: t })).not.toBe(d);
+    expect(mutationDigest(h, p, undefined)).not.toBe(d);
+    writeFileSync(t, 'fake.test.tsx -t "x"\n');
+    expect(mutationDigest(h, p, { kind: 'test', file: t })).not.toBe(d);
+    writeFileSync(t, 'fake.test.tsx\n'); writeFileSync(p, `${readFileSync(p, 'utf8')} `);
+    expect(mutationDigest(h, p, { kind: 'test', file: t })).not.toBe(d);
   });
 
   it('a survivor and a bad patch are classes, not failures', () => {

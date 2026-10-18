@@ -32,16 +32,16 @@ function render(file: string, vars: RenderVars): string {
 const ALL: RenderVars = {
   STORY_ID: '900', RULES: 'R', REVIEW_TEXT: 'V', STORY_TEXT: 'S', INTENT: 'I', STORY_BASE: 'base', HEAD_SHA: 'h', BASE_SHA: 'b',
   ROUND: '2', REPO_RULES_TEXT: 'RR', VITEST_CMD: 'vt', BUILD_CMD: 'bd', LINT_CMD: 'lt', CHECK_MUTATION: 'cm', BASELINE_FIXES: '2', BASELINE: 'bl',
-  BASELINE_RED: 'br',
+  BASELINE_RED: 'br', TDD_FIXES: '3', TDD_RED: 'tr',
 };
 
 describe('renderPrompt', () => {
   it('every placeholder, and a trailing newline stripped as $(cat) strips it', () => {
     const f = prompt(
       'all.md',
-      '{{STORY_ID}} {{RULES}} {{REVIEW_TEXT}} {{STORY}} {{INTENT}} {{STORY_BASE}} {{HEAD_SHA}} {{BASE_SHA}} {{ROUND}} {{REPO_RULES}} {{VITEST_CMD}} {{BUILD_CMD}} {{LINT_CMD}} {{CHECK_MUTATION}} {{BASELINE_FIXES}} {{BASELINE}} {{BASELINE_RED}}\n\n\n',
+      '{{STORY_ID}} {{RULES}} {{REVIEW_TEXT}} {{STORY}} {{INTENT}} {{STORY_BASE}} {{HEAD_SHA}} {{BASE_SHA}} {{ROUND}} {{REPO_RULES}} {{VITEST_CMD}} {{BUILD_CMD}} {{LINT_CMD}} {{CHECK_MUTATION}} {{BASELINE_FIXES}} {{TDD_FIXES}} {{BASELINE}} {{BASELINE_RED}} {{TDD_RED}}\n\n\n',
     );
-    expect(render(f, ALL)).toBe('900 R V S I base h b 2 RR vt bd lt cm 2 bl br');
+    expect(render(f, ALL)).toBe('900 R V S I base h b 2 RR vt bd lt cm 2 3 bl br tr');
   });
 
   it('order is the contract: a value inserted early is subject to the later replacements, not the earlier ones', () => {
@@ -119,6 +119,13 @@ describe('renderPrompt', () => {
     const f = prompt('n.md', 'at most {{BASELINE_FIXES}}\n');
     expect(render(f, { BASELINE_FIXES: '0' })).toBe('at most 0');
     expect(render(f, { BASELINE_FIXES: '' })).toBe('XX n.md uses {{BASELINE_FIXES}} but BASELINE_FIXES is empty\n');
+  });
+
+  it('TDD_RED comes last and is guarded, and TDD_FIXES takes 0 as a value (L-42)', () => {
+    const f = prompt('tdd.md', 'at most {{TDD_FIXES}}:\n{{TDD_RED}}\n');
+    expect(render(f, { TDD_FIXES: '0', TDD_RED: 'GREEN AC1-tdd-a {{STORY_ID}}', STORY_ID: '900' })).toBe('!! unsubstituted in tdd.md: {{STORY_ID}} \nat most 0:\nGREEN AC1-tdd-a {{STORY_ID}}');
+    expect(render(f, { TDD_FIXES: '2', TDD_RED: '' })).toBe('XX tdd.md uses {{TDD_RED}} but TDD_RED is empty\n');
+    expect(render(f, { TDD_FIXES: '', TDD_RED: 'x' })).toBe('XX tdd.md uses {{TDD_FIXES}} but TDD_FIXES is empty\n');
   });
 
   it('a missing prompt file dies', () => {

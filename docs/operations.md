@@ -244,6 +244,20 @@ deploys — belongs to that target, not here.
   in `builder.md` — and the log; the Machine block's lines are unchanged,
   its builder and baseline seconds summing every call and every run (case
   155).
+- **The builder's tdd- pairs are run once, by the harness (L-42).** The
+  builder used to run `fleet check-mutation` over its pairs before handing
+  over, and the mutation phase ran them again: the duplicate averaged 67 s a
+  round over khaita 097–115 and reached 251–288 s on 113, whose pairs are
+  browser specs. Now the launcher runs them right after a GREEN baseline —
+  the tdd check — and hands any that is not RED back to the builder's
+  session with `prompts/tdd-fix.md`, `TDD_FIXES` times (default 2); the
+  mutation phase reuses each class by digest. Measured before the change:
+  in 12 of 25 builder sessions since 097 the first check-mutation call was
+  not all RED, and every one was fixed by redoing the evidence, never by a
+  commit — so a hand-back costs a resumed call and a re-run of the changed
+  pairs, not another baseline. The saving is the duplicate less that resumed
+  call: about 45 s a round on average, about 4 min on a round of browser
+  pairs (case 159).
 - **A bot job that outlives the poll is a unit of its own.** `/merge`
   starts its job with `DETACH_CMD` (`systemd-run --user --collect …`). A
   child forked inside the poll was killed with the poll's cgroup, seconds

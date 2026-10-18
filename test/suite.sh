@@ -673,7 +673,9 @@ case_35_builder_tdd_mutation() {
   assert_eq "$(field status)" done "true claim does not block a PASS"
 
   CASE="35b a false TDD claim fails the story"; fixture c35b
-  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  # TDD_FIXES=0: the tdd check hands nothing back (case 159), so the claim
+  # the builder made is the one the verdict reads.
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_REVIEWER=PASS MAX_ROUNDS=1 TDD_FIXES=0
   assert_grep '^AC1 +GREEN +tdd-observed-red' "$REPO/.review/$STORY.md" "survived"
   assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
   assert_grep '^computed: FAIL — .*tdd-observed-red GREEN' "$REPO/.review/$STORY.md" "reason names the tdd claim"
@@ -3540,7 +3542,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_150_bot_testdeploy case_151_refused_push_follows_origin
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
        case_155_baseline_fix_in_the_round
-       case_158_review_keeps_rounds_across_a_stop)
+       case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4645,6 +4647,84 @@ case_158_review_keeps_rounds_across_a_stop() {
   assert_grep '^## Round 1 — FAIL$' "$TRACE/claude-prompt-3" "…and given its findings"
   assert_grep '^## Round 1 — FAIL$' "$REPO/.review/$STORY.md" "the final review keeps round 1"
   assert_grep '^## Round 3 — PASS$' "$REPO/.review/$STORY.md" "and adds round 3"
+}
+
+# L-42 (17 Oct). The builder ran `fleet check-mutation` over its own tdd-
+# pairs before it handed over, and the mutation phase ran the same pairs
+# again: 447 of 487 s of khaita 113's round-2 builder, and 67 s of an
+# average round's mutation phase. The harness now runs the pairs once, right
+# after a green baseline and before the reviewer, hands any that is not RED
+# back to the builder's session (TDD_FIXES times), and the mutation phase
+# takes their classes. Red while the launcher has no tdd check.
+case_159_tdd_pairs_run_once_by_the_harness() {
+  local cm calls_before
+  CASE="159 a true pair is run once, after the baseline and before the reviewer"; fixture c159
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "story status"
+  assert_grep 'tdd check 1: 1 RED' "$LOG" "the check ran and says so"
+  assert_grep '^tdd: +check 1: 1 RED \([0-9]+s\)$' "$REPO/.review/$STORY.md" "the Machine block records it"
+  assert_grep 'mutation AC1-tdd-observed-red: RED \(run by the tdd check at this head\)' "$LOG" "the mutation phase takes its class"
+  assert_grep '^AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "and the verdict reads it"
+  cm="$(grep -n '^vitest fake.test.tsx$' "$TRACE/calls" | head -1 | cut -d: -f1)"
+  calls_before="$(grep -n '^codex$' "$TRACE/calls" | head -1 | cut -d: -f1)"
+  (( cm < calls_before )) && ok || fail "the pair ran before the reviewer (line $cm, codex at $calls_before)"
+  assert_eq "$(grep -c '^vitest fake.test.tsx$' "$TRACE/calls")" 3 "tdd pre + mutated, then the reviewer's mutated run on the shared pre-run"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/tdd-check-1.txt" "the run's classes are committed"
+
+  CASE="159b a pair that is not RED goes back to the builder's session; new pairs run at the same head"; fixture c159b
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_BUILDER_RESUMED=nocommit FAKE_BUILDER_MUTATIONS_RESUMED=red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "the fixed pair passes"
+  assert_eq "$(calls claude)" 2 "the builder and one tdd fix"
+  assert_eq "$(arg_after --resume "$TRACE/claude-args-2")" fake-session-1 "the fix resumes the builder's session"
+  assert_grep 'This is fix 1 of 2' "$TRACE/claude-prompt-2" "the fix is told which it is"
+  assert_grep '^GREEN +AC1-tdd-observed-red$' "$TRACE/claude-prompt-2" "…and every pair's class"
+  assert_grep 'stayed green' "$TRACE/claude-prompt-2" "…and what GREEN means"
+  assert_grep 'selector \(\.test\): fake.test.tsx' "$TRACE/claude-prompt-2" "…and its selector"
+  assert_eq "$(grep -c 'baseline: ' "$LOG")" 1 "no commit: the baseline is not run again"
+  assert_file "$REPO/.review/$STORY/round-1/mutations/AC1-tdd-fixed.patch" "the fix's pairs are the round's"
+  assert_no_file "$REPO/.review/$STORY/round-1/mutations/AC1-tdd-observed-red.patch" "…in place of the ones before"
+  assert_file "$REPO/.review/$STORY/round-1/builder-tdd-fix-1.json" "the fix call's object is kept"
+  assert_grep '^tdd: +check 1: 1 GREEN \([0-9]+s\) \| fix 1 \| check 2: 1 RED \([0-9]+s\)$' "$REPO/.review/$STORY.md" "the Machine block tells it"
+  assert_eq "$(calls codex)" 1 "reviewed once, after the pairs are RED"
+
+  CASE="159h a later check runs only the pairs a fix changed"; fixture c159h
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=kept+green FAKE_BUILDER_RESUMED=nocommit FAKE_BUILDER_MUTATIONS_RESUMED=kept+red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "story status"
+  assert_grep 'tdd check 2: mutation AC1-tdd-kept: RED \(run by the tdd check at this head\)' "$LOG" "the unchanged pair is not run again"
+  assert_grep 'tdd check 2: mutation AC1-tdd-fixed: RED[^(]*$' "$LOG" "the fixed one is"
+  assert_grep '^AC1 +RED +tdd-kept' "$REPO/.review/$STORY.md" "and both reach the verdict"
+
+  CASE="159c a fix that commits: the baseline runs again before the pairs"; fixture c159c
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_BUILDER_RESUMED=commit FAKE_BUILDER_MUTATIONS_RESUMED=red FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "story status"
+  assert_eq "$(grep -c 'baseline: ' "$LOG")" 2 "the baseline ran on both heads"
+  assert_grep '\| fix 1 \(committed\) \| check 2: 1 RED' "$REPO/.review/$STORY.md" "the Machine block tells it"
+  assert_grep '^commits this round: 2$' "$REPO/.review/$STORY.md" "the fix's commit is the round's"
+
+  CASE="159d fixes run out: TDD_FIXES calls, then the pair fails the round"; fixture c159d
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_BUILDER_RESUMED=nocommit FAKE_REVIEWER=PASS MAX_ROUNDS=1 TDD_FIXES=1
+  assert_eq "$(calls claude)" 2 "the builder and one fix"
+  assert_grep 'still not RED after 1 fix' "$LOG" "said"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the pair vetoes"
+  assert_grep '^computed: FAIL — .*tdd-fixed GREEN' "$REPO/.review/$STORY.md" "the reason names it"
+  assert_grep 'mutation AC1-tdd-fixed: GREEN \(run by the tdd check at this head\)' "$LOG" "not run a second time"
+
+  CASE="159e TDD_FIXES=0: nothing goes back"; fixture c159e
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_REVIEWER=PASS MAX_ROUNDS=1 TDD_FIXES=0
+  assert_eq "$(calls claude)" 1 "no fix call"
+  assert_eq "$(review_line 3)" "verdict: FAIL" "the pair vetoes"
+  assert_not_grep 'still not RED' "$LOG" "and nothing is said about fixes that were never offered"
+
+  CASE="159f a fix that asks a question blocks the story"; fixture c159f
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=green FAKE_BUILDER_RESUMED=blocked FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" blocked "story status"
+  assert_eq "$(calls codex)" 0 "nothing reviewed"
+
+  CASE="159g the builder is told the harness runs its pairs, and how often it hands one back"; fixture c159g
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 TDD_FIXES=3
+  assert_grep 'Do not run the classifier over your pairs before you hand over' "$TRACE/claude-prompt-1" "the rules say so"
+  assert_grep 'at most 3 time\(s\) a round — and one still not RED' "$TRACE/claude-prompt-1" "with the knob's value"
+  assert_not_grep 'tdd check' "$LOG" "no pairs handed over: no check"
 }
 
 for c in "${CASES[@]}"; do

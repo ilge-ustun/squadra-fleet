@@ -106,6 +106,24 @@ describe('the models a round ran on', () => {
   });
 });
 
+describe('the tdd check a round ran (L-42)', () => {
+  const section = (tdd?: string): string => renderRoundSection({
+    round: '1', headSha: 'h', roundCommits: '1', reviewedAt: 't', baseline: { test: 'GREEN', build: 'GREEN', lint: 'GREEN' },
+    timing: { build: '0', base: '0', review: '0', mut: '0', total: '0' }, builderModel: 'sonnet', reviewerModel: '',
+    ...(tdd === undefined ? {} : { tdd }),
+    acIds: ['AC1'], scope: 'CLEAN', scopeHits: [], model: 'PASS', computed: 'PASS', reasons: [], mutRows: [], probeRows: [],
+    builderText: Buffer.from('b\n'), reviewerText: Buffer.from('r\n'),
+  }).toString('utf8');
+  it('a tdd: line after the reviewer\'s, before the criteria', () => {
+    expect(section('check 1: 1 RED 1 GREEN (12s) | fix 1 | check 2: 2 RED (9s)')).toContain(
+      '\nreviewer: codex\ntdd:      check 1: 1 RED 1 GREEN (12s) | fix 1 | check 2: 2 RED (9s)\nacs:      AC1 \n',
+    );
+  });
+  it('no check ran: no line, the block as before', () => {
+    expect(section()).toContain('\nreviewer: codex\nacs:      AC1 \n');
+  });
+});
+
 describe('formatIsoSeconds — date -Iseconds', () => {
   const epoch = 1758621600; // 2026-09-23T10:00:00Z
   it.each(['Europe/Rome', 'UTC', 'Asia/Kolkata', 'America/New_York'])('under TZ=%s', (tz) => {

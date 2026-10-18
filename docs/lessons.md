@@ -835,3 +835,34 @@ A launch that judged no round still leaves the file as it found it (case
 155f).
 
 **Enforced by:** `case_158_review_keeps_rounds_across_a_stop`
+
+### L-42 — the builder's tdd- pairs were run twice, by two parties, one of which counted
+
+The builder's rules had it run `fleet check-mutation` over its own `ACn-tdd-*`
+pairs before handing over, and the harness's mutation phase then ran the same
+pairs again — the run the verdict reads. In khaita 113's round 2 the builder
+spent 447 of its 487 s in `check-mutation` over seven browser pairs, and the
+mutation phase spent another 288 s on the same seven. Over the 27 rounds of
+khaita 097–115 the second run averaged 67 s a round. The builder's run was
+never evidence: it ran in the builder's own tree, and its answer reached the
+harness only as the builder's word.
+
+**Lesson:** a check whose answer decides belongs to the party that decides,
+and runs once. What the other party needs from it is the answer, in time to
+act on it.
+
+**Prevention:** the tdd check in `ts/src/launch.ts`. Right after a GREEN
+baseline the launcher runs the builder's pairs in the reviewer's clean tree,
+through the verdict's runner (`runMutations`, `lib/evidence.ts`), before scope
+and the reviewer. A pair that is not RED goes back to the builder's own
+session (`prompts/tdd-fix.md`, `lib/tdd-check.ts`) — `TDD_FIXES` times,
+default 2 — as a RED baseline does (the baseline-fix loop, PR #32); a fix
+that commits sends the new head through the baseline first. Every class is kept by its digest — head,
+patch bytes, selector — and neither a later check nor the mutation phase runs
+that pair again (`known`, `mutationDigest`). The builder's rules no longer ask
+it to run the classifier over its pairs. Before the change, in 12 of 25 builder
+sessions since 097 the builder's first `check-mutation` call was not all RED,
+and every one was fixed by redoing the evidence, not by a commit: the
+hand-back costs a resumed call, not another baseline.
+
+**Enforced by:** `case_159_tdd_pairs_run_once_by_the_harness`

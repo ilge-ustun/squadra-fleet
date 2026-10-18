@@ -31,6 +31,11 @@
 // BASELINE_FIXES times at most (default 2; 0 never) — and the baseline is
 // run again on the head it leaves.
 //
+// TDD CHECK: once the baseline is GREEN, the builder's tdd- pairs are run
+// here, before the reviewer; pairs that are not RED go back to the builder
+// in its own session — TDD_FIXES times at most (default 2; 0 never) — and the
+// mutation phase reuses what each pair came to instead of running it again.
+//
 // Status changes are committed and pushed so the queue is visible from a
 // phone. .runs/<id>.json is machine-local (gitignored).
 //
@@ -51,7 +56,7 @@ import { builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, 
 import { reviewerResetAt } from './lib/codex-limits.ts';
 import { baselineCommands, baselineForBuilder, baselineForReviewer, baselineGreen, baselineLine, redSteps, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
-import { RunnerError, runMutations, runProbes } from './lib/evidence.ts';
+import { RunnerError, runMutations, runProbes, type KnownRun } from './lib/evidence.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushFollowingUpstream, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { Die } from './lib/die.ts';
@@ -63,6 +68,7 @@ import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
+import { tddCounts, tddForBuilder } from './lib/tdd-check.ts';
 import type { Baseline } from './lib/types.ts';
 import { computeVerdict } from './lib/verdict.ts';
 import { byCodePoint, nextToRun } from './status.ts';
@@ -151,6 +157,9 @@ export const head20 = (text: string): string => `${text.split('\n').slice(0, 20)
 /** An unquoted `$FLEET_NOTIFY_CMD "$1"`: the command word-split. */
 export const splitCommand = (cmd: string): string[] => cmd.split(/[ \t\n]+/).filter((w) => w !== '');
 
+/** How much of a pair's log a resumed builder is shown (tdd-fix.md). */
+export const TDD_TAIL_LINES = 60;
+
 /** EX_UNAVAILABLE: an agent's provider refused the call (a usage limit);
  *  the story is parked and a human was told. The queue stops its drain on
  *  it — every story after this one would be refused too. */
@@ -209,6 +218,10 @@ export interface Knobs {
    *  builder's own session, before the reviewer runs. 0: never — the RED
    *  fails the round at once. */
   baselineFixes: number;
+  /** How many times the tdd check hands pairs that are not RED back to the
+   *  builder's session before the reviewer runs. 0: never — they stand, and
+   *  the verdict reads them. */
+  tddFixes: number;
 }
 
 /** `${X:-default}`: unset or empty means the default. The numbers must be
@@ -237,6 +250,7 @@ export function readKnobs(env: NodeJS.ProcessEnv, fleetHome: string): Knobs {
     reviewerRetryMin: num('REVIEWER_RETRY_MIN', v('REVIEWER_RETRY_MIN', '60'), /^[0-9]+$/),
     fallbackReviewerModel: v('FALLBACK_REVIEWER_MODEL', 'opus'),
     baselineFixes: num('BASELINE_FIXES', v('BASELINE_FIXES', '2'), /^[0-9]+$/),
+    tddFixes: num('TDD_FIXES', v('TDD_FIXES', '2'), /^[0-9]+$/),
   };
 }
 
@@ -475,7 +489,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
 
     // The variables the prompts are rendered with, as the round goes on.
-    const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '' };
+    const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '', tddRed: '' };
     const render = (file: string): string => {
       const vars: RenderVars = {
         STORY_ID: storyId, RULES: state.rules, REVIEW_TEXT: reviewText, STORY_TEXT: storyText, STORY_BASE: storyBase,
@@ -483,6 +497,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         VITEST_CMD: cfg.vitestCmd, BUILD_CMD: cfg.buildCmd, LINT_CMD: cfg.lintCmd, CHECK_MUTATION: checkMutation,
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
         BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed,
+        TDD_FIXES: String(knobs.tddFixes), TDD_RED: state.tddRed,
       };
       let r;
       try {
@@ -693,40 +708,116 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       // message in builder.md and the round's section. A fix that commits
       // nothing ends the loop, and the RED fails the round as it always has.
       let fixes = 0;
-      while (!reviewOnlyRound && !baselineGreen(baseline) && fixes < knobs.baselineFixes) {
-        if (sessionId === '') {
-          warn('baseline RED — the builder\'s output named no session to resume, so it cannot fix it; the RED stands');
+      // The tdd check (L-42): once the baseline is GREEN, the builder's tdd-
+      // pairs run here, in the reviewer's clean tree at the head, through the
+      // verdict's own runner; the builder no longer runs them itself before
+      // it hands over (rules.md). Pairs that are not RED go back to the
+      // builder in its own session, at most TDD_FIXES times. A fix that
+      // commits moves the head, so the baseline runs again before the pairs
+      // do; one that only hands over new pairs has them run at the same head.
+      // What each pair came to is kept by its digest — head, patch, selector —
+      // and neither a later check nor the mutation phase runs that pair again.
+      // Each run's classes are kept as tdd-check-<k>.txt, a fix's object as
+      // builder-tdd-fix-<n>.json, and the Machine block's tdd: line says what
+      // ran.
+      let tddFixes = 0;
+      let tddChecks = 0;
+      const tddEntries: string[] = [];
+      let tddKnown = new Map<string, KnownRun>();
+      const preRuns = new Map<string, string>();
+      const hasPairs = (): boolean => isDir(`${evidenceDir}/mutations`) && readdirSync(`${evidenceDir}/mutations`).some((n) => /^AC[\s\S]*-[\s\S]*\.patch$/.test(n));
+      for (;;) {
+        while (!reviewOnlyRound && !baselineGreen(baseline) && fixes < knobs.baselineFixes) {
+          if (sessionId === '') {
+            warn('baseline RED — the builder\'s output named no session to resume, so it cannot fix it; the RED stands');
+            break;
+          }
+          fixes += 1;
+          const red = `${evidenceDir}/baseline-red-${fixes}`;
+          rmSync(red, { recursive: true, force: true });
+          renameSync(`${evidenceDir}/baseline`, red);
+          const steps = redSteps(baseline).join(', ');
+          log(`baseline RED (${steps}) — back to the builder, fix ${fixes} of ${knobs.baselineFixes}`);
+          const redSummary = `${red}/test.summary.json`;
+          state.baselineRed = `This is fix ${fixes} of ${knobs.baselineFixes}.\n\n${baselineForBuilder(baseline, {
+            summaryText: isFile(redSummary) ? readFileSync(redSummary, 'utf8') : undefined, logsDir: red, commands: baselineCommands(cfg),
+          })}`;
+          const before = headSha;
+          const c = await builderCall({
+            round, evidenceDir, prompt: render('baseline-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
+            who: `the builder's baseline fix ${fixes}`, tag: `baseline fix ${fixes}`, json: `builder-fix-${fixes}.json`,
+          });
+          if (c.stop) return c.code;
+          tBuild += c.secs;
+          if (c.sessionId !== '') sessionId = c.sessionId;
+          if (c.handedOver) builderHandedOver = true;
+          buildMsg = `${buildMsg}\n\n(baseline fix ${fixes} of ${knobs.baselineFixes}: the harness's baseline was RED (${steps}) at ${before.slice(0, 8)}; the builder, resumed, said:)\n${c.message}`;
+          headSha = revParse(builderWt, 'HEAD');
+          if (headSha === before) {
+            warn(`baseline fix ${fixes} made no commit — the RED baseline stands`);
+            cpSync(red, `${evidenceDir}/baseline`, { recursive: true });
+            break;
+          }
+          roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
+          log(`baseline fix ${fixes}: ${roundCommits} commit(s) this round, head ${headSha.slice(0, 8)}`);
+          baseline = baselineAt(headSha);
+        }
+
+        if (reviewOnlyRound || !baselineGreen(baseline) || !hasPairs()) break;
+        tddChecks += 1;
+        const k = tddChecks;
+        const tddPrefix = (name: string): string => `${root}/.runs/${storyId}-round${round}-tdd${k}-${name}`;
+        const tT = secs();
+        const record = new Map<string, KnownRun>();
+        let rows;
+        try {
+          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
+        } catch (e) {
+          if (!(e instanceof RunnerError)) throw e;
+          if (e.before !== undefined) dieMessage(e.before);
+          throw new Die(e.message);
+        }
+        tMut += secs() - tT;
+        tddKnown = record;
+        writeFileSync(`${evidenceDir}/tdd-check-${k}.txt`, `${rows.map((r) => `${r.cls} ${r.ac}-${r.slug}`).join('\n')}\n`);
+        tddEntries.push(`check ${k}: ${tddCounts(rows)} (${secs() - tT}s)`);
+        log(`tdd check ${k}: ${tddCounts(rows)}`);
+        if (rows.every((r) => r.cls === 'RED')) break;
+        if (tddFixes >= knobs.tddFixes) {
+          if (knobs.tddFixes > 0) warn(`tdd check: pairs still not RED after ${knobs.tddFixes} fix(es) — they stand, and the verdict reads them`);
           break;
         }
-        fixes += 1;
-        const red = `${evidenceDir}/baseline-red-${fixes}`;
-        rmSync(red, { recursive: true, force: true });
-        renameSync(`${evidenceDir}/baseline`, red);
-        const steps = redSteps(baseline).join(', ');
-        log(`baseline RED (${steps}) — back to the builder, fix ${fixes} of ${knobs.baselineFixes}`);
-        const redSummary = `${red}/test.summary.json`;
-        state.baselineRed = `This is fix ${fixes} of ${knobs.baselineFixes}.\n\n${baselineForBuilder(baseline, {
-          summaryText: isFile(redSummary) ? readFileSync(redSummary, 'utf8') : undefined, logsDir: red, commands: baselineCommands(cfg),
-        })}`;
+        if (sessionId === '') {
+          warn('tdd check: pairs not RED, and the builder\'s output named no session to resume — they stand');
+          break;
+        }
+        tddFixes += 1;
+        state.tddRed = `This is fix ${tddFixes} of ${knobs.tddFixes}.\n\n${tddForBuilder(rows, { mutationsDir: `${evidenceDir}/mutations`, rawPrefix: tddPrefix, tailLines: TDD_TAIL_LINES })}`;
+        log(`tdd check: not every pair is RED — back to the builder, fix ${tddFixes} of ${knobs.tddFixes}`);
         const before = headSha;
         const c = await builderCall({
-          round, evidenceDir, prompt: render('baseline-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
-          who: `the builder's baseline fix ${fixes}`, tag: `baseline fix ${fixes}`, json: `builder-fix-${fixes}.json`,
+          round, evidenceDir, prompt: render('tdd-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
+          who: `the builder's tdd fix ${tddFixes}`, tag: `tdd fix ${tddFixes}`, json: `builder-tdd-fix-${tddFixes}.json`,
         });
         if (c.stop) return c.code;
         tBuild += c.secs;
         if (c.sessionId !== '') sessionId = c.sessionId;
         if (c.handedOver) builderHandedOver = true;
-        buildMsg = `${buildMsg}\n\n(baseline fix ${fixes} of ${knobs.baselineFixes}: the harness's baseline was RED (${steps}) at ${before.slice(0, 8)}; the builder, resumed, said:)\n${c.message}`;
+        buildMsg = `${buildMsg}\n\n(tdd fix ${tddFixes} of ${knobs.tddFixes}: the harness's tdd check at ${before.slice(0, 8)} was ${tddCounts(rows)}; the builder, resumed, said:)\n${c.message}`;
         headSha = revParse(builderWt, 'HEAD');
-        if (headSha === before) {
-          warn(`baseline fix ${fixes} made no commit — the RED baseline stands`);
-          cpSync(red, `${evidenceDir}/baseline`, { recursive: true });
+        if (headSha !== before) {
+          roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
+          tddEntries.push(`fix ${tddFixes} (committed)`);
+          log(`tdd fix ${tddFixes}: ${roundCommits} commit(s) this round, head ${headSha.slice(0, 8)} — the baseline runs again`);
+          baseline = baselineAt(headSha);
+          continue;
+        }
+        if (!c.handedOver) {
+          tddEntries.push(`fix ${tddFixes} (no change)`);
+          warn(`tdd fix ${tddFixes} changed nothing — the pairs stand as they were run`);
           break;
         }
-        roundCommits = revListCount(builderWt, `${roundStartSha}..${headSha}`);
-        log(`baseline fix ${fixes}: ${roundCommits} commit(s) this round, head ${headSha.slice(0, 8)}`);
-        baseline = baselineAt(headSha);
+        tddEntries.push(`fix ${tddFixes}`);
       }
 
       // What this round changed, at the head the reviewer reviews: the scope
@@ -808,8 +899,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         writeFileSync(newFile, dropTrailingUnavailable(readFileSync(newFile, 'utf8'), round));
         appendFileSync(newFile, renderRoundSection({
           round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(now),
-          baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: '0', total: String(secs() - tRound) },
+          baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
           builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+          ...(tddEntries.length > 0 ? { tdd: tddEntries.join(' | ') } : {}),
           model: 'UNAVAILABLE', computed: 'UNAVAILABLE', reasons: [`reviewer unavailable: ${refusal}`], mutRows: [], probeRows: [],
           builderText: readFileSync(`${evidenceDir}/builder.md`), reviewerText: readFileSync(`${evidenceDir}/reviewer.md`),
         }));
@@ -857,14 +949,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let mutRows;
       let probeRows;
       try {
-        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, log });
+        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, log, known: tddKnown, preRuns });
         probeRows = runProbes({ wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, log });
       } catch (e) {
         if (!(e instanceof RunnerError)) throw e;
         if (e.before !== undefined) dieMessage(e.before);
         throw new Die(e.message);
       }
-      tMut = secs() - t0;
+      tMut += secs() - t0;
 
       // ── verdict ────────────────────────────────────────────────────────
       // The rule is lib/verdict.ts and the section's text lib/machine-block.ts.
@@ -879,6 +971,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         round: String(round), headSha, roundCommits: String(roundCommits), reviewedAt: formatIsoSeconds(new Date()),
         baseline, timing: { build: String(tBuild), base: String(tBase), review: String(tReview), mut: String(tMut), total: String(secs() - tRound) },
         builderModel: roundModel, builderModelUsed: builderUsed, reviewerCli, reviewerModel: reviewerModelAsked, reviewerModelUsed: reviewerUsed, acIds: acs, scope: scope.scope, scopeHits: scope.hits,
+        ...(tddEntries.length > 0 ? { tdd: tddEntries.join(' | ') } : {}),
         model: v.model, computed: v.computed, reasons: v.reasons, mutRows, probeRows, builderText: builderBytes, reviewerText: reviewerBytes,
       }));
       verdict = v.computed;
