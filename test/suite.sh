@@ -3542,7 +3542,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_150_bot_testdeploy case_151_refused_push_follows_origin
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
        case_155_baseline_fix_in_the_round
-       case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness)
+       case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
+       case_160_story_reds_are_real)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4440,6 +4441,25 @@ case_152_e2e_baseline() {
 
 # The post-merge baseline runs the same e2e command, so a merge cannot land
 # what the browser suite rejects. Red without it in merge.ts.
+# L-43 (18 Oct). Two rounds were lost to criteria that were never going to
+# go red for the reason stated: one already passed on the base in the
+# instrument's browser, one rested on an audit rule nobody had seen fire.
+# The writer's prompt and the coordinator's review now ask both questions,
+# and an answer that changes an AC edits the story in the same commit.
+# Red while the prompt and the two skills do not say so.
+case_160_story_reds_are_real() {
+  CASE="160 the writer and the coordinator ask whether each red is real"; fixture c160
+  git -C "$REPO" push -q origin base:epic/test
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=960 FAKE_BUILDER=story \
+      bash "$FLEET/fleet" write-story t 960 "x" --base epic/test >/dev/null 2>&1 )
+  assert_grep 'environment it runs in. If so, the criterion proves nothing' "$TRACE/claude-prompt-1" "the writer: red on the base, where the instrument runs"
+  assert_grep "claim about someone else's code" "$TRACE/claude-prompt-1" "the writer: a tool's behaviour is a claim"
+  assert_grep 'Known weakness as not observed' "$TRACE/claude-prompt-1" "or it is stated as not observed"
+  assert_grep 'Red on the base, for the reason stated' "$FLEET_HOME/skills/fleet-story/SKILL.md" "the coordinator's review asks it too"
+  assert_grep "read the code, not to build, run or measure" "$FLEET_HOME/skills/fleet-story/SKILL.md" "the intent keeps the writer reading"
+  assert_grep 'in the same commit as the answer' "$FLEET_HOME/skills/fleet-verdict/SKILL.md" "an answer that changes an AC edits the story"
+}
+
 case_153_merge_runs_e2e() {
   CASE="153 a red post-merge e2e run undoes the merge"; epic_story c153
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1

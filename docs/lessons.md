@@ -866,3 +866,45 @@ and every one was fixed by redoing the evidence, not by a commit: the
 hand-back costs a resumed call, not another baseline.
 
 **Enforced by:** `case_159_tdd_pairs_run_once_by_the_harness`
+
+### L-43 — criteria that were never going to go red, and an answer the story did not carry
+
+Three ways a story itself cost rounds, all in khaita, all found only when
+a builder or the coordinator ran the claim:
+
+- **Green on the base, in the instrument's browser.** 113's draft AC6 asked
+  that the collection player's buttons be centred, measured in headless
+  Chromium. Chromium already centred them on the base (119 px either side
+  at 390, 260 at 1280); the phone's Safari, the human's report, did not.
+  The coordinator measured it before promoting, and the AC was rewritten
+  to require the structure that centres them everywhere: the row spans the
+  box's content width. Unmeasured, it would have passed with no change.
+- **A red that rested on someone else's code.** 114's AC5 said O1's axe run
+  "reports aria-hidden-focus" when the menu link gets `aria-hidden="true"`.
+  Nobody had seen it fire. With the mutation applied O1 passed; the round
+  failed on the survivor, the next blocked on it (L-40), and the answer,
+  an assertion the test makes itself (`a.closest("[aria-hidden]")` is
+  null), passed in round 3.
+- **An answer the story contradicted.** 091 blocked in round 4 because a
+  `/answer` changed the decision and the story's AC still demanded the old
+  one; the builder and the reviewer judge against the story.
+
+And the writer: 083's first writer run set out to build and measure, and
+an a11y-tree draft had a wide brief; both ran out of turns before they
+wrote the file.
+
+**Lesson:** "Goes red when" is a prediction. It is worth a round only if it
+is red on the base in the environment the instrument runs in, and red for
+the reason the story gives.
+
+**Prevention:** `prompts/write-story.md` item 5 has the writer ask both
+questions of every red and prefer assertions the test makes itself, or
+state a tool's behaviour under Known weakness as not observed.
+`skills/fleet-story` adds both to the coordinator's review (item 10) and
+tells the coordinator to give the writer `path:line` pointers and "read the
+code, not build, run or measure". `skills/fleet-verdict` has an answer that
+changes an AC edit the story in the same commit.
+
+**Enforced by:** `case_160_story_reds_are_real` (the rendered writer prompt
+and the two skills carry the rules). Whether a coordinator follows them is
+not testable here.

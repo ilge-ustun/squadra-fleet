@@ -22,6 +22,12 @@ writer will surface it under Evidence and the story waits for the answer.
 State what is out of scope when you know it. Name the previous story when
 this one continues it. Do not paste code into an intent.
 
+Point the writer at the code: name the files, and the `path:line`s you
+already found. Tell it to read the code, not to build, run or measure. A
+writer that sets out to measure, or is given a wide brief, runs out of turns
+before it writes the file (L-43). One concern per intent: a wish with three
+concerns is three stories.
+
 ## 2. The draft
 
 ```bash
@@ -75,6 +81,15 @@ checkout, which is usually `develop`):
    is recorded in `docs/COORDINATORS.md` (Trials). `haiku` is retired: in
    both of its trials the cheap tier cost a round instead of saving one.
 
+10. **Red on the base, for the reason stated.** For each AC, would its
+   instrument fail on the base, in the environment it runs in? Headless
+   Chromium is not a phone's Safari, and jsdom has no layout. If the base
+   already passes, the AC proves nothing: rewrite it to require the
+   structural property that makes it right everywhere. Check every
+   "Goes red when" that rests on a third party's behaviour (an audit rule
+   firing, a browser quirk): measure it yourself, or have the AC assert the
+   thing directly. Each has cost a round (L-43).
+
 Hand-edit what the review found. Keep the writer's citations unless you
 verified a replacement. After any edit:
 
@@ -106,3 +121,12 @@ criteria passed first time. If the draft is wide, split it: ids are cheap.
 If the writer says the request is already true on the base, believe the
 Evidence, check it, and tell the human the story is not needed — that is a
 result, not a failure.
+
+If instead the writer finds the *premise* was wrong — not "already fixed"
+but "never a defect" (khaita 049: the flagged lookup was deliberate,
+load-bearing design; narrowing it broke 9 of 64 tests) — tell the human;
+declining is theirs (`ts/src/status.ts`). On their word, set `status:
+declined` rather than leaving it `draft`. It stays in `.stories/` for its
+Evidence and citations, is never picked up by the queue (it isn't
+`ready`), and `fleet status --bot` hides it by default like `landed`/`done`
+(squadra-fleet PR #25). Commit it declined; do not promote it.

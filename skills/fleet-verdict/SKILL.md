@@ -88,7 +88,11 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
 - **`blocked`.** `.blocked/<id>.md` holds the question, the options and the
   builder's recommendation. Draft the answer; the human sends `/answer
   <repo> <id> <text>`. A product question is theirs; a technical one you
-  can answer from the code, say so and let them send it.
+  can answer from the code, say so and let them send it. When the answer
+  changes what an AC demands (a new assertion, a dropped claim), edit the
+  story in the same commit as the answer. The builder and the reviewer
+  judge against the story, not the answer, and an answer the story
+  contradicts blocks it again (L-43).
 - **`in_progress` for longer than `AGENT_TIMEOUT` (default 30 min per
   agent call) with no new round** → the launcher may be dead. A live one
   holds `<target>/.git/fleet-launch.lock` (the file names its pid and
