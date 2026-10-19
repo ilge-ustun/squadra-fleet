@@ -140,4 +140,12 @@ describe('renderPrompt', () => {
       expect(r.leftover, f).toEqual([]);
     }
   });
+
+  it('answered.md, the preface of a relaunch after an answer, renders with STORY_ID alone (L-44)', () => {
+    const real = resolve(import.meta.dirname, '../../../prompts');
+    const r = renderPrompt(real, 'answered.md', { STORY_ID: '900' });
+    expect(r.leftover).toEqual([]);
+    expect(r.text).toContain('.blocked/900.md');
+    expect(r.text.startsWith('=== AN EARLIER QUESTION, ANSWERED ===')).toBe(true);
+  });
 });

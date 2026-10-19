@@ -12,6 +12,7 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 | `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` `{{TDD_FIXES}}` |
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
+| `answered.md` | `{{STORY_ID}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `baseline-fix.md` | `{{BASELINE_RED}}` `{{STORY_ID}}` |
 | `tdd-fix.md` | `{{TDD_RED}}` `{{STORY_ID}}` |
@@ -20,6 +21,13 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 `{{RULES}}` in every build prompt.
+
+`answered.md` opens the first build prompt of a launch that found the
+builder's `.blocked/<id>.md` still in its worktree — a question an earlier
+launch asked, answered since (L-44). The launcher appends the checkout's
+`.blocked/<id>.md` after it as it is, not through `renderPrompt`: the
+question and the human's answer under it, so a `{{` in an answer is never
+read as a placeholder. Then `=== END ===` and the round's own prompt.
 
 `{{BASELINE}}` is the harness's own baseline at the head under review —
 its line, the suite's count and failed names, and where its logs are

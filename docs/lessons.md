@@ -908,3 +908,30 @@ changes an AC edit the story in the same commit.
 **Enforced by:** `case_160_story_reds_are_real` (the rendered writer prompt
 and the two skills carry the rules). Whether a coordinator follows them is
 not testable here.
+
+### L-44 — an answered question stayed in the worktree and asked itself again
+
+A builder asks by writing `.blocked/<id>.md` in its worktree; after every
+builder call the launcher looks for that file there, copies it to the
+checkout and stops the story as `blocked`. `/answer` appends the answer to
+the checkout's copy and sets the story `ready`. The relaunch takes the same
+worktree (`resuming existing worktree`), and nothing had removed the
+builder's file from it, so the next builder call, whatever it did, ended
+in `blocked` on the old question. khaita 114 got through only because its
+round-3 builder happened to `rm` the file. The same relaunch never showed
+the builder the answer either: it is in the checkout, and no prompt carried
+it — only an edited story could.
+
+**Lesson:** a signal file in a tree that outlives the launch is evidence of
+the launch that wrote it, not of this one. Take it out of the tree once
+it has been acted on.
+
+**Prevention:** before any builder runs, `ts/src/launch.ts` moves a
+`.blocked/<id>.md` it finds in the builder's tree to
+`.review/<id>/round-<n>/question.md` (committed with the round's evidence),
+and the first build prompt opens with `prompts/answered.md` and the
+checkout's `.blocked/<id>.md`, the question with the answer under it,
+appended verbatim. A question written in this launch still blocks (161b).
+
+**Enforced by:** `case_161_answered_question_does_not_block_again`; the
+prompt by `render.test.ts`.

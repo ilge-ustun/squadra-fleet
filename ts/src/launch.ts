@@ -471,6 +471,22 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       }
     }
 
+    // A question the builder left in this tree was asked by an earlier
+    // launch, and the story is ready again: answered. It goes to the round's
+    // evidence, so only a question asked in this launch blocks (L-44), and
+    // the question with the answer under it — the checkout's copy, where
+    // /answer appends — opens the first build prompt.
+    let answered = '';
+    const staleQuestion = `${builderWt}/.blocked/${storyId}.md`;
+    if (isFile(staleQuestion)) {
+      const kept = `.review/${storyId}/round-${roundStart + 1}/question.md`;
+      mkdirSync(`${root}/.review/${storyId}/round-${roundStart + 1}`, { recursive: true });
+      copyFileSync(staleQuestion, `${root}/${kept}`);
+      rmSync(staleQuestion);
+      answered = capture(readFileSync(isFile(`${root}/.blocked/${storyId}.md`) ? `${root}/.blocked/${storyId}.md` : `${root}/${kept}`, 'utf8'));
+      log(`the question an earlier launch's builder asked is answered — moved out of the tree to ${kept}`);
+    }
+
     const baseSha = mergeBase(builderWt, 'HEAD', `origin/${storyBase}`);
     log(`base ${baseSha.slice(0, 8)}`);
 
@@ -628,7 +644,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const reviewFileText = isFile(reviewFile) ? readFileSync(reviewFile, 'utf8') : '';
       const roundModel = builderModelForRound(builderModel, round, knobs.builderModel);
       if (roundModel !== builderModel) log(`model: ${roundModel} for round ${round} — haiku builds one round`);
-      const buildPrompt = render(chooseBuildPrompt({ round, roundStart, reviewText, reviewFileText }));
+      const buildPrompt = (round === roundStart + 1 && answered !== '' ? `${render('answered.md')}\n\n${answered}\n=== END ===\n\n` : '')
+        + render(chooseBuildPrompt({ round, roundStart, reviewText, reviewFileText }));
 
       let buildErr: string;
       let builderUsed = '';

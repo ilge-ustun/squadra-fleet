@@ -3543,7 +3543,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
        case_155_baseline_fix_in_the_round
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
-       case_160_story_reds_are_real)
+       case_160_story_reds_are_real case_161_answered_question_does_not_block_again)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4667,6 +4667,39 @@ case_158_review_keeps_rounds_across_a_stop() {
   assert_grep '^## Round 1 — FAIL$' "$TRACE/claude-prompt-3" "…and given its findings"
   assert_grep '^## Round 1 — FAIL$' "$REPO/.review/$STORY.md" "the final review keeps round 1"
   assert_grep '^## Round 3 — PASS$' "$REPO/.review/$STORY.md" "and adds round 3"
+}
+
+# L-44 (18 Oct). A blocked story, answered and set ready, is relaunched in
+# the worktree it stopped in, and that worktree still held the builder's
+# .blocked/<id>.md. The launcher looks for that file after every builder
+# call, so unless the next builder happened to delete it (khaita 114's
+# round 3 did), the story blocked again on the old question. And the
+# answer never reached that builder: it is in the checkout's copy, not in
+# any prompt. Red while the stale question stays in the worktree.
+case_161_answered_question_does_not_block_again() {
+  CASE="161 an answered question moves to the evidence; the builder gets it with the answer"; fixture c161
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  assert_eq "$(field status)" blocked "the builder asked a question"
+  assert_not_grep 'AN EARLIER QUESTION, ANSWERED' "$TRACE/claude-prompt-1" "a first launch has no answered question"
+  printf '\n## Answer (telegram, 2026-10-18T12:00:00Z)\n\ntake option B\n' >> "$REPO/.blocked/$STORY.md"
+  set_ready                                   # as /answer does; the worktree keeps its file
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS
+  assert_eq "$(field status)" done "the answered story is built, not blocked again"
+  assert_grep 'AN EARLIER QUESTION, ANSWERED' "$TRACE/claude-prompt-2" "the relaunched builder is told"
+  assert_grep '^fake question: which option\?$' "$TRACE/claude-prompt-2" "…what was asked"
+  assert_grep '^take option B$' "$TRACE/claude-prompt-2" "…and the answer"
+  assert_file "$REPO/.review/$STORY/round-2/question.md" "the old question is kept as evidence"
+  assert_contains "$(tracked)" ".review/$STORY/round-2/question.md" "and committed"
+  assert_grep 'question an earlier launch' "$LOG" "the log says so"
+
+  CASE="161b a question asked in the relaunch still blocks"; fixture c161b
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  printf '\n## Answer (telegram, 2026-10-18T12:00:00Z)\n\ntake option B\n' >> "$REPO/.blocked/$STORY.md"
+  set_ready
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  assert_eq "$(field status)" blocked "a new question blocks"
+  assert_eq "$(calls codex)" 0 "nothing reviewed"
+  assert_not_grep '^take option B$' "$REPO/.blocked/$STORY.md" "the checkout holds the new question"
 }
 
 # L-42 (17 Oct). The builder ran `fleet check-mutation` over its own tdd-
