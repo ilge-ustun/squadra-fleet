@@ -77,6 +77,33 @@ systemctl --user daemon-reload
 systemctl --user enable --now fleet-agents-update.timer
 ```
 
+### The coordinator's Remote Control server (a service, no timer)
+
+`fleet-remote-control.service` runs `fleet remote-control`: a Claude Code
+Remote Control server in `~/work`, so a coordinator's session can be opened
+from claude.ai/code or the Claude app after any reboot, with nobody at a
+terminal. It starts with the user manager and again 30 s after any exit;
+the server keeps one session open and starts a second on demand
+(`--capacity 2`, about 400 MB for the server and one session).
+
+```bash
+ln -sf ~/work/fleet/systemd/fleet-remote-control.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-remote-control.service
+```
+
+Before it will stay up: `claude` must have been trusted in `~/work` once
+(run `claude` there and accept). The home directory will not do — Remote
+Control never saves trust for it and the server exits at once. A session
+keeps the memory of its directory's project; to keep the one a session
+started in `~` had, `~/work/.claude/settings.local.json` names it:
+
+```json
+{ "autoMemoryDirectory": "/home/fleet/.claude/projects/-home-fleet/memory" }
+```
+
+`systemctl --user restart fleet-remote-control` ends every open session.
+
 The models each round actually ran on are in the review's Machine block
 (`builder:  sonnet → claude-sonnet-5`, `reviewer: codex → gpt-6-astra`), so
 a release that changes behaviour shows up in the verdicts' history.
@@ -121,6 +148,7 @@ systemctl --user list-timers 'fleet-*'           # when they next fire
 journalctl --user -u fleet-queue -f              # live
 journalctl --user -u fleet-queue --since today   # what it did
 journalctl --user -u fleet-bot --since today     # what was asked of it
+journalctl --user -u fleet-remote-control -b     # the Remote Control server since boot
 ./fleet status <repo>                            # where every story of one repo stands
 ```
 
@@ -155,6 +183,8 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | `fleet-bot.service` | `TimeoutStartSec=2min` | a poll is one request and a few git commands. `/run` starts the queue with `--no-block`: a plain `systemctl start` on a oneshot waits for the whole drain, and the poll was killed at two minutes with its reply unsent and the bot deaf meanwhile. `/merge`'s job is a transient unit of its own (`fleet-merge-<ms>`, `DETACH_CMD`): a child left in this oneshot's cgroup is killed when the poll ends (L-34) |
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
 | transient | `fleet-test-deploy` | the test server, started by `fleet test-deploy` with `systemd-run --user`; no unit file, gone after a reboot. `fleet-test-deploy-build` is `/testdeploy`'s build, one at a time by its fixed name |
+| `fleet-remote-control.service` | `Restart=always`, `StartLimitIntervalSec=0` | the server is there whenever the app is opened, whatever ended it, and a long network outage does not leave the unit failed |
+| `bin/remote-control.sh` | `--capacity 2` | each session took ~250 MB beside the server's ~150 MB, on a box where a drain may take 2.5 GB |
 | `fleet-bot.timer` | `Persistent=false` | a missed poll is not worth catching up; the offset means nothing is lost by being late |
 
 ## Promoting stories remotely

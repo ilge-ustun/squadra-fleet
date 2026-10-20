@@ -5,7 +5,7 @@
 # `fleet status <repo>`, `fleet merge <repo> --epic epic/<name>`.
 #
 # A command is a TypeScript program, ts/src/bin/<command>.ts, run by node as
-# is — no build, no runtime dependencies — or one of the two bash chores in
+# is — no build, no runtime dependencies — or one of the bash chores in
 # bin/. node loads a whole program before it starts, so editing ts/src/ while
 # a launcher runs is safe: the change reaches the next launch.
 #
@@ -34,6 +34,7 @@ usage: fleet <command> [args…]
   telegram send [--pre] <text> | poll                      the notifications and the phone commands
   install-skills                                           link skills/ into ~/.claude/skills
   update-agents                                            the claude and codex CLIs to their newest release
+  remote-control                                           a Remote Control server for the coordinator, in the foreground
 EOF
 }
 
@@ -44,7 +45,7 @@ case "$cmd" in
     program=("$FLEET_HOME/ts/src/bin/$cmd.ts") ;;
   check-mutation)
     program=("$FLEET_HOME/ts/src/bin/mutation.ts" check) ;;
-  install-skills|update-agents)
+  install-skills|update-agents|remote-control)
     exec bash "$FLEET_HOME/bin/$cmd.sh" "$@" ;;
   help|-h|--help)
     usage; exit 0 ;;

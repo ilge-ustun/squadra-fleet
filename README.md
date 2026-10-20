@@ -322,6 +322,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet test-deploy <repo> --status` · `--stop` | | what the test URL serves and whether it is up · stop it and remove its tree |
 | `fleet install-skills` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
 | `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
+| `fleet remote-control` | | a Claude Code Remote Control server for the coordinator in `~/work`, in the foreground; `fleet-remote-control.service` keeps it running across reboots |
 
 A merge from the phone is detached: the bot acknowledges it immediately and
 sends the result when it ends. It has to be — the merge installs deps and
@@ -540,7 +541,7 @@ are inactive.
 ```
 fleet               the entry point: fleet <command> — a case table over ts/src/bin/ and bin/
 bin/lib.sh          FLEET_HOME and load_repo (the .fleet/config contract, read by ts/src/lib/config.ts); log/warn/die
-bin/install-skills.sh  bin/update-agents.sh   the two bash chores
+bin/install-skills.sh  bin/update-agents.sh  bin/remote-control.sh   the bash chores
 ts/                 the harness, run by node as is:
   src/bin/          one entry point per command: launch merge revert reset run-queue lint-story
                     new-epic write-story mutation (check-mutation) status telegram
@@ -554,7 +555,7 @@ ts/                 the harness, run by node as is:
 prompts/            the agents' prompts; README = the verdict contract
 skills/             the coordinator's procedures (.agents/skills → skills/ for Codex)
 test/suite.sh       the suite            test/fakes/   claude, codex, vitest, npm; telegram-api.mts
-systemd/            the three timer/service pairs
+systemd/            the three timer/service pairs and the Remote Control service
 repos/              the registry         docs/         operations, lessons, coordinators
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```

@@ -3544,7 +3544,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_155_baseline_fix_in_the_round
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
-       case_162_queue_timer_fires_after_any_boot)
+       case_162_queue_timer_fires_after_any_boot case_163_remote_control)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4796,6 +4796,43 @@ case_162_queue_timer_fires_after_any_boot() {
   assert_not_grep '^OnBootSec=' "$t" "not after the kernel's boot, which a late manager has passed"
   assert_not_grep '^Persistent=' "$t" "no stamp to drop the late firing by (Persistent only ever applied to OnCalendar)"
   assert_grep '^OnUnitActiveSec=15min$' "$t" "and every fifteen minutes after a drain starts"
+}
+
+# 20 Oct. The coordinator's session had been started by hand, in tmux over
+# ssh, with /remote-control; the maintenance's reboots ended it and nothing
+# brought it back. `fleet remote-control` runs a Claude Code Remote Control
+# server in the foreground, and fleet-remote-control.service runs that at
+# every start of the user manager and after every exit. Red while neither
+# exists.
+case_163_remote_control() {
+  CASE="163 fleet remote-control serves Remote Control from REMOTE_CONTROL_DIR"; fixture c163
+  local B="$FX/bin" W="$FX/work" out rc
+  mkdir -p "$B" "$W"
+  cat > "$B/claude" <<EOF
+#!/usr/bin/env bash
+pwd > "$TRACE/rc-pwd"
+printf '%s\n' "\$@" > "$TRACE/rc-args"
+EOF
+  chmod +x "$B/claude"
+  out="$( env PATH="$B:$PATH" REMOTE_CONTROL_DIR="$W" bash "$FLEET/fleet" remote-control 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "the server's exit is the command's"
+  assert_eq "$(cat "$TRACE/rc-pwd" 2>/dev/null)" "$W" "in REMOTE_CONTROL_DIR"
+  assert_eq "$(head -n 1 "$TRACE/rc-args" 2>/dev/null)" remote-control "the server, not an interactive session"
+  assert_grep '^--capacity$' "$TRACE/rc-args" "with a ceiling on its sessions"
+
+  CASE="163b a missing directory is a die, and claude is not started"
+  rm -f "$TRACE/rc-args"
+  out="$( env PATH="$B:$PATH" REMOTE_CONTROL_DIR="$FX/nowhere" bash "$FLEET/fleet" remote-control 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "exit 1"
+  assert_contains "$out" "$FX/nowhere" "it names the directory"
+  assert_no_file "$TRACE/rc-args" "nothing started"
+
+  CASE="163c the unit runs it at every start of the user manager and after every exit"
+  local u="$FLEET/systemd/fleet-remote-control.service"
+  assert_grep '^ExecStart=.*/fleet remote-control$' "$u" "it runs the command"
+  assert_grep '^Restart=always$' "$u" "it comes back after any exit"
+  assert_grep '^StartLimitIntervalSec=0$' "$u" "and never gives up"
+  assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
 }
 
 for c in "${CASES[@]}"; do

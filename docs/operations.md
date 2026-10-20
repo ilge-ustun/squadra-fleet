@@ -70,8 +70,8 @@ When nothing is deployed, Caddy answers 502.
 
 ## Unattended
 
-`systemd/` holds three timer/service pairs, installed as user units with
-lingering on (`systemd/README.md`):
+`systemd/` holds three timer/service pairs and one service, installed as
+user units with lingering on (`systemd/README.md`):
 
 - `fleet-queue` — `fleet run-queue --all --max 5` every 15 minutes: reaps
   orphans, runs every `ready` story lowest id first, merges each computed
@@ -84,6 +84,9 @@ lingering on (`systemd/README.md`):
 - `fleet-agents-update` — `fleet update-agents` weekly, only while the
   queue is idle: the model aliases mean "the newest this CLI knows", and
   codex never updates itself.
+- `fleet-remote-control` — `fleet remote-control`, always: a Claude Code
+  Remote Control server in `~/work`, so the coordinator can be reached from
+  the app after a reboot. Not part of the pipeline; nothing waits for it.
 
 ## What needs a human, fleet-wide
 
