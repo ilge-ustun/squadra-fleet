@@ -13,7 +13,7 @@ cd ~/work/fleet
 ./fleet status <repo> --bot --all     # every story: landing state, round, computed verdict
 bash test/suite.sh                    # the harness's own suite; the count is on its last line
 git log --oneline -15
-systemctl --user is-active fleet-bot.service fleet-queue.service
+systemctl --user list-units fleet-bot.service 'fleet-queue@*.service' --state=active,activating --no-legend   # idle: prints nothing
 systemctl --user list-timers 'fleet-*'
 ```
 
@@ -75,9 +75,10 @@ When nothing is deployed, Caddy answers 502.
 `systemd/` holds three timer/service pairs and one service, installed as
 user units with lingering on (`systemd/README.md`):
 
-- `fleet-queue` — `fleet run-queue --all --max 5` every 15 minutes: reaps
-  orphans, runs every `ready` story lowest id first, merges each computed
-  PASS into its epic. A stopped story does not stop the queue; crash resume
+- `fleet-queue@<repo>` — `fleet run-queue <repo> --max 5` every 15 minutes,
+  one instance per registered repo (so repos drain side by side): reaps
+  orphans, runs every `ready` story of the repo lowest id first, merges each
+  computed PASS into its epic. A stopped story does not stop the queue; crash resume
   is tested (case 42). `AGENT_TIMEOUT` wraps both agent calls.
 - `fleet-bot` — `fleet telegram poll` every minute:
   `/status /status-all /why /promote /answer /merge /revert /run /repo /help`;
@@ -137,13 +138,18 @@ deploys — belongs to that target, not here.
   gives the first build prompt the question with its answer (L-44, case
   161). Open: an answer that changes what an AC demands must still be
   written into the story (`skills/fleet-verdict`, L-43) — nothing checks it.
-- **Lanes.** One, and enforced: the launch lock is the lane (L-31). The
+- **Lanes.** One per repo, and enforced: the launch lock is the lane
+  (L-31), and it is per repo, so two repos launch at once — each has its own
+  queue unit (`fleet-queue@<repo>`), memory-capped for two concurrent drains
+  (`MemoryHigh=3000M`), and a drain that finds less than `LAUNCH_MIN_FREE_MB`
+  of memory available launches nothing. The
   trigger for a second, stated in advance: ≥3 stories `ready` for a day and
   peak RSS under 1.2 GB per lane (one lane peaked at 1.8 GB on 25 Sep). A
-  second lane needs a second slot in the lock and a claim under the fleet
-  lock — two launchers could then pass the status check together.
-  Lanes across repos are planned (15 Oct 2026, a second project, a Tauri
-  app): `docs/handoff-parallel-tauri.md` is the brief.
+  second lane *within* a repo needs a second slot in the lock and a claim
+  under the fleet lock — two launchers could then pass the status check
+  together; not built. Lanes across repos (20 Oct 2026, for a second
+  project, a Tauri app): `docs/handoff-parallel-tauri.md` is the brief.
+  `fleet test-deploy` stays one slot on the machine, khaita's.
 - **`fleet reset` and `fleet status` look only at `wt-<id>`.** `reset
   --force` during a review removes the branch under a live launcher, and
   `RUNNING` misses the review phase. `reset` should take the launch lock.
@@ -209,7 +215,7 @@ deploys — belongs to that target, not here.
   (`/promote` and `/answer` refuse `in_progress`), so it would guard
   against a writer that does not exist. A second lane needs it.
 - **`/run` enqueues, never waits.** `QUEUE_START_CMD` defaults to
-  `systemctl --user start --no-block fleet-queue.service`. A oneshot's
+  `systemctl --user start --no-block fleet-queue@<repo>.service`. A oneshot's
   `start` waits for the whole unit, and the poll's two-minute timeout
   killed it mid-drain with its reply unsent (L-33). A drain already running
   makes the start a no-op; the reply is still true. `/promote` starts one the same way

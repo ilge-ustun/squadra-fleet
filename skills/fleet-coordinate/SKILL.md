@@ -46,7 +46,7 @@ have 'recommended' — answer, don't send it to me." So you:
 
 - **Promote** a story you have reviewed and linted: `status: ready`, commit
   `story(<id>): promoted to ready (coordinator, delegated by the human)`,
-  push, `systemctl --user start --no-block fleet-queue.service` — what
+  push, `systemctl --user start --no-block fleet-queue@<repo>.service` — what
   `/promote` does.
 - **Answer** a `.blocked/<id>.md` question when you have a recommended
   option, as `/answer` does: append `## Answer (coordinator, <date>)` and

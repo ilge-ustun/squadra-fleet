@@ -8,8 +8,10 @@
 // Every die is 1 with an XX line on stderr; a normal drain, an empty queue
 // and --all's own walk are 0. lib.sh's die line for a bad repo or config
 // reaches stderr from the child bash itself. No exit hooks: each story it
-// launches is its own process with its own cleanup. fleet-queue.timer runs
-// `--all --max 5` every fifteen minutes; by hand, run it detached:
+// launches is its own process with its own cleanup. fleet-queue@<repo>.timer
+// runs `<repo> --max 5` every fifteen minutes, one unit per repo so repos
+// drain side by side; --all is the by-hand walk of every repo, one after
+// another. By hand, run it detached:
 //   setsid nohup bash -c 'fleet run-queue <repo>' > queue.log 2>&1 < /dev/null &
 import { resolve } from 'node:path';
 import { ConfigError, loadRepo } from '../lib/config.ts';

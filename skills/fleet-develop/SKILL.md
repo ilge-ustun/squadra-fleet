@@ -6,7 +6,7 @@ description: Change the fleet harness itself (~/work/fleet) — worktree, a test
 # Changing the harness
 
 The checkout at `~/work/fleet` is **live**: systemd user timers run it
-every minute (`fleet-bot`) and every fifteen (`fleet-queue`). Never edit it
+every minute (`fleet-bot`) and every fifteen (`fleet-queue@<repo>`, one per repo). Never edit it
 in place.
 
 ```bash
@@ -72,7 +72,7 @@ gh pr create --base main --fill
 Once the human has merged it, the live checkout follows:
 
 ```bash
-systemctl --user is-active fleet-bot.service fleet-queue.service   # both must print inactive
+systemctl --user list-units fleet-bot.service 'fleet-queue@*.service' --state=active,activating --no-legend   # idle: prints nothing
 cd ~/work/fleet && git pull --ff-only
 git worktree remove ../fleet-wt-<topic> && git branch -d <topic>
 ```

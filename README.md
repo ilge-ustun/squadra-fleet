@@ -280,7 +280,7 @@ Every view below is read-only and safe while a round is running.
 cd ~/work/fleet
 ./fleet status <repo>                  # the epics, then every story — landing state, round, verdict
 ./fleet status <repo> <id>             # one story, with its latest round's Machine block
-journalctl --user -u fleet-queue -f    # the queue's drains, live (Ctrl-C to leave)
+journalctl --user -u fleet-queue@<repo> -f    # a repo's drains, live (Ctrl-C to leave)
 journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
 ls -t <target>/.runs/ | grep ^<id> | head      # raw output, newest first
 tail -f <target>/.runs/<id>-round1-*.log       # a mutation being run
@@ -490,7 +490,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
 | `BASELINE_FIXES` | 2 | times a round's RED baseline goes back to its builder's session with the RED logs before the reviewer runs; 0 fails the round on it at once |
 | `TDD_FIXES` | 2 | times the tdd check hands the builder's pairs that are not RED back to its session before the reviewer runs; 0 hands nothing back, and the verdict reads them |
-| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
+| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue@.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |

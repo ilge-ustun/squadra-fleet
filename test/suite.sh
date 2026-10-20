@@ -3545,7 +3545,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
-       case_164_queue_waits_for_free_memory)
+       case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4792,7 +4792,7 @@ case_159_tdd_pairs_run_once_by_the_harness() {
 # timer counts from the kernel's boot and keeps a stamp.
 case_162_queue_timer_fires_after_any_boot() {
   CASE="162 the queue timer counts from the user manager's start and keeps no stamp"
-  local t="$FLEET_HOME/systemd/fleet-queue.timer"
+  local t="$FLEET_HOME/systemd/fleet-queue@.timer"
   assert_grep '^OnStartupSec=2min$' "$t" "two minutes after the user manager starts, always in its future"
   assert_not_grep '^OnBootSec=' "$t" "not after the kernel's boot, which a late manager has passed"
   assert_not_grep '^Persistent=' "$t" "no stamp to drop the late firing by (Persistent only ever applied to OnCalendar)"
@@ -4866,6 +4866,29 @@ case_164_queue_waits_for_free_memory() {
   fixture c164d
   queue FLEET_MEMINFO="$FX/nowhere" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
   assert_eq "$(field status)" done "unknown is not low"
+}
+
+# 20 Oct. A second project (a Tauri app) drains beside khaita on the same
+# box. One `--all` unit walks the repos one after another, so a long khaita
+# epic made the other repo wait. The launch lock is per repo already; what
+# was missing was a unit per repo: fleet-queue@<repo> (service and timer),
+# each running `run-queue <repo>`. Red while the units are the single --all
+# pair, and while update-agents asks only about fleet-queue.service.
+case_165_queue_unit_per_repo() {
+  CASE="165 the queue is a template: one drain unit per registered repo"
+  local s="$FLEET_HOME/systemd/fleet-queue@.service" t="$FLEET_HOME/systemd/fleet-queue@.timer"
+  assert_grep '^ExecStart=.*/fleet run-queue %i --max 5$' "$s" "it drains the instance's repo, five stories at most"
+  assert_not_grep 'run-queue --all' "$s" "not every repo one after another"
+  assert_grep '^Type=oneshot$' "$s" "a repo's drain is never entered twice"
+  assert_grep '^Environment=AGENT_TIMEOUT=3600$' "$s" "the agents' ceiling is the old unit's"
+  assert_grep '^TimeoutStartSec=6h$' "$s" "so is the drain's"
+  assert_grep '^MemoryHigh=3000M$' "$s" "a share of the box for two concurrent drains"
+  assert_grep '^WantedBy=timers.target$' "$t" "the timer is enabled per instance"
+  assert_no_file "$FLEET_HOME/systemd/fleet-queue.service" "the single --all service is gone"
+  assert_no_file "$FLEET_HOME/systemd/fleet-queue.timer" "and its timer"
+
+  CASE="165b the agent updater waits while any repo's drain runs"
+  assert_grep 'fleet-queue@\*\.service' "$FLEET_HOME/bin/update-agents.sh" "it asks about every instance"
 }
 
 for c in "${CASES[@]}"; do

@@ -1,7 +1,9 @@
 # Running the queue unattended
 
-Four units, in two pairs. **`fleet-queue`** — a timer every 15 minutes and a
-oneshot service that drains whatever is `ready`. **`fleet-bot`** — a timer
+Four units, in two pairs, and the queue's is a template. **`fleet-queue@<repo>`**
+— a timer every 15 minutes and a oneshot service that drains whatever is
+`ready` in that one repo; one instance per registered repo (`repos/<repo>.env`),
+so two repos drain side by side. **`fleet-bot`** — a timer
 every minute and a oneshot service that reads Telegram commands and answers
 them. Nothing here is installed by an agent — installing a unit and enabling
 lingering are a human's calls.
@@ -18,13 +20,28 @@ model call, no story processing. So an idle fleet polling every 15 minutes is
 cheap, and the interval is a question of how soon you want a promoted story
 picked up — not of load.
 
-The service is `Type=oneshot`, so while a drain is running the timer's next
-firing is **skipped rather than queued**. Two drains can never overlap, and
-nothing in the fleet has to know about it.
+The service is `Type=oneshot`, so while a repo's drain is running that repo's
+timer's next firing is **skipped rather than queued**. Two drains of one repo
+can never overlap, and nothing in the fleet has to know about it; the
+repo's launch lock (`<repo>/.git/fleet-launch.lock`) is the second guard.
+Drains of different repos are different units and do run at the same time.
+
+## Two repos at once
+
+Each instance is capped at `MemoryHigh=3000M`: about 1.4 GB is resident outside
+the units, which leaves ~6.5 GB of the 7.9 GB box, split between two drains.
+One lane peaked at 1.8 GB (25 Sep), so a lane is slowed, never killed, well
+above its own peak. And before each launch a drain reads `MemAvailable`: below
+`LAUNCH_MIN_FREE_MB` (default 2500) it launches nothing, says so in the
+journal, and leaves the repo to its next drain. A third repo is a third share:
+revisit `MemoryHigh` then, or give one instance its own with
+`systemctl --user edit fleet-queue@<repo>.service`. A Rust or Tauri repo
+whose builds peak above 1.8 GB sets a larger `LAUNCH_MIN_FREE_MB` the same
+way (`Environment=LAUNCH_MIN_FREE_MB=4000`).
 
 ## What happens after the machine restarts
 
-The queue's first drain of a boot starts two minutes after the user
+Each repo's first drain of a boot starts two minutes after the user
 manager does (`OnStartupSec=2min`), however long the boot took. That is also
 the crash-recovery path: the first thing
 `fleet run-queue` does is reap orphans, so a story stranded at `in_progress` by a
@@ -39,12 +56,10 @@ already past, and systemd dropped that late firing because `Persistent=true`
 had left a stamp file. The queue did not run for ten hours; the bot, with no
 `Persistent`, fired every minute. After any reboot,
 `systemctl --user list-timers 'fleet-*'` shows the queue's next firing — a
-`-` there with nothing in `journalctl --user -u fleet-queue -b` is this
-failure, and `systemctl --user start --no-block fleet-queue.service` is the
-cure.
-
-The queue unit runs `fleet run-queue --all`: every repo in `repos/` is drained in
-turn, each in its own process, and `--max` is a per-repo ceiling.
+`-` there with nothing in `journalctl --user -u 'fleet-queue@*' -b` is this
+failure, and `systemctl --user start --no-block fleet-queue@<repo>.service` is the
+cure. (`fleet run-queue --all` still walks every repo in `repos/` in turn,
+each in its own process: a by-hand command now, not a unit.)
 
 ## Install
 
@@ -52,13 +67,36 @@ As the `fleet` user:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-ln -sf ~/work/fleet/systemd/fleet-queue.service ~/.config/systemd/user/
-ln -sf ~/work/fleet/systemd/fleet-queue.timer   ~/.config/systemd/user/
+ln -sf ~/work/fleet/systemd/'fleet-queue@.service' ~/.config/systemd/user/
+ln -sf ~/work/fleet/systemd/'fleet-queue@.timer'   ~/.config/systemd/user/
 ln -sf ~/work/fleet/systemd/fleet-bot.service   ~/.config/systemd/user/
 ln -sf ~/work/fleet/systemd/fleet-bot.timer     ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now fleet-queue.timer
+systemctl --user enable --now fleet-queue@khaita.timer     # one per repos/<repo>.env
 systemctl --user enable --now fleet-bot.timer
+```
+
+### Adding a repo
+
+Register it (`repos/<name>.env`, in its own parent directory), then
+`systemctl --user enable --now fleet-queue@<name>.timer`. Nothing else: the
+bot's `/run <name>` and `/promote <name> <id>` start `fleet-queue@<name>.service`.
+
+### Migrating from the single `--all` unit
+
+A box that ran `fleet-queue.timer` and `fleet-queue.service` (every repo, one
+after another) moves to one instance per repo. After the merge, with the
+live checkout fast-forwarded (both queue and bot inactive), and once, as the
+`fleet` user:
+
+```bash
+systemctl --user disable --now fleet-queue.timer     # a drain in flight is not stopped; it ends by itself
+rm ~/.config/systemd/user/fleet-queue.service ~/.config/systemd/user/fleet-queue.timer
+ln -sf ~/work/fleet/systemd/'fleet-queue@.service' ~/.config/systemd/user/
+ln -sf ~/work/fleet/systemd/'fleet-queue@.timer'   ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-queue@khaita.timer     # and one for each other repo in repos/
+systemctl --user list-timers 'fleet-*'                     # each repo's NEXT shows a time
 ```
 
 ### The agent updater (a third pair)
@@ -68,7 +106,7 @@ default), and an alias is only as new as the CLI resolving it. Claude Code
 updates itself; codex, an npm global under nvm, does not.
 `fleet-agents-update.timer` runs `fleet update-agents` on Sundays at 04:30: it
 runs `claude update` and `npm install -g @openai/codex@latest`, and does
-nothing (exit 0) while `fleet-queue.service` is active.
+nothing (exit 0) while any `fleet-queue@*.service` is active.
 
 ```bash
 ln -sf ~/work/fleet/systemd/fleet-agents-update.service ~/.config/systemd/user/
@@ -145,8 +183,8 @@ sudo loginctl enable-linger fleet
 
 ```bash
 systemctl --user list-timers 'fleet-*'           # when they next fire
-journalctl --user -u fleet-queue -f              # live
-journalctl --user -u fleet-queue --since today   # what it did
+journalctl --user -u fleet-queue@khaita -f              # live (a repo's drains)
+journalctl --user -u 'fleet-queue@*' --since today      # what every repo's drain did
 journalctl --user -u fleet-bot --since today     # what was asked of it
 journalctl --user -u fleet-remote-control -b     # the Remote Control server since boot
 ./fleet status <repo>                            # where every story of one repo stands
@@ -167,7 +205,7 @@ exits 75 and touches nothing — wait for the drain. If you want to be sure the
 timer stays out of the way:
 
 ```bash
-systemctl --user stop fleet-queue.timer     # re-enable with `start`
+systemctl --user stop fleet-queue@<repo>.timer     # re-enable with `start`
 ```
 
 ## Settings worth knowing
