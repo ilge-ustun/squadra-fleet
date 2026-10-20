@@ -3544,7 +3544,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_155_baseline_fix_in_the_round
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
-       case_162_queue_timer_fires_after_any_boot case_163_remote_control)
+       case_162_queue_timer_fires_after_any_boot case_163_remote_control
+       case_164_queue_waits_for_free_memory)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4833,6 +4834,38 @@ EOF
   assert_grep '^Restart=always$' "$u" "it comes back after any exit"
   assert_grep '^StartLimitIntervalSec=0$' "$u" "and never gives up"
   assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
+}
+
+# 20 Oct. A second project will drain beside khaita on a 7.9 GB box, and one
+# lane peaked at 1.8 GB (25 Sep). A drain that finds less than
+# LAUNCH_MIN_FREE_MB (default 2500) available launches nothing and leaves the
+# repo to its next drain, as it does for a launch lock held by another. The
+# file read is FLEET_MEMINFO (default /proc/meminfo), the seam this case uses.
+# Red while run-queue.ts never reads it: the builder runs at 1000 MB free.
+case_164_queue_waits_for_free_memory() {
+  CASE="164 a drain with too little free memory launches nothing"; fixture c164
+  printf 'MemTotal:  8120000 kB\nMemAvailable:  1024000 kB\n' > "$FX/meminfo"
+  queue FLEET_MEMINFO="$FX/meminfo" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the drain still exits cleanly"
+  assert_grep 'only 1000 MB of memory is available \(LAUNCH_MIN_FREE_MB=2500\) — leaving the queue to the next drain' "$FX/queue.log" "it says why it left the repo"
+  assert_grep 'nothing ran: only 1000 MB' "$FX/queue.log" "and the summary says nothing ran for that reason"
+  assert_eq "$(field status)" ready "the story is still ready"
+  assert_eq "$(calls claude)" 0 "no builder ran"
+
+  CASE="164b the knob moves the line, and 0 turns the guard off"
+  queue FLEET_MEMINFO="$FX/meminfo" LAUNCH_MIN_FREE_MB=0 FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "with the guard off the story ran"
+
+  CASE="164c enough memory: the drain runs the story"
+  fixture c164c
+  printf 'MemAvailable:  3072000 kB\n' > "$FX/meminfo"
+  queue FLEET_MEMINFO="$FX/meminfo" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "3000 MB is enough"
+
+  CASE="164d a meminfo that cannot be read does not stop the fleet"
+  fixture c164d
+  queue FLEET_MEMINFO="$FX/nowhere" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$(field status)" done "unknown is not low"
 }
 
 for c in "${CASES[@]}"; do

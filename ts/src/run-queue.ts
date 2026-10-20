@@ -29,6 +29,7 @@ import { EXIT_AGENT_REFUSED, readKnobs, splitCommand } from './launch.ts';
 import { EXIT_LAUNCH_BUSY, launchLockHolder, withFleetLock } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
 import { formatIsoSeconds } from './lib/machine-block.ts';
+import { readMemAvailableMb } from './lib/meminfo.ts';
 import { runInherit } from './lib/proc.ts';
 import { readReview } from './lib/review.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -71,6 +72,23 @@ export function formatRanLine(r: RanLine): string {
 export function busyLine(holder: string): string {
   const [pid = '', ...what] = holder.split(' ');
   return `a launch is already running (pid ${pid || '?'}, ${what.join(' ') || 'unknown'}) — leaving the queue to the next drain`;
+}
+
+/** LAUNCH_MIN_FREE_MB: the memory that must be available before the drain
+ *  launches a story, in MB. One lane peaked at 1.8 GB (25 Sep), so 2500 is
+ *  room for one more lane's peak and a margin: on the 7.9 GB box, with
+ *  ~1.4 GB resident outside the units and another lane at its peak, about
+ *  4.7 GB is available when a second drain asks, well above it. 0 turns the
+ *  guard off; anything that is not a whole number is the default. */
+export function launchMinFreeMb(env: NodeJS.ProcessEnv): number {
+  const v = env['LAUNCH_MIN_FREE_MB'];
+  return v !== undefined && /^[0-9]+$/.test(v) ? Number(v) : 2500;
+}
+
+/** What the drain says when it leaves the repo to its next drain for want of
+ *  memory — the same answer as for a launch lock held by another. */
+export function lowMemoryLine(freeMb: number, minMb: number): string {
+  return `only ${freeMb} MB of memory is available (LAUNCH_MIN_FREE_MB=${minMb}) — leaving the queue to the next drain`;
 }
 
 /** Never fails the drain — no upstream, a merge/rebase already in progress,
@@ -207,6 +225,16 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     if (id === prev) {
       warn(`${id} is ready again without having finished — stopping rather than looping`, TAG);
       warn(`read .review/${id}.md and .stories/${id}.md before re-running`, TAG);
+      break;
+    }
+    // Before a launch, not before the drain: the reap above takes no agent,
+    // and a story that is waiting for memory is still `ready`. An unreadable
+    // meminfo is unknown, not low.
+    const minFree = launchMinFreeMb(o.env);
+    const free = minFree > 0 ? readMemAvailableMb(o.env['FLEET_MEMINFO'] ?? '/proc/meminfo') : undefined;
+    if (free !== undefined && free < minFree) {
+      stopped = lowMemoryLine(free, minFree);
+      log(stopped, TAG);
       break;
     }
     prev = id;

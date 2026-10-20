@@ -494,6 +494,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
+| `LAUNCH_MIN_FREE_MB` | 2500 | the memory (`MemAvailable`) a drain needs before it launches a story; below it the drain leaves the repo to its next one, saying so. One lane peaked at 1.8 GB. 0 turns the guard off; `FLEET_MEMINFO` is the file it reads (default `/proc/meminfo`) |
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
