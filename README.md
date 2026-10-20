@@ -499,7 +499,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
-| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run`, and `/promote` after its commit, start a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue@{repo}.service` | how `/run [repo]` (no repo: every registered repo), and `/promote` after its commit, start a repo's drain; `{repo}` is the repo's name, and a command without it runs as it is; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |

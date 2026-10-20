@@ -81,7 +81,10 @@ export interface BotKnobs {
   sendMax: number;
   /** FLEET_LOCK_WAIT (120). */
   lockWait: number;
-  /** QUEUE_START_CMD: how /run starts a drain. It must return once the
+  /** QUEUE_START_CMD: how /run starts a drain. `{repo}` in it is the repo's
+   *  name — each registered repo has a unit of its own, fleet-queue@<repo>,
+   *  so two repos drain side by side; a command without it is run as it is.
+   *  It must return once the
    *  drain is started, never when it ends: fleet-queue is a oneshot, so a
    *  plain `systemctl start` waits for the whole drain, and the poll — a
    *  oneshot of its own with a two-minute start timeout — is killed before
@@ -109,7 +112,7 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
     timeoutSec: num(env['TELEGRAM_TIMEOUT'], 20),
     sendMax: num(env['SEND_MAX'], 3800),
     lockWait: num(env['FLEET_LOCK_WAIT'], 120),
-    queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue.service',
+    queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue@{repo}.service',
     detachCmd: env['DETACH_CMD'] ?? 'systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME',
   };
 }
@@ -357,7 +360,7 @@ const HELP = [
   '/testdeploy <repo> stop — stop serving it',
   '',
   'Run it',
-  '/run — drain the queue now instead of waiting for the timer',
+  '/run [repo] — drain the queue now instead of waiting for the timer (no repo: every repo)',
   '/help — this',
 ].join('\n');
 
@@ -366,8 +369,21 @@ function cmdHelp(c: BotContext): string {
   return only.length === 1 ? `${HELP}\n\nOne repo is registered (${only[0]}), so you can leave <repo> out.` : HELP;
 }
 
-function cmdRun(c: BotContext): string {
-  return c.deps.runCommand(splitCommand(c.knobs.queueStartCmd)) === 0 ? 'queue started' : 'could not start the queue';
+/** Starts one repo's drain: QUEUE_START_CMD with {repo} replaced. */
+function startQueue(c: BotContext, repo: string): boolean {
+  return c.deps.runCommand(splitCommand(c.knobs.queueStartCmd).map((w) => w.replaceAll('{repo}', repo))) === 0;
+}
+
+/** /run [repo]: that repo's drain, or with none every registered repo's.
+ *  One repo registered answers as it always did. */
+function cmdRun(c: BotContext, repo: string): string {
+  const known = repoNames(c);
+  if (repo !== '' && !known.includes(repo)) return `unknown repo: ${repo}\nknown: ${known.join(' ')}\n/help lists the commands`;
+  const names = repo === '' ? known : [repo];
+  if (names.length === 0) return 'no repos registered — add one at repos/<name>.env';
+  const failed = names.filter((n) => !startQueue(c, n));
+  if (failed.length === 0) return names.length === 1 ? 'queue started' : `queue started: ${names.join(', ')}`;
+  return names.length === 1 ? 'could not start the queue' : `could not start the queue for: ${failed.join(', ')}`;
 }
 
 function cmdStatus(c: BotContext, cfg: RepoConfig, all: boolean): string {
@@ -402,7 +418,7 @@ function cmdPromote(c: BotContext, cfg: RepoConfig, id: string): string {
   if (stagedIsEmpty(cfg.root)) return `${id} was already ready`;
   if (commit(cfg.root, `story(${id}): promoted to ready (telegram)`) !== 0) return `${id} could not be committed`;
   pushQuiet(cfg.root);
-  return c.deps.runCommand(splitCommand(c.knobs.queueStartCmd)) === 0
+  return startQueue(c, cfg.name)
     ? `${id} is ready — a drain is starting, or the one running takes it next`
     : `${id} is ready — could not start a drain now; the next one picks it up`;
 }
@@ -540,7 +556,7 @@ export function dispatch(c: BotContext, text: string): string {
 function dispatchRaw(c: BotContext, text: string): string {
   const cmd = parseCommand(text);
   switch (cmd.verb) {
-    case '/run': return cmdRun(c);
+    case '/run': return cmdRun(c, cmd.repo);
     case '/help': case '/start': return cmdHelp(c);
     case '/repo': case '/repos': return cmdRepo(c);
     case '/status': case '/status-all': case '/why': case '/promote': case '/answer': case '/wait': case '/fallback': case '/revert': case '/merge': case '/testdeploy': break;

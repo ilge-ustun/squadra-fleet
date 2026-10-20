@@ -165,7 +165,7 @@ describe('configuredFrom', () => {
 describe('readBotKnobs', () => {
   it('defaults', () => {
     expect(readBotKnobs({})).toEqual({
-      base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue.service',
+      base: undefined, timeoutSec: 20, sendMax: 3800, lockWait: 120, queueStartCmd: 'systemctl --user start --no-block fleet-queue@{repo}.service',
       detachCmd: 'systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME',
     });
   });
@@ -285,6 +285,34 @@ describe('dispatch', () => {
     expect(dispatch(ctx({ QUEUE_START_CMD: 'systemctl --user start x' }), '/run')).toBe('queue started');
     expect(commands).toEqual([['systemctl', '--user', 'start', 'x']]);
     expect(dispatch(ctx({ QUEUE_START_CMD: 'false' }), '/run')).toBe('could not start the queue');
+  });
+  // One queue unit per repo (fleet-queue@<repo>), so two repos drain side by
+  // side: /run names the repo whose unit it starts, and with none it starts
+  // every registered repo's. {repo} in QUEUE_START_CMD is the repo's name; a
+  // command without it is run as it is.
+  it('/run <repo> starts that repo\'s unit: {repo} in QUEUE_START_CMD is its name', () => {
+    writeFileSync(join(fleetHome, 'repos', 'u.env'), 'OTHER=1\n');
+    const c = ctx({ QUEUE_START_CMD: 'systemctl --user start q@{repo}.service' });
+    expect(dispatch(c, '/run u')).toBe('queue started');
+    expect(commands).toEqual([['systemctl', '--user', 'start', 'q@u.service']]);
+  });
+  it('/run with no repo starts every registered repo\'s unit, in the registry\'s order', () => {
+    writeFileSync(join(fleetHome, 'repos', 'u.env'), 'OTHER=1\n');
+    expect(dispatch(ctx({ QUEUE_START_CMD: 'start {repo}' }), '/run')).toBe('queue started: t, u');
+    expect(commands).toEqual([['start', 't'], ['start', 'u']]);
+  });
+  it('/run of a repo that is not registered says so and starts nothing', () => {
+    expect(dispatch(ctx({ QUEUE_START_CMD: 'start {repo}' }), '/run nosuch')).toBe('unknown repo: nosuch\nknown: t\n/help lists the commands');
+    expect(commands).toEqual([]);
+  });
+  it('/run when no unit will start names the repos', () => {
+    writeFileSync(join(fleetHome, 'repos', 'u.env'), 'OTHER=1\n');
+    expect(dispatch(ctx({ QUEUE_START_CMD: '{repo}' }), '/run')).toBe('queue started: t, u');
+    expect(dispatch(ctx({ QUEUE_START_CMD: 'false {repo}' }), '/run')).toBe('could not start the queue for: t, u');
+  });
+  it('/promote starts the promoted story\'s own repo\'s unit', () => {
+    dispatch(ctx({ QUEUE_START_CMD: 'systemctl --user start q@{repo}.service' }), '/promote t 900');
+    expect(commands).toEqual([['systemctl', '--user', 'start', 'q@t.service']]);
   });
   it('/status and /status-all go through fleet status --bot, output merged', () => {
     expect(dispatch(ctx(), '/status t')).toBe('ran status t --bot\x1b[32m!\x1b[0m');
