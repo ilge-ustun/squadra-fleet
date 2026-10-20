@@ -19,7 +19,9 @@ systemctl --user list-timers 'fleet-*'
 
 ## The machine
 
-**VPS:** Ubuntu 24.04, 2 CPU / 3.8 GB / 60 GB + 8 GB swap. Users `ubuntu`
+**VPS:** Ubuntu 24.04, 4 CPU (AMD EPYC Genoa) / 7.9 GB / 154 GB + 8 GB
+swap since the 20 Oct maintenance (2 CPU / 3.8 GB / 60 GB before it; the
+units' memory figures date from then). Users `ubuntu`
 (admin), `fleet` (the agents and every checkout under `~/work`), `hermes`.
 
 **Installed under `fleet`:** Claude Code (it updates itself), Codex (an npm

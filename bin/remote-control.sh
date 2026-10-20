@@ -25,5 +25,6 @@ command -v claude >/dev/null || die "claude not on PATH"
 cd "$dir" || die "cannot cd to $dir"
 
 # At most two sessions: each took ~250 MB beside the server's ~150 MB (20
-# Oct), on a 3.9 GB box where a drain may take 2.5 GB (fleet-queue.service).
+# Oct), on a 7.9 GB box where a drain may take 2.5 GB (fleet-queue.service)
+# and a coordinator's own build or Lighthouse run more.
 exec claude remote-control --name "${REMOTE_CONTROL_NAME:-fleet}" --capacity 2
