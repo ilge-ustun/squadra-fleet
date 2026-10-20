@@ -38,19 +38,41 @@ the landing state (`awaiting merge`, `on epic`, `landed`) is derived from
 git on every run. The verdict shown is the computed one, line 3 of
 `.review/<id>.md`, never the reviewer's own line.
 
-## What only a human does
+## What the human delegated, and what stays theirs
 
-Do none of these yourself, whatever harness or model you are. Say what the
-human should run instead.
+The human, 20 Oct 2026, standing for every epic: "you answer questions,
+promote stories, deploy to test when it's ready. answer questions — if you
+have 'recommended' — answer, don't send it to me." So you:
 
-- Promote a story to `ready` (edit `status:`, or `/promote <repo> <id>` from
-  the phone). Reading the story is the review that matters; it is theirs.
-- Land anything on the integration branch: an epic (`/merge <repo>
-  epic/<name>`) or an integration-branch story (`/merge <repo> <id>`).
+- **Promote** a story you have reviewed and linted: `status: ready`, commit
+  `story(<id>): promoted to ready (coordinator, delegated by the human)`,
+  push, `systemctl --user start --no-block fleet-queue.service` — what
+  `/promote` does.
+- **Answer** a `.blocked/<id>.md` question when you have a recommended
+  option, as `/answer` does: append `## Answer (coordinator, <date>)` and
+  the answer, `status: ready`, one commit with any story edit the answer
+  needs (L-43), push, start the queue. The same for a choice a story
+  reserves for the human: take the recommended option and record it as the
+  coordinator's, under this instruction (and the human's of 16 Oct, "Don't
+  ask me if you have a recommended option, go with it") — never as the
+  human's own confirmation. With no clear recommendation, ask.
+- **Land an epic** on the integration branch once all its stories are on
+  it: the full e2e on the epic's tip first, then `fleet merge <repo> --epic
+  epic/<name>` detached as `/merge` runs it (`DETACH_CMD`), never as a
+  child of your session.
+- **Deploy to test**: `fleet test-deploy <repo> <integration-branch>`,
+  detached, once the epic has landed, and send the URL.
+- Report each verdict and each of these steps when it happens, not in a
+  batch later.
+
+Still the human's alone, whatever harness or model you are. Say what they
+should run instead:
+
 - Deploy or touch production — a target's deploy command, its hosting or
   database CLI. Its `.fleet/rules.md` names them.
-- Answer `.blocked/<id>.md` questions that are product decisions
-  (`/answer <repo> <id> <text>`). You may draft the answer; they send it.
+- Land a single story on the integration branch (`/merge <repo> <id>`),
+  and merge a fleet pull request into `main`.
+- A question you have no recommendation for.
 - Tokens and logins: `.env.fleet` (mode 600, the bot's token), `gh`/`glab`
   logins, any API key. Never read, copy or print them.
 
@@ -81,7 +103,7 @@ human should run instead.
 
 | you see | do |
 |---|---|
-| a wish, a bug report, an idea | `fleet-story`: intent → draft → your review → lint → commit; the human promotes |
+| a wish, a bug report, an idea | `fleet-story`: intent → draft → your review → lint → commit → promote |
 | `draft` with lint errors, or a draft the human has questions about | `fleet-story`: fix by hand, lint again |
 | `in_progress` | wait. `fleet status <repo> <id>` shows the round; never touch its worktree `../wt-<id>` |
 | `done` with `PASS`, `on epic` or `awaiting merge` | `fleet-land` |
@@ -93,9 +115,9 @@ human should run instead.
 ```
 intent ──fleet write-story──▶ .stories/<id>.md (draft)
        ──fleet lint-story───▶ cited paths exist, ACs headed **ACn, base legal
-       ──a human────────────▶ status: ready
+       ──you (delegated)────▶ status: ready
        ──the queue──────────▶ fleet launch: worktree, builder, baseline, scope,
                               reviewer, mutations, probes, computed verdict
        ──fleet merge────────▶ story → its epic on a computed PASS (the queue)
-       ──a human────────────▶ epic → integration branch
+       ──you (delegated)────▶ epic → integration branch, then the test deploy
 ```

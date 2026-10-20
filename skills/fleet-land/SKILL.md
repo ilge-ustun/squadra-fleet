@@ -13,10 +13,13 @@ lands anything on the integration branch by itself.
 |---|---|---|---|
 | story on an epic | its epic | the queue, on a computed PASS | `fleet merge <repo> <id>` |
 | story on the integration branch | the integration branch | a human | `fleet merge <repo> <id> --land` · `/merge <repo> <id>` |
-| epic | the integration branch | a human | `fleet merge <repo> --epic epic/<name>` · `/merge <repo> epic/<name>` |
+| epic | the integration branch | the coordinator (delegated) or a human | `fleet merge <repo> --epic epic/<name>` · `/merge <repo> epic/<name>` |
 | `main` / `master` | — | nobody | refused |
 
-Landing is the human's decision; you tell them the state and the command.
+Landing an epic is delegated to you (`fleet-coordinate`, 20 Oct 2026):
+the full e2e on its tip, then the merge, detached. Landing a single story on
+the integration branch stays the human's; tell them the state and the
+command.
 
 ## Reading the state
 
@@ -51,7 +54,7 @@ Recovery:
 git -C <target> worktree list
 git -C <target> worktree remove --force ../merge-<name>     # only when nothing runs in it
 git -C <target> worktree prune
-./fleet merge <repo> --epic epic/<name>                      # the human's call; run detached, never inside a session
+./fleet merge <repo> --epic epic/<name>                      # delegated for an epic; run detached, never inside a session
 ```
 
 Check that nothing is still running in a worktree before removing it.

@@ -36,7 +36,10 @@ other than Claude Code:
   within fifteen minutes, or by a human's `/run`. This is what lets a
   sandboxed harness coordinate at all: nothing it spawns has to outlive it
   or reach the network.
-- **It promotes nothing and lands nothing.** Those are the human's; the
+- **It promotes and lands only what the human delegated.** On this box,
+  since 20 Oct 2026: promoting, answering with a recommended option,
+  landing an epic and the test deploy (`fleet-coordinate`). Production, a
+  single story's landing, `main` and tokens stay the human's; the
   coordinator ends by naming the command.
 - **It never touches tokens** (`.env.fleet`, CLI logins, API keys).
 

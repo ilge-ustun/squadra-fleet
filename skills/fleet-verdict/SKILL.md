@@ -57,12 +57,11 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   with the review text in the builder's prompt. Wait.
 - **FAIL at the ceiling → `needs_human`.** Read the reasons. Then:
   - the reasons are the builder's (GREEN, probe RED, baseline) and the
-    story is sound → say so, and let the human decide between `fleet reset
-    <repo> <id>` (back to the queue, fresh worktree) and a story edit.
+    story is sound → choose between `fleet reset <repo> <id>` (back to
+    the queue, fresh worktree) and a story edit, do it, and say which and why.
   - the reasons come from the story (an AC no instrument can satisfy, a
     domain that turned out unbounded, a wrong `scope_deny`) → edit the
-    story by hand, `fleet lint-story --strict`, commit, and tell the human it
-    needs `/promote` again. Fold a probe's finding into the AC it belongs
+    story by hand, `fleet lint-story --strict`, commit, and promote it again. Fold a probe's finding into the AC it belongs
     under; never add an AC for it — that becomes another branch nobody
     stated (see `prompts/review.md`).
   - the head is good and only the evidence was wrong (a `.test` that should
@@ -84,11 +83,11 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   you would pick and why; do not send either.
 - **`needs_human` after "Claude refused the builder".** A usage limit; the
   review file is unchanged and the round not counted. Nothing follows by
-  design. The human sends `/promote <repo> <id>` once the limit has reset.
+  design. Promote it again once the limit has reset.
 - **`blocked`.** `.blocked/<id>.md` holds the question, the options and the
-  builder's recommendation. Draft the answer; the human sends `/answer
-  <repo> <id> <text>`. A product question is theirs; a technical one you
-  can answer from the code, say so and let them send it. When the answer
+  builder's recommendation. Answer it yourself when you have a
+  recommended option, as `fleet-coordinate` says; put it to the human only
+  when you have none (they send `/answer <repo> <id> <text>`). When the answer
   changes what an AC demands (a new assertion, a dropped claim), edit the
   story in the same commit as the answer. The builder and the reviewer
   judge against the story, not the answer, and an answer the story
@@ -100,11 +99,12 @@ mutations:  ACn  CLASS  slug        probes:  CLASS  name
   `.runs/` log, and report; do not start another.
 - **A PASS you doubt.** Read `Known weakness` in the story and the probes
   the reviewer left. What the criteria did not instrument is not verified;
-  say so to the human before they land it. Human verification steps are in
+  say so in your report before the epic lands. Human verification steps are in
   the story.
 
 ## What to report
 
 The story id, the computed verdict and its reasons in plain words, who owns
-the fix, and the one command the human should send. Not the reviewer's
+the fix, and what you did next — or, for what stays the human's, the one
+command they should send. Not the reviewer's
 prose, which they can read in `.review/<id>.md`.
