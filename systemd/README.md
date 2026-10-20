@@ -24,13 +24,24 @@ nothing in the fleet has to know about it.
 
 ## What happens after the machine restarts
 
-`Persistent=true` makes a firing missed while the box was off run shortly
-after boot. That is also the crash-recovery path: the first thing
+The queue's first drain of a boot starts two minutes after the user
+manager does (`OnStartupSec=2min`), however long the boot took. That is also
+the crash-recovery path: the first thing
 `fleet run-queue` does is reap orphans, so a story stranded at `in_progress` by a
 power cut is returned to the queue and resumed — its worktree reused, the
 builder's existing commits intact, rounds continuing from the frontmatter
 rather than restarting at one. `test/suite.sh` case 42 covers exactly that
 state.
+
+Not `OnBootSec`, and no `Persistent=true` (L-45): after a maintenance the
+user manager came up six minutes after the kernel, `OnBootSec=2min` was
+already past, and systemd dropped that late firing because `Persistent=true`
+had left a stamp file. The queue did not run for ten hours; the bot, with no
+`Persistent`, fired every minute. After any reboot,
+`systemctl --user list-timers 'fleet-*'` shows the queue's next firing — a
+`-` there with nothing in `journalctl --user -u fleet-queue -b` is this
+failure, and `systemctl --user start --no-block fleet-queue.service` is the
+cure.
 
 The queue unit runs `fleet run-queue --all`: every repo in `repos/` is drained in
 turn, each in its own process, and `--max` is a per-repo ceiling.
@@ -65,6 +76,33 @@ ln -sf ~/work/fleet/systemd/fleet-agents-update.timer   ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now fleet-agents-update.timer
 ```
+
+### The coordinator's Remote Control server (a service, no timer)
+
+`fleet-remote-control.service` runs `fleet remote-control`: a Claude Code
+Remote Control server in `~/work`, so a coordinator's session can be opened
+from claude.ai/code or the Claude app after any reboot, with nobody at a
+terminal. It starts with the user manager and again 30 s after any exit;
+the server keeps one session open and starts a second on demand
+(`--capacity 2`, about 400 MB for the server and one session).
+
+```bash
+ln -sf ~/work/fleet/systemd/fleet-remote-control.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-remote-control.service
+```
+
+Before it will stay up: `claude` must have been trusted in `~/work` once
+(run `claude` there and accept). The home directory will not do — Remote
+Control never saves trust for it and the server exits at once. A session
+keeps the memory of its directory's project; to keep the one a session
+started in `~` had, `~/work/.claude/settings.local.json` names it:
+
+```json
+{ "autoMemoryDirectory": "/home/fleet/.claude/projects/-home-fleet/memory" }
+```
+
+`systemctl --user restart fleet-remote-control` ends every open session.
 
 The models each round actually ran on are in the review's Machine block
 (`builder:  sonnet → claude-sonnet-5`, `reviewer: codex → gpt-6-astra`), so
@@ -110,6 +148,7 @@ systemctl --user list-timers 'fleet-*'           # when they next fire
 journalctl --user -u fleet-queue -f              # live
 journalctl --user -u fleet-queue --since today   # what it did
 journalctl --user -u fleet-bot --since today     # what was asked of it
+journalctl --user -u fleet-remote-control -b     # the Remote Control server since boot
 ./fleet status <repo>                            # where every story of one repo stands
 ```
 
@@ -136,6 +175,7 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | where | what | why |
 |---|---|---|
 | `.timer` | `OnUnitActiveSec=15min` | how soon a promoted story is picked up |
+| `.timer` | `OnStartupSec=2min`, no `Persistent` | the first drain of every boot, however late the user manager starts (L-45) |
 | `.service` | `--all --max 5` | every registered repo, at most 5 stories each per drain; a ceiling against looping unattended |
 | `.service` | `AGENT_TIMEOUT=3600` | wall clock per agent call (the launcher's own default is 1800; an hour since khaita 072's browser-test builder was killed at 1800 s); a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
 | `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is in use before the fleet starts (`free -m` on an idle box) and a Next build peaks near 1.4 GB (`docs/operations.md`) |
@@ -143,6 +183,8 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | `fleet-bot.service` | `TimeoutStartSec=2min` | a poll is one request and a few git commands. `/run` starts the queue with `--no-block`: a plain `systemctl start` on a oneshot waits for the whole drain, and the poll was killed at two minutes with its reply unsent and the bot deaf meanwhile. `/merge`'s job is a transient unit of its own (`fleet-merge-<ms>`, `DETACH_CMD`): a child left in this oneshot's cgroup is killed when the poll ends (L-34) |
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
 | transient | `fleet-test-deploy` | the test server, started by `fleet test-deploy` with `systemd-run --user`; no unit file, gone after a reboot. `fleet-test-deploy-build` is `/testdeploy`'s build, one at a time by its fixed name |
+| `fleet-remote-control.service` | `Restart=always`, `StartLimitIntervalSec=0` | the server is there whenever the app is opened, whatever ended it, and a long network outage does not leave the unit failed |
+| `bin/remote-control.sh` | `--capacity 2` | each session took ~250 MB beside the server's ~150 MB, on a box where a drain may take 2.5 GB |
 | `fleet-bot.timer` | `Persistent=false` | a missed poll is not worth catching up; the offset means nothing is lost by being late |
 
 ## Promoting stories remotely

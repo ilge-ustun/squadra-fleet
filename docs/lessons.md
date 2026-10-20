@@ -935,3 +935,31 @@ appended verbatim. A question written in this launch still blocks (161b).
 
 **Enforced by:** `case_161_answered_question_does_not_block_again`; the
 prompt by `render.test.ts`.
+
+### L-45 — a slow boot left the queue's timer with nothing to fire
+
+On 20 Oct the VPS went down for maintenance at 01:09, in the middle of
+khaita 125's round 1, and came back at 02:27. The user manager started 351 s
+after the kernel. `fleet-queue.timer` had `OnBootSec=2min`, already past by
+then, and `Persistent=true` with a stamp file from the last drain: systemd
+255 drops a past one-off firing of such a timer instead of running it.
+`OnUnitActiveSec` has no base until the service has run once, so nothing
+else could fire either. The bot's timer, `OnBootSec=1min` with no
+`Persistent`, fired every minute, so the phone answered and nothing looked
+wrong. 125 sat at `in_progress` until a second reboot at 12:11, when the
+manager came up in 20 s — before its two minutes — and the queue resumed the
+story as designed. Ten hours lost. Probed with transient timers: a past
+`OnBootSec` fires at once without `Persistent`, or with it and no stamp;
+with both it never fires. The README had promised the opposite, reading
+`Persistent=true` as "a firing missed while the box was off runs after
+boot", which is what it does for `OnCalendar` only.
+
+**Lesson:** a recovery path that was only ever exercised by fast boots is
+untested. A timer's first firing in a boot must be counted from something
+that is certain to be in its future when the timer is set up.
+
+**Prevention:** the queue's timer counts its first firing from the user
+manager's start (`OnStartupSec=2min`) and has no `Persistent`;
+`systemd/README.md` says how to see the failure after a reboot.
+
+**Enforced by:** `case_162_queue_timer_fires_after_any_boot`.

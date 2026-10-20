@@ -7,14 +7,22 @@ Documentation=file:///home/fleet/work/fleet/systemd/README.md
 # nothing, exits. No git fetch, no model call, no cost. So polling often is
 # cheap, and the interval is about how soon you want a promoted story picked
 # up, not about load.
-OnBootSec=2min
 OnUnitActiveSec=15min
 
-# A firing missed while the machine was off runs shortly after boot. That is
-# also the crash-recovery path: the first thing `fleet run-queue` does is reap
-# orphans, so a story stranded at in_progress by a power cut is picked up
-# without anyone asking.
-Persistent=true
+# The first drain of a boot, two minutes after the user manager starts. That
+# is also the crash-recovery path: the first thing `fleet run-queue` does is
+# reap orphans, so a story stranded at in_progress by a power cut is picked
+# up without anyone asking. OnUnitActiveSec has no base until the service has
+# run once, so this firing is the only one a boot gets until a drain starts.
+#
+# Not OnBootSec, and no Persistent=true (L-45): after a maintenance the user
+# manager came up 351 s after the kernel, OnBootSec=2min was already past,
+# and systemd dropped that late firing because Persistent=true had left a
+# stamp file — the queue never ran in ten hours while the bot did.
+# OnStartupSec counts from the manager's own start, so this firing is still
+# ahead when the timer is set up, however slow the boot; and Persistent only
+# ever applied to OnCalendar.
+OnStartupSec=2min
 
 # Avoid every timer on the box firing on the same second.
 RandomizedDelaySec=30

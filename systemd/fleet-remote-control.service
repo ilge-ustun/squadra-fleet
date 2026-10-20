@@ -1,0 +1,36 @@
+[Unit]
+Description=fleet — a Claude Code Remote Control server for the coordinator
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
+After=network-online.target
+
+# Never stop restarting: a network that stays down for an hour after a
+# maintenance must not leave the unit failed for good.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+
+# The directory the sessions work in; bin/remote-control.sh says why it is
+# not the home directory.
+WorkingDirectory=/home/fleet/work
+Environment=REMOTE_CONTROL_DIR=/home/fleet/work
+
+# The same PATH as fleet-queue.service: a coordinator's session runs the
+# fleet, git, node and npm.
+Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/fleet
+
+ExecStart=/bin/bash /home/fleet/work/fleet/fleet remote-control
+
+# Always, not on-failure: the server is meant to be there whenever someone
+# opens the app, whatever ended it. Stopping or restarting the unit ends
+# every session it holds.
+Restart=always
+RestartSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fleet-remote-control
+
+[Install]
+WantedBy=default.target
