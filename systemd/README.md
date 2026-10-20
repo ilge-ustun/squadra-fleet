@@ -24,13 +24,24 @@ nothing in the fleet has to know about it.
 
 ## What happens after the machine restarts
 
-`Persistent=true` makes a firing missed while the box was off run shortly
-after boot. That is also the crash-recovery path: the first thing
+The queue's first drain of a boot starts two minutes after the user
+manager does (`OnStartupSec=2min`), however long the boot took. That is also
+the crash-recovery path: the first thing
 `fleet run-queue` does is reap orphans, so a story stranded at `in_progress` by a
 power cut is returned to the queue and resumed — its worktree reused, the
 builder's existing commits intact, rounds continuing from the frontmatter
 rather than restarting at one. `test/suite.sh` case 42 covers exactly that
 state.
+
+Not `OnBootSec`, and no `Persistent=true` (L-45): after a maintenance the
+user manager came up six minutes after the kernel, `OnBootSec=2min` was
+already past, and systemd dropped that late firing because `Persistent=true`
+had left a stamp file. The queue did not run for ten hours; the bot, with no
+`Persistent`, fired every minute. After any reboot,
+`systemctl --user list-timers 'fleet-*'` shows the queue's next firing — a
+`-` there with nothing in `journalctl --user -u fleet-queue -b` is this
+failure, and `systemctl --user start --no-block fleet-queue.service` is the
+cure.
 
 The queue unit runs `fleet run-queue --all`: every repo in `repos/` is drained in
 turn, each in its own process, and `--max` is a per-repo ceiling.
@@ -136,6 +147,7 @@ systemctl --user stop fleet-queue.timer     # re-enable with `start`
 | where | what | why |
 |---|---|---|
 | `.timer` | `OnUnitActiveSec=15min` | how soon a promoted story is picked up |
+| `.timer` | `OnStartupSec=2min`, no `Persistent` | the first drain of every boot, however late the user manager starts (L-45) |
 | `.service` | `--all --max 5` | every registered repo, at most 5 stories each per drain; a ceiling against looping unattended |
 | `.service` | `AGENT_TIMEOUT=3600` | wall clock per agent call (the launcher's own default is 1800; an hour since khaita 072's browser-test builder was killed at 1800 s); a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
 | `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is in use before the fleet starts (`free -m` on an idle box) and a Next build peaks near 1.4 GB (`docs/operations.md`) |

@@ -3543,7 +3543,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_152_e2e_baseline case_153_merge_runs_e2e case_154_e2e_bounded
        case_155_baseline_fix_in_the_round
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
-       case_160_story_reds_are_real case_161_answered_question_does_not_block_again)
+       case_160_story_reds_are_real case_161_answered_question_does_not_block_again
+       case_162_queue_timer_fires_after_any_boot)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4778,6 +4779,23 @@ case_159_tdd_pairs_run_once_by_the_harness() {
   assert_grep 'Do not run the classifier over your pairs before you hand over' "$TRACE/claude-prompt-1" "the rules say so"
   assert_grep 'at most 3 time\(s\) a round — and one still not RED' "$TRACE/claude-prompt-1" "with the knob's value"
   assert_not_grep 'tdd check' "$LOG" "no pairs handed over: no check"
+}
+
+# L-45 (20 Oct). After the VPS maintenance the user manager came up 351 s
+# after the kernel. The queue timer's OnBootSec=2min was already past, and
+# systemd 255 drops a past one-off firing of a timer that has Persistent=true
+# and a stamp file (the same timer without either fires at once — probed);
+# OnUnitActiveSec has no base until the service has run once. So the queue
+# never ran in that boot: ten hours, khaita 125 stranded at in_progress,
+# while the bot's timer (no Persistent) fired every minute. Red while the
+# timer counts from the kernel's boot and keeps a stamp.
+case_162_queue_timer_fires_after_any_boot() {
+  CASE="162 the queue timer counts from the user manager's start and keeps no stamp"
+  local t="$FLEET_HOME/systemd/fleet-queue.timer"
+  assert_grep '^OnStartupSec=2min$' "$t" "two minutes after the user manager starts, always in its future"
+  assert_not_grep '^OnBootSec=' "$t" "not after the kernel's boot, which a late manager has passed"
+  assert_not_grep '^Persistent=' "$t" "no stamp to drop the late firing by (Persistent only ever applied to OnCalendar)"
+  assert_grep '^OnUnitActiveSec=15min$' "$t" "and every fifteen minutes after a drain starts"
 }
 
 for c in "${CASES[@]}"; do
