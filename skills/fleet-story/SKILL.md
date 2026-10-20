@@ -8,7 +8,8 @@ description: Turn a wish into a fleet story — write the intent, run fleet writ
 A story is the only specification the builder and the reviewer get; neither
 can ask anything. `fleet write-story` has an agent draft it from the code,
 and `fleet lint-story` checks it mechanically. Your part is the intent going in and
-the review coming out. The human's part is promoting it.
+the review coming out. Promoting it is yours too, under the human's delegation
+(`fleet-coordinate`).
 
 ## 1. The intent
 
@@ -70,8 +71,10 @@ checkout, which is usually `develop`):
    reason under Out of scope. `.fleet/*` is always denied by the harness.
 7. **No AC says "suite/build/lint stays green"** — the baseline is run
    unconditionally.
-8. **Product decisions.** If Evidence raises a question, stop and put it to
-   the human; do not answer it yourself. When they answer, add the AC by
+8. **Product decisions.** If Evidence raises a question and you have a
+   recommended option, take it and record it in the story as the
+   coordinator's choice under the human's delegation (`fleet-coordinate`);
+   put it to the human only when you have none. Either way add the AC by
    hand — that has been the right move before.
 9. **model:** in the frontmatter names the builder's model, as an alias
    only (`fleet lint-story` refuses anything else), so a new release is
@@ -108,11 +111,10 @@ git -C <target> push
 The commit carries the human's name only — no trailer naming a harness or
 a model.
 
-Then tell the human: the story id, its title, what it asks, any question
-still open, the harness and model that drafted it (the trials in
-`docs/COORDINATORS.md` are recorded from this message), and that
-`/promote <repo> <id>` puts it in the queue. Do not promote it. Do not
-start a launcher.
+Then promote it, and tell the human: the story id, its title, what it
+asks, any choice you made for them, any question still open, the harness and model that drafted it (the trials in
+`docs/COORDINATORS.md` are recorded from this message), and that you
+promoted it. Do not start a launcher.
 
 ## Signs the story is wrong, not the build
 
