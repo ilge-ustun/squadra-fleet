@@ -4834,6 +4834,22 @@ EOF
   assert_grep '^Restart=always$' "$u" "it comes back after any exit"
   assert_grep '^StartLimitIntervalSec=0$' "$u" "and never gives up"
   assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
+
+  CASE="163d a repo argument serves from that repo's checkout, named after it"
+  mkdir -p "$FX/repos" "$FX/qr"
+  printf 'REPO_PATH=%s\n' "$FX/qr" > "$FX/repos/qr.env"
+  out="$( env PATH="$B:$PATH" FLEET_REGISTRY_DIR="$FX/repos" bash "$FLEET/fleet" remote-control qr 2>&1 )"; rc=$?
+  assert_eq "$rc" 0 "the server's exit is the command's"
+  assert_eq "$(cat "$TRACE/rc-pwd" 2>/dev/null)" "$FX/qr" "in the repo's REPO_PATH"
+  assert_grep '^qr$' "$TRACE/rc-args" "named after the repo"
+  out="$( env PATH="$B:$PATH" FLEET_REGISTRY_DIR="$FX/repos" bash "$FLEET/fleet" remote-control nowhere 2>&1 )"; rc=$?
+  assert_eq "$rc" 1 "an unregistered repo is a die"
+
+  CASE="163e the template unit runs one server per registered repo"
+  local t="$FLEET/systemd/fleet-remote-control@.service"
+  assert_grep '^ExecStart=.*/fleet remote-control %i$' "$t" "the instance is the repo"
+  assert_grep '^Restart=always$' "$t" "it comes back after any exit"
+  assert_grep '^WantedBy=default.target$' "$t" "started with the user manager"
 }
 
 # 20 Oct. A second project will drain beside khaita on a 7.9 GB box, and one

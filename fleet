@@ -34,7 +34,7 @@ usage: fleet <command> [args…]
   telegram send [--pre] <text> | poll                      the notifications and the phone commands
   install-skills                                           link skills/ into ~/.claude/skills
   update-agents                                            the claude and codex CLIs to their newest release
-  remote-control                                           a Remote Control server for the coordinator, in the foreground
+  remote-control [repo]                                    a Remote Control server for the coordinator (a repo's own, in its checkout), in the foreground
 EOF
 }
 
