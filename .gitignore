@@ -3,3 +3,6 @@
 .test-deploy.json
 .test-deploy-waiting
 ts/node_modules/
+
+# which repos this box serves is the box's business, not the fleet's history
+repos/*.env
