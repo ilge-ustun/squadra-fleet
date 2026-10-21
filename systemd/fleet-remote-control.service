@@ -15,7 +15,7 @@ Type=simple
 WorkingDirectory=/home/fleet/work
 Environment=REMOTE_CONTROL_DIR=/home/fleet/work
 
-# The same PATH as fleet-queue.service: a coordinator's session runs the
+# The same PATH as fleet-queue@.service: a coordinator's session runs the
 # fleet, git, node and npm.
 Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/fleet

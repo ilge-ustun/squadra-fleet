@@ -1,8 +1,11 @@
 [Unit]
-Description=fleet — look for ready stories every 15 minutes
+Description=fleet — look for ready stories of %i every 15 minutes
 Documentation=file:///home/fleet/work/fleet/systemd/README.md
 
 [Timer]
+# fleet-queue@<repo>.timer starts fleet-queue@<repo>.service: a template
+# timer's default Unit= is the service of the same name and instance.
+#
 # An empty queue costs 0.08s: reap_orphans scans .stories and /proc, finds
 # nothing, exits. No git fetch, no model call, no cost. So polling often is
 # cheap, and the interval is about how soon you want a promoted story picked

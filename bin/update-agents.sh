@@ -15,7 +15,8 @@
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
-QUEUE_ACTIVE_CMD="${FLEET_QUEUE_ACTIVE_CMD:-systemctl --user is-active --quiet fleet-queue.service}"
+DEFAULT_QUEUE_ACTIVE='test -n "$(systemctl --user list-units "fleet-queue@*.service" --state=active,activating --no-legend)"'
+QUEUE_ACTIVE_CMD="${FLEET_QUEUE_ACTIVE_CMD:-$DEFAULT_QUEUE_ACTIVE}"
 
 if bash -c "$QUEUE_ACTIVE_CMD"; then
   log "the queue is running — not updating the agents now; the next firing will"

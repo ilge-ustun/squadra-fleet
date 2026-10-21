@@ -12,7 +12,7 @@ Type=oneshot
 WorkingDirectory=/home/fleet/work/fleet
 
 # node and git are all this needs; claude and codex are not on the path of
-# a poll. Kept identical to fleet-queue.service so there is one PATH to fix.
+# a poll. Kept identical to fleet-queue@.service so there is one PATH to fix.
 Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/fleet
 

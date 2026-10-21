@@ -1,0 +1,59 @@
+[Unit]
+Description=fleet — drain the story queue of %i
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
+
+# One instance per registered repo (fleet-queue@khaita.service, repos/khaita.env),
+# so two repos drain side by side. A repo's launch lock (<repo>/.git/
+# fleet-launch.lock) still allows one launch per repo; a second lane inside a
+# repo is not built (docs/operations.md, "Lanes").
+#
+# Do not start if the machine is still coming up; the timer handles catch-up.
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# A oneshot service is never entered twice: while a repo's drain is running,
+# its timer's next firing is skipped rather than queued. That is the overlap
+# guard, and it is free — nothing in the fleet has to know about it. Other
+# repos' instances are other units and run at the same time.
+
+WorkingDirectory=/home/fleet/work/fleet
+
+# claude lives in ~/.local/bin and codex under nvm, neither of which is on a
+# systemd unit's default PATH. The launcher resolves both by bare name, so
+# without this the run dies at "claude not on PATH" — loudly, but pointlessly.
+Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/fleet
+
+# Per-agent wall clock. The queue's own ceiling is --max stories, per repo.
+# An hour, not the launcher's default half hour: a builder on a story whose
+# instruments are browser tests runs e2e for every TDD check, about two
+# minutes a run, and khaita 072's builder was killed at 1800 s mid-work.
+# It bounds a hung agent; a working one should not meet it.
+Environment=AGENT_TIMEOUT=3600
+
+ExecStart=/bin/bash /home/fleet/work/fleet/fleet run-queue %i --max 5
+
+# A full queue is long: several stories, each up to MAX_ROUNDS rounds, each
+# round a builder and a reviewer plus the mutation runs. Generous, because
+# AGENT_TIMEOUT already bounds the part that can actually hang.
+TimeoutStartSec=6h
+
+# MemoryHigh is per instance, and now two drains run at once on a 7.9 GB box.
+# About 1.4 GB is resident outside the units (the bot, the test-deploy
+# server, a coordinator's session: `free -m` on an idle box), which leaves
+# ~6.5 GB; split between two instances that is 3.2 GB each, and 3000M keeps
+# a margin. One lane peaked at 1.8 GB (25 Sep), so a lane is throttled, not
+# killed, well above its own peak: MemoryHigh slows a Next or Rust build that
+# spikes instead of OOM-killing it mid-round. LAUNCH_MIN_FREE_MB (README.md)
+# is the other half: a drain that finds too little memory available launches
+# nothing. A third repo means a third share; revisit this line then.
+MemoryHigh=3000M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fleet-queue-%i
+
+[Install]
+WantedBy=default.target

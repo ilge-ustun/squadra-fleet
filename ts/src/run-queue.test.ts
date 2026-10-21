@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Die } from './lib/die.ts';
-import { busyLine, formatRanLine, readMax, registeredRepos } from './run-queue.ts';
+import { busyLine, formatRanLine, launchMinFreeMb, lowMemoryLine, readMax, registeredRepos } from './run-queue.ts';
 
 // The pure parts of `fleet run-queue`; the drain loop itself is proven by
 // test/suite.sh (cases 41, 69-71, 87, 91d, 99, 128-131), as the launcher's is.
@@ -64,5 +64,25 @@ describe('registeredRepos — sorted as a shell glob is', () => {
     mkdirSync(other, { recursive: true });
     writeFileSync(join(other, 'x.env'), '');
     expect(registeredRepos(dir, { FLEET_REGISTRY_DIR: other })).toEqual(['x']);
+  });
+});
+
+describe('launchMinFreeMb — the free memory a launch needs (LAUNCH_MIN_FREE_MB)', () => {
+  it('2500 MB by default: one more lane\'s 1.8 GB peak and a margin', () => {
+    expect(launchMinFreeMb({})).toBe(2500);
+  });
+  it('the environment sets it; 0 turns the guard off', () => {
+    expect(launchMinFreeMb({ LAUNCH_MIN_FREE_MB: '4000' })).toBe(4000);
+    expect(launchMinFreeMb({ LAUNCH_MIN_FREE_MB: '0' })).toBe(0);
+  });
+  it('a value that is not a whole number is the default, not zero', () => {
+    expect(launchMinFreeMb({ LAUNCH_MIN_FREE_MB: 'lots' })).toBe(2500);
+    expect(launchMinFreeMb({ LAUNCH_MIN_FREE_MB: '' })).toBe(2500);
+  });
+});
+
+describe('lowMemoryLine — what the drain says when it leaves the repo to the next one', () => {
+  it('names the free memory, the knob and the threshold', () => {
+    expect(lowMemoryLine(1200, 2500)).toBe('only 1200 MB of memory is available (LAUNCH_MIN_FREE_MB=2500) — leaving the queue to the next drain');
   });
 });

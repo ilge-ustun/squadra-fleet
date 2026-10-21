@@ -58,7 +58,7 @@ line numbers rot (L-11), commands do not.
 
 ## Fleet work, in order (each a PR the human merges; `fleet-develop` skill)
 
-1. **Parallel projects (lanes per repo).**
+1. **Parallel projects (lanes per repo).** *Built on branch `repo-queues`, 20 Oct 2026: `fleet-queue@<repo>` units, the bot's `/run [repo]`, a `LAUNCH_MIN_FREE_MB` guard; `fleet status` and the reaper were already per repo. Everything below is the brief it was built from.*
    - Today `fleet run-queue --all` drains registered repos one after another
      in one oneshot (`ts/src/run-queue.ts`, `runAll`), up to `--max 5`
      stories each, under the single `fleet-queue` unit

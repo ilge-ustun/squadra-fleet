@@ -280,7 +280,7 @@ Every view below is read-only and safe while a round is running.
 cd ~/work/fleet
 ./fleet status <repo>                  # the epics, then every story — landing state, round, verdict
 ./fleet status <repo> <id>             # one story, with its latest round's Machine block
-journalctl --user -u fleet-queue -f    # the queue's drains, live (Ctrl-C to leave)
+journalctl --user -u fleet-queue@<repo> -f    # a repo's drains, live (Ctrl-C to leave)
 journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
 ls -t <target>/.runs/ | grep ^<id> | head      # raw output, newest first
 tail -f <target>/.runs/<id>-round1-*.log       # a mutation being run
@@ -490,15 +490,16 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `MAX_ROUNDS` | 2 | rounds per launch before `needs_human` |
 | `BASELINE_FIXES` | 2 | times a round's RED baseline goes back to its builder's session with the RED logs before the reviewer runs; 0 fails the round on it at once |
 | `TDD_FIXES` | 2 | times the tdd check hands the builder's pairs that are not RED back to its session before the reviewer runs; 0 hands nothing back, and the verdict reads them |
-| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue.service`) |
+| `AGENT_TIMEOUT` | 1800 | seconds per agent call; a hung agent is killed and the story goes to a human. The queue's unit sets 3600 (`systemd/fleet-queue@.service`) |
 | `REVIEW_ONLY` | 0 | 1 re-reviews the head without a builder — for a `needs_human` that was a spec defect |
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
+| `LAUNCH_MIN_FREE_MB` | 2500 | the memory (`MemAvailable`) a drain needs before it launches a story; below it the drain leaves the repo to its next one, saying so. One lane peaked at 1.8 GB. 0 turns the guard off; `FLEET_MEMINFO` is the file it reads (default `/proc/meminfo`) |
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
-| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue.service` | how `/run`, and `/promote` after its commit, start a drain; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue@{repo}.service` | how `/run [repo]` (no repo: every registered repo), and `/promote` after its commit, start a repo's drain; `{repo}` is the repo's name, and a command without it runs as it is; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |
