@@ -142,6 +142,23 @@ started in `~` had, `~/work/.claude/settings.local.json` names it:
 
 `systemctl --user restart fleet-remote-control` ends every open session.
 
+#### One coordinator per project
+
+`fleet-remote-control@<repo>.service` runs `fleet remote-control <repo>`: a
+second server whose sessions work in the repo's checkout (`REPO_PATH` in
+`repos/<repo>.env`), so they keep that directory's memory apart from the
+fleet's, and which the app lists under the repo's name. `claude` must have
+been trusted in that checkout once (run `claude` there and accept).
+
+```bash
+ln -sf ~/work/fleet/systemd/'fleet-remote-control@.service' ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-remote-control@<repo>.service
+```
+
+Each server is about 150 MB and each session about 250 MB; on the 7.9 GB box
+keep to two servers.
+
 The models each round actually ran on are in the review's Machine block
 (`builder:  sonnet → claude-sonnet-5`, `reviewer: codex → gpt-6-astra`), so
 a release that changes behaviour shows up in the verdicts' history.

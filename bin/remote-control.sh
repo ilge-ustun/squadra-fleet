@@ -13,11 +13,25 @@
 # trusted in once. Not the home directory: Remote Control never saves trust
 # for it, and the server exits at once. Its sessions keep the memory of that
 # directory's project, unless its .claude/settings.local.json names another
-# with autoMemoryDirectory.
+# with autoMemoryDirectory. `fleet remote-control <repo>` serves one project's
+# coordinator from the repo's own checkout instead (fleet-remote-control@.service).
 #
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || { echo "cannot source lib.sh" >&2; exit 1; }
+
+# With a repo argument the server is that project's coordinator: it works in
+# the repo's checkout (REPO_PATH in repos/<repo>.env), so its sessions keep
+# that directory's memory apart from the fleet's, and it is named after it.
+if [[ -n "${1:-}" ]]; then
+  repo="$1"
+  [[ "$repo" =~ ^[A-Za-z0-9_-]+$ ]] || die "not a repo name: '$repo'"
+  f="$FLEET_REGISTRY_DIR/$repo.env"
+  [[ -f "$f" ]] || die "unknown repo '$repo' — no $f"
+  REMOTE_CONTROL_DIR="$( . "$f" >/dev/null 2>&1 && printf '%s' "${REPO_PATH:-}" )"
+  [[ -n "$REMOTE_CONTROL_DIR" ]] || die "$f sets no REPO_PATH"
+  REMOTE_CONTROL_NAME="$repo"
+fi
 
 dir="${REMOTE_CONTROL_DIR:-$HOME/work}"
 [[ -d "$dir" ]] || die "no directory $dir — set REMOTE_CONTROL_DIR to the coordinator's"
