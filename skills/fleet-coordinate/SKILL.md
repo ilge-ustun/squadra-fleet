@@ -98,6 +98,20 @@ should run instead:
   `git status --short` when you report.
 - Commits and PRs name the human only: no `Co-Authored-By`,
   `Claude-Session`, "Generated with" or model trailer.
+- **Write about 80% of the way to ASD-STE100** (Simplified Technical
+  English). This is the human's rule (22 Oct 2026). It applies to all the
+  text you write: messages to the human, intents, story edits, commit
+  messages and PR bodies.
+  - Write short sentences: 20 words or fewer for an instruction, 25 or
+    fewer for a description.
+  - Write one instruction in each sentence. Start it with the verb.
+  - Use the active voice and simple tenses.
+  - Use one word for one meaning, and use the same word each time.
+  - Do not use idioms. Do not use a phrasal verb when a simple verb has
+    the same meaning ("start", not "kick off").
+  - The other 20%: names, code, commands, paths, story titles and quoted
+    text stay as they are. When a strict rule makes a sentence less clear,
+    write the clear sentence.
 
 ## What happens next — the routing
 
