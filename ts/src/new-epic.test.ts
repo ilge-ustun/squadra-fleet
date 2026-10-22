@@ -32,7 +32,7 @@ beforeAll(() => {
   g(['push', '-q', '-u', 'origin', 'base']);
   cfg = {
     name: 't', root: clone, baseBranch: 'base', installCmd: '', vitestCmd: '', buildCmd: '', lintCmd: '',
-    seedFiles: [], probeDir: '.', mergeMode: 'direct',
+    seedFiles: [], probeDir: '.', mergeMode: 'direct', runners: ['vitest'],
   };
 });
 

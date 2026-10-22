@@ -3556,7 +3556,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
-       case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo)
+       case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
+       case_166_runners_config)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4916,6 +4917,58 @@ case_165_queue_unit_per_repo() {
 
   CASE="165b the agent updater waits while any repo's drain runs"
   assert_grep 'fleet-queue@\*\.service' "$FLEET_HOME/bin/update-agents.sh" "it asks about every instance"
+}
+
+# 22 Oct. A target says which test runners its evidence may name. RUNNERS
+# lists them; absent means vitest, so every target written before this loads
+# as it did. vitest stays required: VITEST_CMD is the baseline's test step.
+# cargo needs CARGO_CMD (the prefix the harness appends a selector's
+# arguments to) and CARGO_PROBE_DIR (where a reviewer's Rust probe lands).
+#
+# Red while lib.sh does not know RUNNERS: nothing is refused and RUNNERS is
+# never defaulted.
+case_166_runners_config() {
+  CASE="166 RUNNERS: vitest by default, cargo with its command, the rest refused"
+  local d="$TMP/c166" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/bin/lib.sh}" out rc
+  mkdir -p "$d/repos" "$d/a/target/.fleet"
+  git init -q "$d/a/target"
+  printf 'REPO_PATH=%s\n' "$d/a/target" > "$d/repos/t.env"
+  cat > "$d/a/target/.fleet/config" <<'EOF'
+BASE_BRANCH=base
+INSTALL_CMD=true
+VITEST_CMD='fake vitest'
+BUILD_CMD=true
+LINT_CMD=true
+SEED_FILES=
+PROBE_DIR=src
+EOF
+  probe() {                           # probe [VAR=value …] → out rc
+    out="$( env -i PATH="$PATH" HOME="$HOME" "$@" FLEET_REGISTRY_DIR="$d/repos" \
+            bash -c 'source "$1" && load_repo t && printf "%s|%s|%s\n" "$RUNNERS" "${CARGO_CMD:-}" "${CARGO_PROBE_DIR:-}"' \
+            _ "$lib" 2>&1 )"; rc=$?
+  }
+  probe
+  assert_eq "$rc" 0 "a config without RUNNERS loads"
+  assert_eq "$out" "vitest||" "and means vitest alone"
+
+  probe RUNNERS='vitest cargo' CARGO_CMD='cargo test' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 0 "vitest and cargo with both cargo keys load"
+  assert_eq "$out" "vitest cargo|cargo test|core/tests" "and hand the keys back"
+
+  probe RUNNERS='vitest cargo' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 1 "cargo without CARGO_CMD dies"; assert_contains "$out" "CARGO_CMD" "and names the key"
+  probe RUNNERS='vitest cargo' CARGO_CMD='cargo test'
+  assert_eq "$rc" 1 "cargo without CARGO_PROBE_DIR dies"; assert_contains "$out" "CARGO_PROBE_DIR" "and names the key"
+  probe RUNNERS='vitest jest'
+  assert_eq "$rc" 1 "an unknown runner dies"; assert_contains "$out" "jest" "and names it"
+  probe RUNNERS=cargo CARGO_CMD='cargo test' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 1 "a list without vitest dies"; assert_contains "$out" "VITEST_CMD" "because vitest is the baseline's test step"
+  probe CARGO_CMD='cargo test'
+  assert_eq "$rc" 1 "a cargo key without cargo in RUNNERS dies"; assert_contains "$out" "RUNNERS" "and says why"
+
+  printf "RUNNERS='vitest cargo'\nCARGO_CMD='cargo test --locked'\nCARGO_PROBE_DIR=core/tests\n" >> "$d/a/target/.fleet/config"
+  probe
+  assert_eq "$out" "vitest cargo|cargo test --locked|core/tests" "the keys come from the file like every other"
 }
 
 for c in "${CASES[@]}"; do

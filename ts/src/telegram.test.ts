@@ -98,7 +98,7 @@ function git(...args: string[]): string {
 }
 
 function cfg(): RepoConfig {
-  return { name: 't', root, baseBranch: 'base', installCmd: 'true', vitestCmd: 'true', buildCmd: 'true', lintCmd: 'true', seedFiles: [], probeDir: 'src', mergeMode: 'direct' };
+  return { name: 't', root, baseBranch: 'base', installCmd: 'true', vitestCmd: 'true', buildCmd: 'true', lintCmd: 'true', seedFiles: [], probeDir: 'src', mergeMode: 'direct', runners: ['vitest'] };
 }
 
 function ctx(extraEnv: Record<string, string> = {}): BotContext {

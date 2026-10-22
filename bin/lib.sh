@@ -14,7 +14,7 @@
 #                             BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD
 #                             LINT_CMD SEED_FILES PROBE_DIR, optional
 #                             REPO_RULES MERGE_MODE PR_CMD START_CMD E2E_CMD
-#                             E2E_TIMEOUT
+#                             E2E_TIMEOUT RUNNERS CARGO_CMD CARGO_PROBE_DIR
 #
 # A variable already in the caller's environment wins over the file, so a
 # test can point VITEST_CMD at a fake and a hand run can override one value
@@ -25,7 +25,7 @@
 FLEET_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_REGISTRY_DIR="${FLEET_REGISTRY_DIR:-$FLEET_HOME/repos}"
 
-FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD START_CMD E2E_CMD E2E_TIMEOUT"
+FLEET_REPO_KEYS="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD SEED_FILES PROBE_DIR REPO_RULES MERGE_MODE PR_CMD START_CMD E2E_CMD E2E_TIMEOUT RUNNERS CARGO_CMD CARGO_PROBE_DIR"
 FLEET_REPO_REQUIRED="BASE_BRANCH INSTALL_CMD VITEST_CMD BUILD_CMD LINT_CMD PROBE_DIR"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; DIM=$'\033[2m'; RST=$'\033[0m'
@@ -80,4 +80,25 @@ load_repo() {                         # load_repo <name> → REPO_NAME REPO_ROOT
     pr) [[ -n "${PR_CMD:-}" ]] || die ".fleet/config for '$name' says MERGE_MODE=pr but sets no PR_CMD" ;;
     *)  die ".fleet/config for '$name' sets MERGE_MODE=$MERGE_MODE — direct or pr" ;;
   esac
+  # Which runners a selector may name: a mutation's, a tdd pair's, a probe's.
+  # Absent means vitest. vitest is always listed, because VITEST_CMD is the
+  # baseline's test step; cargo adds `cargo:` selectors, run as
+  # `$CARGO_CMD -p <package> … -- --exact`, and Rust probes in CARGO_PROBE_DIR.
+  RUNNERS="${RUNNERS:-vitest}"
+  local r has_vitest="" has_cargo=""
+  for r in $RUNNERS; do
+    case "$r" in
+      vitest) has_vitest=1 ;;
+      cargo)  has_cargo=1 ;;
+      *) die ".fleet/config for '$name' sets RUNNERS='$RUNNERS' — '$r' is not a runner (vitest, cargo)" ;;
+    esac
+  done
+  [[ -n "$has_vitest" ]] \
+    || die ".fleet/config for '$name' sets RUNNERS='$RUNNERS' without vitest — VITEST_CMD is the baseline's test step"
+  if [[ -n "$has_cargo" ]]; then
+    [[ -n "${CARGO_CMD:-}" ]]       || die ".fleet/config for '$name' lists cargo in RUNNERS but sets no CARGO_CMD"
+    [[ -n "${CARGO_PROBE_DIR:-}" ]] || die ".fleet/config for '$name' lists cargo in RUNNERS but sets no CARGO_PROBE_DIR"
+  elif [[ -n "${CARGO_CMD:-}${CARGO_PROBE_DIR:-}" ]]; then
+    die ".fleet/config for '$name' sets CARGO_CMD or CARGO_PROBE_DIR but RUNNERS does not list cargo"
+  fi
 }
