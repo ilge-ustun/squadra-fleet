@@ -210,6 +210,21 @@ check does that once, in a clean tree, and hands back what is not RED
 (L-42); the builder's rules keep it for a single pair the harness handed
 back whose log does not show why. `prompts/README.md` is the full contract.
 
+A selector is a vitest one, or — when the target's `RUNNERS` list cargo — a
+Rust test, `cargo:<package>[/<target>][::<test path>]`. `<target>` is a
+`tests/<target>.rs` file, or `lib` for the unit tests in `src/`. The harness
+runs it as `$CARGO_CMD -p <package> --test <target> <path> -- --exact` and
+reads libtest's output (`ts/src/lib/libtest.ts`). A reviewer's
+`.review-out/probes/<name>.rs` runs as its own test target in
+`CARGO_PROBE_DIR`. A Rust target onboards with these lines in
+`.fleet/config`:
+
+```bash
+RUNNERS='vitest cargo'
+CARGO_CMD='export PATH="$HOME/.cargo/bin:$PATH" CARGO_TARGET_DIR="$HOME/.cache/fleet-cargo/<repo>/${PWD##*/}"; cargo test --locked'
+CARGO_PROBE_DIR=core/tests
+```
+
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
 (every patch, selector and `.result`), `probes/`, `reviewer.md`,
@@ -551,14 +566,14 @@ ts/                 the harness, run by node as is:
                     new-epic write-story mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
                     new-epic write-story classifier status status-views telegram
-  src/lib/          agents render baseline scope evidence vitest-json result-summary verdict
+  src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types
   fixtures/         the status and Machine-block goldens
 .nvmrc              the Node the units pin
 prompts/            the agents' prompts; README = the verdict contract
 skills/             the coordinator's procedures (.agents/skills → skills/ for Codex)
-test/suite.sh       the suite            test/fakes/   claude, codex, vitest, npm; telegram-api.mts
+test/suite.sh       the suite            test/fakes/   claude, codex, vitest, cargo, npm; telegram-api.mts
 systemd/            the three timer/service pairs and the Remote Control service
 repos/              the registry         docs/         operations, lessons, coordinators
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
