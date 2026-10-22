@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
-import { DASH, byCodePoint, landingOf, listDir, nextReady, nextToRun, queueHold, questionOpen, storyIds, titleOf } from './status.ts';
+import { DASH, byCodePoint, countsMerged, landingOf, listDir, nextReady, nextToRun, queueHold, questionOpen, storyIds, titleOf } from './status.ts';
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
@@ -30,6 +30,28 @@ describe('landingOf — the table in status.ts\'s header', () => {
     landingOf({ ...base, status: 'done', merged: true, verdict: 'PASS', intoInBase: () => { asked++; return true; } });
     landingOf({ ...base, status: 'done', merged: false, verdict: 'PASS', base: 'epic/x', intoInBase: () => { asked++; return true; } });
     expect(asked).toBe(0);
+  });
+});
+
+describe('countsMerged — the epic block counts what the table calls on epic or landed', () => {
+  it.each([
+    ['done and merged', 'done', true, true],
+    ['done, not merged (FAIL, or awaiting merge)', 'done', false, false],
+    ['running, its fresh branch still at the epic tip (qr-desktop-scanner 005, 007)', 'in_progress', true, false],
+    ['ready, a branch left at the tip by a reset', 'ready', true, false],
+    ['blocked mid-round before any commit', 'blocked', true, false],
+  ])('%s', (_name, status, merged, expected) => {
+    expect(countsMerged(status, merged)).toBe(expected);
+  });
+
+  it('agrees with landingOf on every status', () => {
+    const base = { branch: 'story/1', base: 'epic/x', baseBranch: 'base', intoInBase: () => false };
+    for (const status of ['draft', 'ready', 'in_progress', 'blocked', 'needs_human', 'done']) {
+      for (const merged of [true, false]) {
+        const landing = landingOf({ ...base, status, merged, verdict: 'PASS' });
+        expect(countsMerged(status, merged)).toBe(landing === 'on epic' || landing === 'landed');
+      }
+    }
   });
 });
 
