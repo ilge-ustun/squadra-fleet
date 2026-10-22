@@ -44,6 +44,8 @@
 #          `marker` mode then fails, so the claim holds
 #   green  a patch that changes a comment only — nothing fails, so the
 #          builder's "observed red" claim is false and the story must not pass
+#   cargo-red  the red patch with a `cargo:` selector, for a target whose
+#          RUNNERS list cargo (test/fakes/cargo in marker mode catches it)
 #
 # It records every call in $FAKE_TRACE_DIR/calls and saves the prompt it was
 # given as $FAKE_TRACE_DIR/claude-prompt-N, and its argv as claude-args-N, so a
@@ -161,12 +163,12 @@ esac
 
 # TDD evidence, written after the commit so the tree is clean apart from
 # .review-out/ — the same contract the reviewer is held to.
-red_pair() {      # red_pair <name>: a patch the fake vitest catches
+red_pair() {      # red_pair <name> [selector]: a patch the fake vitest (or the fake cargo) catches
   mkdir -p .review-out/mutations
   printf '\nFLEET_MUTANT_MARKER\n' >> src/marker.txt
   git diff -- src/marker.txt > ".review-out/mutations/$1.patch"
   git checkout -q -- src/marker.txt
-  printf 'fake.test.tsx\n' > ".review-out/mutations/$1.test"
+  printf '%s\n' "${2:-fake.test.tsx}" > ".review-out/mutations/$1.test"
 }
 green_pair() {    # green_pair <name>: a patch nothing catches
   mkdir -p .review-out/mutations
@@ -180,6 +182,7 @@ green_pair() {    # green_pair <name>: a patch nothing catches
 case "$evidence" in
   none) : ;;
   red)   red_pair "AC1-$slug" ;;
+  cargo-red) red_pair "AC1-$slug" 'cargo:fake-core/scan::marker_absent' ;;
   green) green_pair "AC1-$slug" ;;
   kept+red)   red_pair AC1-tdd-kept; red_pair "AC1-$slug" ;;
   kept+green) red_pair AC1-tdd-kept; green_pair "AC1-$slug" ;;

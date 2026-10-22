@@ -36,7 +36,7 @@ least one mutation as files in .review-out/mutations/ inside this checkout:
                      criterion claims
   ACn-<slug>.test    ONE line: the vitest selector that must go red once the
                      patch is applied, e.g.
-                       path/to/thing.test.ts -t "AC1"
+                       path/to/thing.test.ts -t "AC1"{{CARGO_SELECTOR}}
   or
   ACn-<slug>.cmd     ONE line: a command that must exit non-zero once the
                      patch is applied (for build, lint or script instruments)
@@ -56,7 +56,7 @@ shows anything else when you finish, the run stops and goes to a human.
 
 If you construct a race or edge case to hunt a regression (check 4), leave it
 behind as a PROBE instead of describing it: write the test itself to
-.review-out/probes/<name>.test.ts (or .test.tsx). No patch — the harness runs it against
+.review-out/probes/<name>.test.ts (or .test.tsx){{CARGO_PROBE}}. No patch — the harness runs it against
 the tree as it stands, in the same worktree, then removes it.
 
 A probe is the inverse of a mutation: it FAILING is the finding. A failing

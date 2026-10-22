@@ -210,6 +210,21 @@ check does that once, in a clean tree, and hands back what is not RED
 (L-42); the builder's rules keep it for a single pair the harness handed
 back whose log does not show why. `prompts/README.md` is the full contract.
 
+A selector is a vitest one, or — when the target's `RUNNERS` list cargo — a
+Rust test, `cargo:<package>[/<target>][::<test path>]`. `<target>` is a
+`tests/<target>.rs` file, or `lib` for the unit tests in `src/`. The harness
+runs it as `$CARGO_CMD -p <package> --test <target> <path> -- --exact` and
+reads libtest's output (`ts/src/lib/libtest.ts`). A reviewer's
+`.review-out/probes/<name>.rs` runs as its own test target in
+`CARGO_PROBE_DIR`. A Rust target onboards with these lines in
+`.fleet/config`:
+
+```bash
+RUNNERS='vitest cargo'
+CARGO_CMD='export PATH="$HOME/.cargo/bin:$PATH" CARGO_TARGET_DIR="$HOME/.cache/fleet-cargo/<repo>/${PWD##*/}"; cargo test --locked'
+CARGO_PROBE_DIR=core/tests
+```
+
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
 (every patch, selector and `.result`), `probes/`, `reviewer.md`,
@@ -387,6 +402,9 @@ environment wins over the file; a missing required key is a `die`.
 | `PR_CMD` | with `pr` | see below |
 | `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. A Next app that should listen on loopback only: `npx next start -H 127.0.0.1` |
 | `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log`. The run is bounded by `E2E_TIMEOUT` and swept afterwards: a timeout, or any process still running in the tree, is RED and is killed |
+| `RUNNERS` | no, default `vitest` | the test runners a selector may name — a mutation's, a tdd pair's, a probe's: `vitest`, or `vitest cargo`. vitest is always listed, because `VITEST_CMD` is the baseline's test step. A new target states its runners here when it is onboarded; an unknown word is a `die` |
+| `CARGO_CMD` | with `cargo` | the prefix a `cargo:` selector's arguments are appended to, e.g. `export PATH="$HOME/.cargo/bin:$PATH"; cargo test --locked`. Set without `cargo` in `RUNNERS` it is a `die` |
+| `CARGO_PROBE_DIR` | with `cargo` | the integration-test directory a reviewer's Rust probe lands in, beside the package's `Cargo.toml` (`core/tests`) |
 | `E2E_TIMEOUT` | no, default 900 | seconds an `E2E_CMD` run may take. At the bound coreutils `timeout` kills its whole process group, so a hung browser suite cannot stall a launcher or a merge |
 
 `.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
@@ -548,14 +566,14 @@ ts/                 the harness, run by node as is:
                     new-epic write-story mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
                     new-epic write-story classifier status status-views telegram
-  src/lib/          agents render baseline scope evidence vitest-json result-summary verdict
+  src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types
   fixtures/         the status and Machine-block goldens
 .nvmrc              the Node the units pin
 prompts/            the agents' prompts; README = the verdict contract
 skills/             the coordinator's procedures (.agents/skills → skills/ for Codex)
-test/suite.sh       the suite            test/fakes/   claude, codex, vitest, npm; telegram-api.mts
+test/suite.sh       the suite            test/fakes/   claude, codex, vitest, cargo, npm; telegram-api.mts
 systemd/            the three timer/service pairs and the Remote Control service
 repos/              the registry         docs/         operations, lessons, coordinators
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code

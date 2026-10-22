@@ -10,7 +10,7 @@ Rules that override anything you infer:
                            round ends on, so a patch written earlier will not
                            apply and proves nothing. Never hand-author one.
     ACn-tdd-<slug>.test    ONE line: the vitest selector that must then go red,
-                           e.g.  path/to/foo.test.ts -t "AC1"
+                           e.g.  path/to/foo.test.ts -t "AC1"{{CARGO_SELECTOR}}
   The harness applies each patch in a clean tree and runs the selector. A patch
   whose selector stays green means the test never proved what you said it
   proved, and the story fails whatever your summary claims. Leave the tree

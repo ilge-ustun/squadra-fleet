@@ -156,10 +156,26 @@ deploys — belongs to that target, not here.
 - **The queue's own merge takes no fleet lock.** The bot holds it around
   `/merge`; the queue's `fleet merge`, after its launch has exited and let
   go of the launch lock, commits the `merged:` record without it.
-- **The runner contract.** `VITEST_CMD` must accept
-  `<selector> --reporter json --outputFile <f>` and write vitest's JSON
-  shape. Another runner needs an adapter in `ts/src/lib/vitest-json.ts`,
-  the one place a runner's JSON becomes a class.
+- **The runner contract.** A target names its runners in `RUNNERS`
+  (`vitest`, or `vitest cargo`). Each runner has one adapter, and no other
+  file turns a runner's output into a class. `classifier.ts` picks the
+  adapter by the selector's form.
+  - vitest: `VITEST_CMD` must accept
+    `<selector> --reporter json --outputFile <f>` and write vitest's JSON
+    shape. The adapter is `ts/src/lib/vitest-json.ts`.
+  - cargo: a `.test` line `cargo:<package>[/<target>][::<test path>]` runs
+    as `$CARGO_CMD -p <package> [--test <target>|--lib] [<path> -- --exact]`.
+    The adapter is `ts/src/lib/libtest.ts`. It reads libtest's plain output
+    on stable, because `--format json` is nightly-only. A failed result, or a
+    test binary that died before its result, is RED. A compile error, no
+    match or only ignored tests is NO_TESTS. A Rust probe lands in
+    `CARGO_PROBE_DIR` as its own test target.
+  - Open: vitest is still required, because `VITEST_CMD` is the baseline's
+    test step. A target with no JavaScript tests cannot list cargo alone.
+    `cargo test` still runs in the baseline only through `BUILD_CMD`.
+  - Open: a `cargo:` run compiles the crate's tests. The first run in a fresh
+    worktree takes minutes unless `CARGO_CMD` sets a shared
+    `CARGO_TARGET_DIR`.
 - **E2E_CMD runs in khaita's baselines** since story 062 (cases 152, 153):
   063–071 ran it green, 39–97 s a run on this box. Each run is bounded by
   `E2E_TIMEOUT` (default 900 s) and swept for leftover processes, because

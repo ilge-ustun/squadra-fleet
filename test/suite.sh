@@ -92,7 +92,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm systemd-run systemctl; do
+  for name in claude codex npm systemd-run systemctl cargo; do
     got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
       echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -3556,7 +3556,9 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_158_review_keeps_rounds_across_a_stop case_159_tdd_pairs_run_once_by_the_harness
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
-       case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo)
+       case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
+       case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
+       case_168_cargo_probes case_169_prompts_name_the_runners)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4916,6 +4918,204 @@ case_165_queue_unit_per_repo() {
 
   CASE="165b the agent updater waits while any repo's drain runs"
   assert_grep 'fleet-queue@\*\.service' "$FLEET_HOME/bin/update-agents.sh" "it asks about every instance"
+}
+
+# 22 Oct. A target says which test runners its evidence may name. RUNNERS
+# lists them; absent means vitest, so every target written before this loads
+# as it did. vitest stays required: VITEST_CMD is the baseline's test step.
+# cargo needs CARGO_CMD (the prefix the harness appends a selector's
+# arguments to) and CARGO_PROBE_DIR (where a reviewer's Rust probe lands).
+#
+# Red while lib.sh does not know RUNNERS: nothing is refused and RUNNERS is
+# never defaulted.
+case_166_runners_config() {
+  CASE="166 RUNNERS: vitest by default, cargo with its command, the rest refused"
+  local d="$TMP/c166" lib="${FLEET_LIB_OVERRIDE:-$FLEET_HOME/bin/lib.sh}" out rc
+  mkdir -p "$d/repos" "$d/a/target/.fleet"
+  git init -q "$d/a/target"
+  printf 'REPO_PATH=%s\n' "$d/a/target" > "$d/repos/t.env"
+  cat > "$d/a/target/.fleet/config" <<'EOF'
+BASE_BRANCH=base
+INSTALL_CMD=true
+VITEST_CMD='fake vitest'
+BUILD_CMD=true
+LINT_CMD=true
+SEED_FILES=
+PROBE_DIR=src
+EOF
+  probe() {                           # probe [VAR=value …] → out rc
+    out="$( env -i PATH="$PATH" HOME="$HOME" "$@" FLEET_REGISTRY_DIR="$d/repos" \
+            bash -c 'source "$1" && load_repo t && printf "%s|%s|%s\n" "$RUNNERS" "${CARGO_CMD:-}" "${CARGO_PROBE_DIR:-}"' \
+            _ "$lib" 2>&1 )"; rc=$?
+  }
+  probe
+  assert_eq "$rc" 0 "a config without RUNNERS loads"
+  assert_eq "$out" "vitest||" "and means vitest alone"
+
+  probe RUNNERS='vitest cargo' CARGO_CMD='cargo test' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 0 "vitest and cargo with both cargo keys load"
+  assert_eq "$out" "vitest cargo|cargo test|core/tests" "and hand the keys back"
+
+  probe RUNNERS='vitest cargo' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 1 "cargo without CARGO_CMD dies"; assert_contains "$out" "CARGO_CMD" "and names the key"
+  probe RUNNERS='vitest cargo' CARGO_CMD='cargo test'
+  assert_eq "$rc" 1 "cargo without CARGO_PROBE_DIR dies"; assert_contains "$out" "CARGO_PROBE_DIR" "and names the key"
+  probe RUNNERS='vitest jest'
+  assert_eq "$rc" 1 "an unknown runner dies"; assert_contains "$out" "jest" "and names it"
+  probe RUNNERS=cargo CARGO_CMD='cargo test' CARGO_PROBE_DIR=core/tests
+  assert_eq "$rc" 1 "a list without vitest dies"; assert_contains "$out" "VITEST_CMD" "because vitest is the baseline's test step"
+  probe CARGO_CMD='cargo test'
+  assert_eq "$rc" 1 "a cargo key without cargo in RUNNERS dies"; assert_contains "$out" "RUNNERS" "and says why"
+
+  printf "RUNNERS='vitest cargo'\nCARGO_CMD='cargo test --locked'\nCARGO_PROBE_DIR=core/tests\n" >> "$d/a/target/.fleet/config"
+  probe
+  assert_eq "$out" "vitest cargo|cargo test --locked|core/tests" "the keys come from the file like every other"
+}
+
+# A target whose RUNNERS list cargo: its config names the fake cargo as
+# CARGO_CMD and a crate, fake-core, whose tests/ is CARGO_PROBE_DIR.
+cargo_target() {                      # cargo_target — after fixture
+  printf "RUNNERS='vitest cargo'\nCARGO_CMD='%s test'\nCARGO_PROBE_DIR=crates/fake-core/tests\n" "$FLEET/test/fakes/cargo" >> "$REPO/.fleet/config"
+  mkdir -p "$REPO/crates/fake-core/tests"
+  printf '[package]\nname = "fake-core"\nversion = "0.1.0"\nedition = "2021"\n' > "$REPO/crates/fake-core/Cargo.toml"
+  printf '#[test]\nfn marker_absent() {}\n' > "$REPO/crates/fake-core/tests/scan.rs"
+  git -C "$REPO" add -A; git -C "$REPO" commit -qm "fixture: a cargo target"; git -C "$REPO" push -q origin base
+}
+
+# 22 Oct. A Rust test is evidence like a vitest one: a .test whose line is
+# `cargo:<package>[/<target>][::<test path>]` runs as `$CARGO_CMD -p … --
+# --exact` and its libtest output becomes the same classes. Every case checks
+# the trace as well as the class: the fake vitest decides by the marker
+# alone, so without the trace a cargo selector handed to vitest would look
+# caught.
+#
+# Red while classifier.ts hands every .test line to VITEST_CMD: no cargo call
+# is traced, and 167c/d/f come out RED where they must not.
+case_167_cargo_evidence() {
+  local want='cargo test -p fake-core --test scan marker_absent -- --exact'
+  CASE="167 a cargo: mutation the Rust test catches is RED"; fixture c167; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "row in the Machine table"
+  assert_grep "^$want\$" "$TRACE/calls" "run by cargo, as CARGO_CMD and the parsed selector"
+  assert_eq "$(field status)" done "a caught Rust mutation passes like a vitest one"
+
+  CASE="167b a cargo: mutation that survives is GREEN and vetoes"; fixture c167b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=pass
+  assert_grep '^computed: FAIL — .*AC1 marker GREEN' "$REPO/.review/$STORY.md" "the veto names it"
+  assert_grep "^$want\$" "$TRACE/calls" "run by cargo"
+
+  CASE="167c a cargo: mutation that breaks the build is NO_TESTS, never RED"; fixture c167c; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker-nocompile
+  assert_grep '^AC1 +NO_TESTS +marker' "$REPO/.review/$STORY.md" "a compile error is not a caught mutation (L-08)"
+
+  CASE="167d a cargo: selector that names no test is SELECTOR_INVALID"; fixture c167d; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=nomatch
+  assert_grep '^AC1 +SELECTOR_INVALID +marker' "$REPO/.review/$STORY.md" "zero tests ran before the patch"
+
+  CASE="167e a builder's tdd pair may name a Rust test"; fixture c167e; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=cargo-red FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_CARGO=marker
+  assert_grep '^AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "the tdd check ran it"
+  assert_grep "^$want\$" "$TRACE/calls" "through cargo"
+
+  CASE="167f a cargo: selector in a repo whose RUNNERS do not list cargo names no test"; fixture c167f
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +SELECTOR_INVALID +marker' "$REPO/.review/$STORY.md" "refused, not handed to vitest"
+  assert_not_grep '^cargo ' "$TRACE/calls" "and cargo never runs"
+  assert_not_grep 'vitest cargo:' "$TRACE/calls" "nor vitest"
+
+  CASE="167g fleet check-mutation runs a cargo: pair as the verdict does"; fixture c167g; cargo_target
+  local m="$REPO/.review-out/mutations" out rc
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'cargo:fake-core/scan::marker_absent\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass FAKE_CARGO=marker \
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "RED AC1-tdd-marker" "caught"
+  assert_eq "$rc" 0 "and exits 0"
+  assert_grep "^$want\$" "$TRACE/calls" "through cargo"
+}
+
+# One classifier for cargo too: the verdict and fleet check-mutation both
+# reach ts/src/lib/libtest.ts. Replace it with a stub that answers GREEN to
+# everything, and a cargo mutation the fake cargo would catch comes out GREEN
+# from both. Red when either caller classifies cargo output without it.
+case_167h_one_cargo_classifier() {
+  CASE="167h the verdict and fleet check-mutation share one cargo classifier"; fixture c167h; cargo_target
+  cat >> "$FLEET/ts/src/lib/libtest.ts" <<'STUB'
+export function classFromLibtestStubbed(): RunClass { return 'GREEN'; }
+STUB
+  sed -i 's/^export function classFromLibtest(log: string, status: number): RunClass {$/export function classFromLibtest(_log: string, _status: number): RunClass { return classFromLibtestStubbed(); }\nfunction unused(log: string, status: number): RunClass {/' "$FLEET/ts/src/lib/libtest.ts"
+  local m="$REPO/.review-out/mutations" out
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'cargo:fake-core/scan::marker_absent\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass FAKE_CARGO=marker \
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"
+  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation gives the stub's answer"
+  rm -rf "$m"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the verdict gives the stub's answer"
+}
+
+# A reviewer's Rust probe: .review-out/probes/<name>.rs, copied into
+# CARGO_PROBE_DIR as its own integration-test target fleet_probe_<name>, run
+# by cargo, removed. RED vetoes, as a vitest probe's does. Red while
+# runProbes reads only *.test.ts(x): the .rs probe never runs and no row
+# appears.
+case_168_cargo_probes() {
+  CASE="168 a green Rust probe is recorded and changes nothing"; fixture c168; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=cargo-green MAX_ROUNDS=1 FAKE_CARGO=pass
+  assert_eq "$(field status)" done "a probe that finds nothing does not block"
+  assert_grep '^GREEN +probe-green.rs' "$REPO/.review/$STORY.md" "row in the Machine table"
+  assert_grep '^cargo test -p fake-core --test fleet_probe_probe_green$' "$TRACE/calls" "run as its own target in the package"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-green.rs" "probe committed"
+
+  CASE="168b a red Rust probe vetoes"; fixture c168b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=cargo-red MAX_ROUNDS=1 FAKE_CARGO=pass
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
+  assert_grep '^computed: FAIL — .*probe probe-red.rs RED' "$REPO/.review/$STORY.md" "reason names the probe"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-red.rs" "kept for the next story"
+}
+
+# The prompts name a target's runners. A target without cargo in RUNNERS
+# must get the prompts it got before cargo existed, byte for byte: run one
+# story with the prompts as they are and one with every {{CARGO_*}}
+# placeholder deleted from them, and the builder's and the reviewer's
+# prompts must be the same once the fixture's own path is masked. A cargo
+# target's builder and reviewer are told the cargo: form, CARGO_CMD and
+# where a Rust probe lands. The two fixtures' paths and commit hashes are
+# masked; nothing else may differ.
+#
+# Red while a placeholder renders anything for a vitest-only target (169),
+# and while the cargo facts are not rendered (169b).
+case_169_prompts_name_the_runners() {
+  CASE="169 a vitest-only target's prompts are unchanged, byte for byte"
+  local a b f
+  # The fixture's path and its commits' hashes differ between two fixtures.
+  mask() { sed -E "s#$1#FX#g; s/[0-9a-f]{40}/SHA/g"; }
+  fixture c169s
+  sed -i 's/{{CARGO_[A-Z]*}}//g' "$FLEET"/prompts/*.md
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  b="$TRACE"; local fx_b="$FX"
+  fixture c169
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  a="$TRACE"
+  for f in claude-prompt-1 codex-prompt-1; do
+    if [[ -s "$a/$f" ]] && cmp -s <(mask "$FX" < "$a/$f") <(mask "$fx_b" < "$b/$f"); then ok; else fail "$f differs from the prompt without placeholders"; fi
+    assert_not_grep 'cargo' "$a/$f" "$f names no cargo"
+  done
+
+  CASE="169b a cargo target's builder and reviewer are told the cargo: form"; fixture c169b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/claude-prompt-1" "the builder's rules"
+  assert_grep "$FLEET/test/fakes/cargo test -p <package> --test <target> <test path> -- --exact" "$TRACE/claude-prompt-1" "with the target's CARGO_CMD"
+  assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/codex-prompt-1" "the reviewer's mutation files"
+  assert_grep 'target in crates/fake-core/tests' "$TRACE/codex-prompt-1" "and where a Rust probe lands"
+  assert_not_grep 'unsubstituted' "$LOG" "no placeholder left"
 }
 
 for c in "${CASES[@]}"; do

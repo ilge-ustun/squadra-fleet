@@ -77,8 +77,11 @@ line numbers rot (L-11), commands do not.
        not swap the box to death.
    - `fleet test-deploy` stays a single slot (khaita only).
    - Update `docs/operations.md` "Lanes" and the systemd README.
-2. **A `cargo test` runner beside vitest.**
-   - Today the machine's evidence — mutations, probes, the builder's
+2. **A `cargo test` runner beside vitest.** Done, 22 Oct 2026: `RUNNERS`,
+   `CARGO_CMD` and `CARGO_PROBE_DIR` in `.fleet/config`, the adapter in
+   `ts/src/lib/libtest.ts`, cases 166–169. `docs/operations.md`, "The runner
+   contract", is the current text. The brief, as written before it:
+   - Before this, the machine's evidence — mutations, probes, the builder's
      `ACn-tdd-*.test` selectors, `fleet check-mutation` — speaks only
      vitest's JSON (`docs/operations.md`, "The runner contract";
      `ts/src/lib/vitest-json.ts` is the one place a runner's output becomes

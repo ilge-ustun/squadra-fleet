@@ -15,6 +15,9 @@ import { runSync } from './proc.ts';
 
 export type MergeMode = 'direct' | 'pr';
 
+/** A runner a selector may name. lib.sh refuses any other word. */
+export type Runner = 'vitest' | 'cargo';
+
 export interface RepoConfig {
   /** The registry name, `REPO_NAME`. */
   name: string;
@@ -42,6 +45,16 @@ export interface RepoConfig {
   /** E2E_TIMEOUT: the seconds an e2e run may take before its process group
    *  is killed; absent means the baseline's default. */
   e2eTimeoutSec?: number;
+  /** RUNNERS split on whitespace: the runners a selector may name. Always
+   *  holds vitest (lib.sh refuses a list without it); `['vitest']` when the
+   *  file does not say. */
+  runners: Runner[];
+  /** CARGO_CMD, set exactly when runners holds cargo: the prefix a `cargo:`
+   *  selector's arguments are appended to. */
+  cargoCmd?: string;
+  /** CARGO_PROBE_DIR, set exactly when runners holds cargo: where a Rust
+   *  probe lands, an integration-test directory beside a Cargo.toml. */
+  cargoProbeDir?: string;
 }
 
 export class ConfigError extends Error {
@@ -103,6 +116,13 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
   const startCmd = m.get('START_CMD');
   const e2eCmd = m.get('E2E_CMD');
   const e2eTimeout = m.get('E2E_TIMEOUT');
+  const runners = required(m, 'RUNNERS').split(/[ \t\n]+/).filter((s) => s !== '');
+  for (const r of runners) {
+    if (r !== 'vitest' && r !== 'cargo') throw new ConfigError(`lib.sh handed back RUNNERS=${runners.join(' ')}`, false);
+  }
+  const cargoCmd = m.get('CARGO_CMD');
+  const cargoProbeDir = m.get('CARGO_PROBE_DIR');
+  const withCargo = runners.includes('cargo');
   if (e2eTimeout !== undefined && e2eTimeout !== '' && !/^[1-9][0-9]*$/.test(e2eTimeout)) {
     throw new ConfigError(`E2E_TIMEOUT=${e2eTimeout} in .fleet/config for '${m.get('REPO_NAME') ?? name}' is not a whole number of seconds`, false);
   }
@@ -122,5 +142,8 @@ export function loadRepo(fleetHome: string, name: string, o: LoadOptions = {}): 
     ...(startCmd !== undefined ? { startCmd } : {}),
     ...(e2eCmd !== undefined && e2eCmd !== '' ? { e2eCmd } : {}),
     ...(e2eTimeout !== undefined && e2eTimeout !== '' ? { e2eTimeoutSec: Number(e2eTimeout) } : {}),
+    runners: runners as Runner[],
+    ...(withCargo && cargoCmd !== undefined && cargoCmd !== '' ? { cargoCmd } : {}),
+    ...(withCargo && cargoProbeDir !== undefined && cargoProbeDir !== '' ? { cargoProbeDir } : {}),
   };
 }

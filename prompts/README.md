@@ -9,18 +9,26 @@ text: nothing expands by accident and a prompt file cannot inject shell.
 
 | file | placeholders |
 |---|---|
-| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` `{{TDD_FIXES}}` |
+| `rules.md` | `{{STORY_ID}}` `{{REPO_RULES}}` `{{CHECK_MUTATION}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE_FIXES}}` `{{TDD_FIXES}}` `{{CARGO_SELECTOR}}` |
 | `build-round1.md` | `{{RULES}}` `{{STORY}}` |
 | `build-round2.md` | `{{STORY_ID}}` `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `answered.md` | `{{STORY_ID}}` |
 | `build-after-spec.md` | `{{RULES}}` `{{STORY}}` `{{REVIEW_TEXT}}` |
 | `baseline-fix.md` | `{{BASELINE_RED}}` `{{STORY_ID}}` |
 | `tdd-fix.md` | `{{TDD_RED}}` `{{STORY_ID}}` |
-| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` |
-| `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` |
+| `review.md` | `{{STORY}}` `{{HEAD_SHA}}` `{{BASE_SHA}}` `{{ROUND}}` `{{VITEST_CMD}}` `{{BUILD_CMD}}` `{{LINT_CMD}}` `{{E2E_STEP}}` `{{BASELINE}}` `{{CARGO_SELECTOR}}` `{{CARGO_PROBE}}` |
+| `write-story.md` | `{{STORY_ID}}` `{{INTENT}}` `{{STORY_BASE}}` `{{CARGO_INSTRUMENT}}` |
 
 Render `rules.md` first — it contains `{{STORY_ID}}` and is then embedded as
 `{{RULES}}` in every build prompt.
+
+The `{{CARGO_*}}` placeholders come from `ts/src/lib/runner-prompts.ts`. They
+are empty when the target's `RUNNERS` do not list cargo. Then the prompt is
+the same, byte for byte, as without them (case 169). For a cargo target they
+tell the builder and the reviewer the `cargo:` selector form and the
+target's `CARGO_CMD`, the reviewer where a Rust probe lands, and the story
+writer that a Rust test can be an instrument. The empty-value guard does not
+apply to them.
 
 `answered.md` opens the first build prompt of a launch that found the
 builder's `.blocked/<id>.md` still in its worktree — a question an earlier

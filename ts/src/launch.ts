@@ -66,6 +66,7 @@ import { COMPUTED_SEP, REASON_END, formatIsoSeconds, renderRoundSection } from '
 import { runBashTo } from './lib/proc.ts';
 import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.ts';
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
+import { runnerVars } from './lib/runner-prompts.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
 import { tddCounts, tddForBuilder } from './lib/tdd-check.ts';
@@ -503,6 +504,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       }
     }
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
+    // CARGO_CMD for the evidence runners, when the target's RUNNERS list cargo.
+    const cargoRunner = cfg.cargoCmd !== undefined ? { cargoCmd: cfg.cargoCmd } : {};
 
     // The variables the prompts are rendered with, as the round goes on.
     const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '', tddRed: '' };
@@ -514,6 +517,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
         BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed,
         TDD_FIXES: String(knobs.tddFixes), TDD_RED: state.tddRed,
+        ...runnerVars(file, cfg),
       };
       let r;
       try {
@@ -788,7 +792,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         const record = new Map<string, KnownRun>();
         let rows;
         try {
-          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
+          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
         } catch (e) {
           if (!(e instanceof RunnerError)) throw e;
           if (e.before !== undefined) dieMessage(e.before);
@@ -966,8 +970,11 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let mutRows;
       let probeRows;
       try {
-        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, log, known: tddKnown, preRuns });
-        probeRows = runProbes({ wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, log });
+        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log, known: tddKnown, preRuns });
+        probeRows = runProbes({
+          wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner,
+          ...(cfg.cargoProbeDir !== undefined ? { cargoProbeDir: cfg.cargoProbeDir } : {}), log,
+        });
       } catch (e) {
         if (!(e instanceof RunnerError)) throw e;
         if (e.before !== undefined) dieMessage(e.before);

@@ -8,6 +8,8 @@ import { DirtyTreeError, classifyMutation, findSelector, runSelector } from './c
 
 // The fleet's one fake runner, the same one test/suite.sh points VITEST_CMD at.
 const FAKE_VITEST = resolve(import.meta.dirname, '../../test/fakes/vitest');
+// And its cargo, which test/suite.sh points CARGO_CMD at as `<it> test`.
+const FAKE_CARGO = `${resolve(import.meta.dirname, '../../test/fakes/cargo')} test`;
 
 describe('classFromVitestJson — the decision, row by row', () => {
   it.each([
@@ -89,6 +91,7 @@ afterEach(() => {
   rmSync(fx.dir, { recursive: true, force: true });
   delete process.env['FAKE_TRACE_DIR'];
   delete process.env['FAKE_VITEST'];
+  delete process.env['FAKE_CARGO'];
 });
 
 describe('findSelector', () => {
@@ -132,6 +135,64 @@ describe('runSelector', () => {
     expect(readFileSync(`${prefix}.log`, 'utf8').trim()).toBe(runSync('pwd', [], { cwd: fx.wt }).stdout.trim());
     writeFileSync(f, 'exit 3\n');
     expect(runSelector({ wt: fx.wt, kind: 'cmd', selectorFile: f, rawPrefix: prefix, vitestCmd: FAKE_VITEST })).toBe('RED');
+  });
+});
+
+describe('runSelector — a cargo: selector', () => {
+  const sel = (line: string) => {
+    const f = join(fx.mut, 'sel.test');
+    writeFileSync(f, `${line}\n`);
+    return f;
+  };
+  const cargoCalls = (): string[] =>
+    existsSync(join(fx.trace, 'calls')) ? readFileSync(join(fx.trace, 'calls'), 'utf8').split('\n').filter((l) => l.startsWith('cargo')) : [];
+  it.each([['pass', 'GREEN'], ['fail', 'RED'], ['nomatch', 'NO_TESTS'], ['nocompile', 'NO_TESTS']] as const)('fake %s → %s, through libtest\'s output', (fake, expected) => {
+    process.env['FAKE_CARGO'] = fake;
+    const prefix = join(fx.raw, 'r');
+    expect(runSelector({ wt: fx.wt, kind: 'test', selectorFile: sel('cargo:qr-core/scan::stale_is_swept'), rawPrefix: prefix, vitestCmd: FAKE_VITEST, cargoCmd: FAKE_CARGO })).toBe(expected);
+    expect(cargoCalls()).toEqual(['cargo test -p qr-core --test scan stale_is_swept -- --exact']);
+    expect(existsSync(`${prefix}.json`)).toBe(false);
+    expect(readFileSync(`${prefix}.log`, 'utf8')).toMatch(fake === 'nocompile' ? /could not compile/ : /^running \d+ tests?$/m);
+  });
+  it('with no CARGO_CMD (RUNNERS does not list cargo) it is NO_TESTS, the log says why, and nothing runs', () => {
+    process.env['FAKE_CARGO'] = 'pass';
+    const prefix = join(fx.raw, 'r');
+    expect(runSelector({ wt: fx.wt, kind: 'test', selectorFile: sel('cargo:qr-core/scan::x'), rawPrefix: prefix, vitestCmd: FAKE_VITEST })).toBe('NO_TESTS');
+    expect(readFileSync(`${prefix}.log`, 'utf8')).toMatch(/RUNNERS/);
+    expect(cargoCalls()).toEqual([]);
+  });
+  it('a line that is not a cargo selector is NO_TESTS and runs nothing: no shell ever sees it', () => {
+    process.env['FAKE_CARGO'] = 'pass';
+    const prefix = join(fx.raw, 'r');
+    expect(runSelector({ wt: fx.wt, kind: 'test', selectorFile: sel('cargo:qr-core/scan::x; touch pwned'), rawPrefix: prefix, vitestCmd: FAKE_VITEST, cargoCmd: FAKE_CARGO })).toBe('NO_TESTS');
+    expect(readFileSync(`${prefix}.log`, 'utf8')).toMatch(/not a cargo selector/);
+    expect(cargoCalls()).toEqual([]);
+    expect(existsSync(join(fx.wt, 'pwned'))).toBe(false);
+  });
+});
+
+describe('classifyMutation — a cargo: selector gets the same classes', () => {
+  const cargoClassify = (fake: string, line = 'cargo:qr-core/scan::marker_absent') => {
+    const p = markerPatch('AC1-cargo', `${line}\n`);
+    process.env['FAKE_CARGO'] = fake;
+    return classifyMutation({
+      wt: fx.wt, patch: p, kind: 'test', selectorFile: join(fx.mut, 'AC1-cargo.test'), rawPrefix: join(fx.raw, 'AC1-cargo'),
+      restore: 'checkout', vitestCmd: FAKE_VITEST, cargoCmd: FAKE_CARGO,
+    });
+  };
+  it.each([
+    ['marker', 'RED', 'caught'],
+    ['pass', 'GREEN', 'survived'],
+    ['marker-nocompile', 'NO_TESTS', 'the mutation broke compilation'],
+    ['nomatch', 'SELECTOR_INVALID', 'the selector named no test'],
+    ['nocompile', 'SELECTOR_INVALID', 'nothing compiled before the mutation'],
+    ['fail', 'PRE_RED', 'already red'],
+  ] as const)('fake %s → %s (%s), the tree restored', (fake, expected, _why) => {
+    expect(cargoClassify(fake).cls).toBe(expected);
+    expect(porcelainOf()).toBe('');
+  });
+  it('a RED cargo run has no JSON for the .result to summarise', () => {
+    expect(cargoClassify('marker').mutJsonPath).toBeUndefined();
   });
 });
 

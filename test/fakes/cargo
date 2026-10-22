@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# fleet/test/fakes/cargo — stand-in for `cargo test …` under fleet/test/suite.sh
+# and ts/src/classifier.test.ts. A target that lists cargo in RUNNERS has its
+# `cargo:` selectors run as `$CARGO_CMD <args>`; the fixtures point CARGO_CMD
+# at `<this file> test`. It compiles nothing. It prints what libtest prints
+# on stable, in the shapes captured from cargo 1.99.1 on 22 Oct 2026 (see
+# ts/src/lib/libtest.test.ts), stdout and stderr as cargo splits them:
+#
+#   FAKE_CARGO=pass            one test ran and passed           exit 0
+#   FAKE_CARGO=fail            one test ran and FAILED           exit 101
+#   FAKE_CARGO=nomatch         every binary ran 0 tests          exit 0
+#   FAKE_CARGO=nocompile       a compile error, no binary ran    exit 101
+#   FAKE_CARGO=marker          fail iff src/marker.txt holds FLEET_MUTANT_MARKER
+#   FAKE_CARGO=marker-nocompile pass unmutated; once the marker exists, the
+#                              crate does not compile (a mutation that breaks
+#                              the build — L-08)
+#
+# A probe's target names its own outcome, as the fake vitest's selector does:
+# `--test fleet_probe_probe_red` fails, `--test fleet_probe_probe_green`
+# passes, whatever FAKE_CARGO says.
+#
+# Records `cargo <args>` in $FAKE_TRACE_DIR/calls.
+#
+set -euo pipefail
+: "${FAKE_CARGO:?FAKE_CARGO must be set}"
+: "${FAKE_TRACE_DIR:?FAKE_TRACE_DIR must be set}"
+
+printf 'cargo %s\n' "$*" >> "$FAKE_TRACE_DIR/calls"
+[[ "${1:-}" == test ]] || { echo "fleet/test/fakes/cargo: only 'cargo test' is faked, got: $*" >&2; exit 2; }
+
+mode="$FAKE_CARGO"
+case " $* " in
+  *" --test fleet_probe_"*red*" "*)   mode=fail ;;
+  *" --test fleet_probe_"*green*" "*) mode=pass ;;
+esac
+if [[ "$mode" == marker || "$mode" == marker-nocompile ]]; then
+  if grep -q FLEET_MUTANT_MARKER src/marker.txt 2>/dev/null; then
+    [[ "$mode" == marker ]] && mode=fail || mode=nocompile
+  else
+    mode=pass
+  fi
+fi
+
+finished() { echo '    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s' >&2; }
+case "$mode" in
+  pass)
+    finished
+    echo '     Running tests/fake.rs (target/debug/deps/fake-0000000000000000)' >&2
+    printf '\nrunning 1 test\ntest fake_test ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s\n\n'
+    exit 0 ;;
+  fail)
+    finished
+    echo '     Running tests/fake.rs (target/debug/deps/fake-0000000000000000)' >&2
+    printf '\nrunning 1 test\ntest fake_test ... FAILED\n\nfailures:\n\n---- fake_test stdout ----\n\nthread %s panicked at tests/fake.rs:4:5:\nassertion failed: the fake asserts\n\n\nfailures:\n    fake_test\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s\n\n' "'fake_test'"
+    echo 'error: test failed, to rerun pass `-p fake --test fake`' >&2
+    exit 101 ;;
+  nomatch)
+    finished
+    printf '\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n\n'
+    exit 0 ;;
+  nocompile)
+    echo '   Compiling fake v0.1.0 (/fake)' >&2
+    echo 'error: this file contains an unclosed delimiter' >&2
+    echo 'error: could not compile `fake` (test "fake") due to 1 previous error' >&2
+    exit 101 ;;
+  *) echo "fleet/test/fakes/cargo: unknown FAKE_CARGO='$FAKE_CARGO'" >&2; exit 2 ;;
+esac

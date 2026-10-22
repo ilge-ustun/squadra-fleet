@@ -12,7 +12,7 @@
 // head, patch and selector are unchanged instead of running it a second time.
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { classifyMutation, findSelector, runSelector as classifierRunSelector, type RunSelectorInput, type Selector } from '../classifier.ts';
 import { porcelain, revParse } from './git.ts';
 import { resultSummaryLine } from './result-summary.ts';
@@ -66,6 +66,8 @@ export interface MutationsInput {
   /** The .runs prefix for a mutation's raw files: <id>-round<N>-<name>. */
   rawPrefix: (name: string) => string;
   vitestCmd: string;
+  /** CARGO_CMD, when the target's RUNNERS list cargo. */
+  cargoCmd?: string;
   log: (msg: string) => void;
   /** Runs already made, by name — the tdd check's. A patch whose digest is
    *  the one recorded keeps its class and is not run again. */
@@ -110,6 +112,7 @@ export function runMutations(i: MutationsInput): MutRow[] {
       try {
         const r = classifyMutation({
           wt: i.wt, patch, kind: sel.kind, selectorFile: sel.file, rawPrefix: i.rawPrefix(name), restore: 'checkout', vitestCmd: i.vitestCmd, preRuns,
+          ...(i.cargoCmd !== undefined ? { cargoCmd: i.cargoCmd } : {}),
         });
         cls = r.cls;
         writeResultFile(join(mdir, `${name}.result`), r.cls, r.mutJsonPath);
@@ -134,37 +137,74 @@ export interface ProbesInput {
   probeDir: string;
   rawPrefix: (name: string) => string;
   vitestCmd: string;
+  /** CARGO_CMD and CARGO_PROBE_DIR, both present when the target's RUNNERS
+   *  list cargo: a reviewer's *.rs probe then runs as a test target there. */
+  cargoCmd?: string;
+  cargoProbeDir?: string;
   log: (msg: string) => void;
   /** The selector runner; the classifier's unless a test injects one. */
   runSelector?: (i: RunSelectorInput) => RunClass;
 }
 
-/** `*.test.tsx` then `*.test.ts`, each in glob order; each copied to
- *  PROBE_DIR/fleet-probe-<name>, run through the selector runner with a .sel
- *  file naming that path, removed; the tree must be clean before and after;
+/** The package a CARGO_PROBE_DIR's tests belong to: `name` under
+ *  `[package]` in the Cargo.toml beside it. */
+export function probePackage(wt: string, cargoProbeDir: string): string {
+  const toml = `${dirname(cargoProbeDir)}/Cargo.toml`;
+  const text = existsSync(join(wt, toml)) ? readFileSync(join(wt, toml), 'utf8') : '';
+  const m = /^\[package\][^[]*?^name\s*=\s*"([A-Za-z0-9_-]+)"/m.exec(text);
+  if (m?.[1] === undefined) {
+    throw new RunnerError(`probe runner: no [package] name in ${toml} — CARGO_PROBE_DIR ${cargoProbeDir} must be a package's tests directory`);
+  }
+  return m[1];
+}
+
+/** `*.test.tsx` then `*.test.ts`, each in glob order, then — when the target
+ *  lists cargo — `*.rs`; a vitest probe is copied to
+ *  PROBE_DIR/fleet-probe-<name>, a Rust one to CARGO_PROBE_DIR/fleet_probe_<stem>.rs,
+ *  its own integration-test target, and the .sel names that path or
+ *  `cargo:<package>/fleet_probe_<stem>`; each is run through the selector
+ *  runner and removed; the tree must be clean before and after;
  *  <name>.result is the class alone. */
 export function runProbes(i: ProbesInput): ProbeRow[] {
   const pdir = join(i.evidenceDir, 'probes');
   if (!isDir(pdir)) return [];
   const all = readdirSync(pdir).filter((n) => !n.startsWith('.'));
+  const rust = i.cargoCmd !== undefined && i.cargoProbeDir !== undefined;
   const names = [
     ...all.filter((n) => n.endsWith('.test.tsx')).sort(byCodePoint),
     ...all.filter((n) => n.endsWith('.test.ts')).sort(byCodePoint),
+    ...(rust ? all.filter((n) => n.endsWith('.rs')).sort(byCodePoint) : []),
   ];
   const run = i.runSelector ?? classifierRunSelector;
   const rows: ProbeRow[] = [];
   for (const name of names) {
-    if (!isDir(join(i.wt, i.probeDir))) {
-      throw new RunnerError(`probe runner: PROBE_DIR ${i.probeDir} does not exist in the worktree — a probe copied there would silently never run`);
+    let dest: string;
+    let selector: string;
+    if (name.endsWith('.rs')) {
+      const dir = i.cargoProbeDir ?? '';
+      if (!isDir(join(i.wt, dir))) {
+        throw new RunnerError(`probe runner: CARGO_PROBE_DIR ${dir} does not exist in the worktree — a probe copied there would silently never run`);
+      }
+      const target = `fleet_probe_${name.slice(0, -'.rs'.length).replace(/[^A-Za-z0-9_]/g, '_')}`;
+      dest = `${dir}/${target}.rs`;
+      selector = `cargo:${probePackage(i.wt, dir)}/${target}`;
+    } else {
+      if (!isDir(join(i.wt, i.probeDir))) {
+        throw new RunnerError(`probe runner: PROBE_DIR ${i.probeDir} does not exist in the worktree — a probe copied there would silently never run`);
+      }
+      dest = `${i.probeDir}/fleet-probe-${name}`;
+      selector = dest;
     }
-    const dest = `${i.probeDir}/fleet-probe-${name}`;
     const raw = i.rawPrefix(`probe-${name}`);
     if (porcelain(i.wt) !== '') throw new RunnerError(`probe runner: tree dirty before ${name}`);
     copyFileSync(join(pdir, name), join(i.wt, dest));
-    writeFileSync(`${raw}.sel`, `${dest}\n`);
+    writeFileSync(`${raw}.sel`, `${selector}\n`);
     let cls: RunClass;
     try {
-      cls = run({ wt: i.wt, kind: 'test', selectorFile: `${raw}.sel`, rawPrefix: raw, vitestCmd: i.vitestCmd });
+      cls = run({
+        wt: i.wt, kind: 'test', selectorFile: `${raw}.sel`, rawPrefix: raw, vitestCmd: i.vitestCmd,
+        ...(i.cargoCmd !== undefined ? { cargoCmd: i.cargoCmd } : {}),
+      });
     } catch (e) {
       throw new RunnerError(`probe runner: ${name} — the runner failed; its message is above`, describe(e));
     }

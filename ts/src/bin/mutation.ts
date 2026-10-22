@@ -22,8 +22,8 @@
 // the cwd unless --wt names it; it must be the named repo's checkout or one
 // of its worktrees. Raw runner output lands in <tree>/.review-out/checks/.
 //
-// VITEST_CMD comes from the target's config through lib/config.ts, never
-// from the environment: lib.sh keeps the target's config out of the
+// VITEST_CMD (and CARGO_CMD, for a `cargo:` selector) comes from the
+// target's config through lib/config.ts, never from the environment: lib.sh keeps the target's config out of the
 // environment on purpose.
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -94,6 +94,7 @@ function check(argv: readonly string[]): number {
         cls = classifyMutation({
           wt, patch, kind: sel.kind, selectorFile: sel.file,
           rawPrefix: `${wt}/.review-out/checks/${name}`, restore: 'reverse', vitestCmd: cfg.vitestCmd,
+          ...(cfg.cargoCmd !== undefined ? { cargoCmd: cfg.cargoCmd } : {}),
         }).cls;
       } catch (e) {
         // The classifier's own message first, then which patch it was.

@@ -80,6 +80,7 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
       seedFiles: ['.env.local', 'extra.env'],
       probeDir: 'src',
       mergeMode: 'direct',
+      runners: ['vitest'],
     });
     expect(c.repoRules).toBeUndefined();
     expect(c.prCmd).toBeUndefined();
@@ -114,6 +115,23 @@ describe('loadRepo — load_repo, run by bash, read back', () => {
     expect(load().e2eCmd).toBeUndefined();
     appendFileSync(join(target, '.fleet/config'), "E2E_CMD='npx playwright test'\n");
     expect(load().e2eCmd).toBe('npx playwright test');
+  });
+
+  it('RUNNERS: absent is vitest alone; vitest cargo brings CARGO_CMD and CARGO_PROBE_DIR', () => {
+    const v = load();
+    expect(v.runners).toEqual(['vitest']);
+    expect(v.cargoCmd).toBeUndefined();
+    expect(v.cargoProbeDir).toBeUndefined();
+    appendFileSync(join(target, '.fleet/config'), "RUNNERS='vitest  cargo'\nCARGO_CMD='cargo test --locked'\nCARGO_PROBE_DIR=core/tests\n");
+    const c = load();
+    expect(c.runners).toEqual(['vitest', 'cargo']);
+    expect(c.cargoCmd).toBe('cargo test --locked');
+    expect(c.cargoProbeDir).toBe('core/tests');
+  });
+
+  it('RUNNERS with cargo and no CARGO_CMD is the die lib.sh has for it', () => {
+    appendFileSync(join(target, '.fleet/config'), "RUNNERS='vitest cargo'\nCARGO_PROBE_DIR=core/tests\n");
+    expect(failure().message).toMatch(/CARGO_CMD/);
   });
 
   it('E2E_TIMEOUT: absent is undefined, a positive integer comes through as seconds, anything else dies', () => {
