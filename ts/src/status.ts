@@ -211,6 +211,34 @@ export function landingOf(i: LandingInput): string {
   return 'done';
 }
 
+/** Whether the epic block counts a story as merged: exactly when the table
+ *  says on epic or landed. Git alone cannot say it: a story that has just
+ *  started has a branch cut at its epic's tip with no commit of its own, an
+ *  ancestor of the epic, and was counted merged until the builder's first
+ *  commit (qr-desktop-scanner 005 and 007, 22 Oct; suite case 80c). */
+export function countsMerged(status: string, merged: boolean): boolean {
+  return status === 'done' && merged;
+}
+
+/** What git says about a story's branch against `into`: the branch name (or
+ *  DASH), whether it is merged there, and how far ahead it is if not. A branch
+ *  deleted after its merge leaves only the `merged:` sha `fleet merge`
+ *  recorded; that sha in `into` is the same fact. */
+function mergeState(root: string, id: string, into: string): { branch: string; merged: boolean; ahead: number } {
+  let branch = `story/${id}`;
+  let merged = false;
+  let ahead = 0;
+  if (branchExists(root, branch)) {
+    if (isAncestor(root, branch, into)) merged = true;
+    else ahead = revListCount(root, `${into}..${branch}`);
+  } else {
+    branch = DASH;
+  }
+  const mergedSha = storyField(root, id, 'merged');
+  if (!merged && mergedSha !== '' && isAncestor(root, mergedSha, into)) merged = true;
+  return { branch, merged, ahead };
+}
+
 function readText(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8');
@@ -225,16 +253,18 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
   const baseRef = refOf(cfg.baseBranch);
   const ids = storyIds(root);
 
-  // The epic block: counts from the same walk the table makes, so the two
-  // cannot disagree. Every story, whatever `one` says.
+  // The epic block: counts with the table's own rule (mergeState, then
+  // countsMerged), so the two cannot disagree. Every story, whatever `one`
+  // says.
   const total = new Map<string, number>();
   const mergedCount = new Map<string, number>();
   for (const id of ids) {
     const e = storyField(root, id, 'base');
     if (e === '' || e === cfg.baseBranch) continue;
-    if (storyField(root, id, 'status') === 'declined') continue;
+    const status = storyField(root, id, 'status');
+    if (status === 'declined') continue;
     total.set(e, (total.get(e) ?? 0) + 1);
-    if (branchExists(root, `story/${id}`) && isAncestor(root, `story/${id}`, refOf(e))) {
+    if (countsMerged(status, mergeState(root, id, refOf(e)).merged)) {
       mergedCount.set(e, (mergedCount.get(e) ?? 0) + 1);
     }
   }
@@ -271,21 +301,9 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
       notes.push(live ? 'RUNNING' : 'worktree');
     }
 
-    let branch = `story/${id}`;
     const base = storyField(root, id, 'base') || cfg.baseBranch;
     const into = refOf(base);
-    let merged = false;
-    let ahead = 0;
-    if (branchExists(root, branch)) {
-      if (isAncestor(root, branch, into)) merged = true;
-      else ahead = revListCount(root, `${into}..${branch}`);
-    } else {
-      branch = DASH;
-    }
-    // A branch deleted after its merge leaves only the `merged:` sha
-    // `fleet merge` recorded; that sha in the base is the same fact.
-    const mergedSha = storyField(root, id, 'merged');
-    if (!merged && mergedSha !== '' && isAncestor(root, mergedSha, into)) merged = true;
+    const { branch, merged, ahead } = mergeState(root, id, into);
 
     const landing = landingOf({
       status, merged, verdict, branch, base, baseBranch: cfg.baseBranch,

@@ -1650,6 +1650,17 @@ case_80_status_epics() {
   out="$( status_run --epics )"
   assert_contains "$out" "no branch yet" "not 'in base'"
   assert_contains "$out" "fleet new-epic t ghost" "with the command that makes it"
+
+  # 22 Oct (qr-desktop-scanner 005, 007): a story that has just started has a
+  # branch cut at its epic's tip and no commit of its own yet, so the branch is
+  # an ancestor of the epic, and the epic block counted it merged until the
+  # builder's first commit (0, 1, 0 merged while the table said in_progress).
+  # Red while the epic block counts by ancestry alone.
+  CASE="80c a story still running is not counted merged on its epic"; epic_story c80c
+  git -C "$REPO" branch "story/$STORY" epic/test
+  sed -i '0,/^status:.*/s//status: in_progress/' "$REPO/.stories/$STORY.md"
+  out="$( status_run --epics )"
+  assert_contains "$out" "0 merged" "a branch with nothing of its own on it has not been merged"
 }
 
 # AC1. Red when the refresh call is deleted from ts/src/run-queue.ts: the
