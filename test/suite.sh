@@ -3558,7 +3558,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
        case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
        case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
-       case_168_cargo_probes)
+       case_168_cargo_probes case_169_prompts_name_the_runners)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5079,6 +5079,43 @@ case_168_cargo_probes() {
   assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
   assert_grep '^computed: FAIL — .*probe probe-red.rs RED' "$REPO/.review/$STORY.md" "reason names the probe"
   assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-red.rs" "kept for the next story"
+}
+
+# The prompts name a target's runners. A target without cargo in RUNNERS
+# must get the prompts it got before cargo existed, byte for byte: run one
+# story with the prompts as they are and one with every {{CARGO_*}}
+# placeholder deleted from them, and the builder's and the reviewer's
+# prompts must be the same once the fixture's own path is masked. A cargo
+# target's builder and reviewer are told the cargo: form, CARGO_CMD and
+# where a Rust probe lands. The two fixtures' paths and commit hashes are
+# masked; nothing else may differ.
+#
+# Red while a placeholder renders anything for a vitest-only target (169),
+# and while the cargo facts are not rendered (169b).
+case_169_prompts_name_the_runners() {
+  CASE="169 a vitest-only target's prompts are unchanged, byte for byte"
+  local a b f
+  # The fixture's path and its commits' hashes differ between two fixtures.
+  mask() { sed -E "s#$1#FX#g; s/[0-9a-f]{40}/SHA/g"; }
+  fixture c169s
+  sed -i 's/{{CARGO_[A-Z]*}}//g' "$FLEET"/prompts/*.md
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  b="$TRACE"; local fx_b="$FX"
+  fixture c169
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  a="$TRACE"
+  for f in claude-prompt-1 codex-prompt-1; do
+    if [[ -s "$a/$f" ]] && cmp -s <(mask "$FX" < "$a/$f") <(mask "$fx_b" < "$b/$f"); then ok; else fail "$f differs from the prompt without placeholders"; fi
+    assert_not_grep 'cargo' "$a/$f" "$f names no cargo"
+  done
+
+  CASE="169b a cargo target's builder and reviewer are told the cargo: form"; fixture c169b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/claude-prompt-1" "the builder's rules"
+  assert_grep "$FLEET/test/fakes/cargo test -p <package> --test <target> <test path> -- --exact" "$TRACE/claude-prompt-1" "with the target's CARGO_CMD"
+  assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/codex-prompt-1" "the reviewer's mutation files"
+  assert_grep 'target in crates/fake-core/tests' "$TRACE/codex-prompt-1" "and where a Rust probe lands"
+  assert_not_grep 'unsubstituted' "$LOG" "no placeholder left"
 }
 
 for c in "${CASES[@]}"; do

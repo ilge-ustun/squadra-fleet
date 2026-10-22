@@ -53,7 +53,7 @@ the code would make its instrument fail:
     Goes red when <the specific change to a named file>.
 
 The harness applies mutations and vetoes the story if one survives, so a
-criterion whose instrument cannot go red is worse than no criterion.
+criterion whose instrument cannot go red is worse than no criterion.{{CARGO_INSTRUMENT}}
 
 **3. Citations that have rotted.** Every path you cite is checked
 mechanically against the working tree — the file must exist and the line

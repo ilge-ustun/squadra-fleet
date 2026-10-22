@@ -22,6 +22,7 @@ import { log, out, warn } from './lib/log.ts';
 import { lintStory } from './lint-story.ts';
 import { run } from './lib/proc.ts';
 import { renderPrompt } from './lib/render.ts';
+import { runnerVars } from './lib/runner-prompts.ts';
 import type { RepoConfig } from './lib/config.ts';
 
 export const USAGE = 'usage: fleet write-story <repo> <story-id> "<what you want>" [--base epic/<name>]';
@@ -87,7 +88,9 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     copyFileSync(join(cfg.root, '.stories', 'TEMPLATE.md'), join(wt, '.stories', 'TEMPLATE.md'));
 
     const promptsDir = `${o.fleetHome}/prompts`;
-    const rendered = renderPrompt(promptsDir, 'write-story.md', { STORY_ID: storyId, INTENT: intent, STORY_BASE: storyBase });
+    const rendered = renderPrompt(promptsDir, 'write-story.md', {
+      STORY_ID: storyId, INTENT: intent, STORY_BASE: storyBase, ...runnerVars('write-story.md', cfg),
+    });
 
     log('writing');
     // No timeout, unlike the launcher's builder/reviewer calls — a human is

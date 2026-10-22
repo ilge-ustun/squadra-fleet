@@ -17,7 +17,7 @@ export class RenderError extends Error {}
 export type RenderVar =
   | 'STORY_ID' | 'RULES' | 'REVIEW_TEXT' | 'STORY_TEXT' | 'INTENT' | 'STORY_BASE' | 'HEAD_SHA' | 'BASE_SHA' | 'ROUND'
   | 'REPO_RULES_TEXT' | 'VITEST_CMD' | 'BUILD_CMD' | 'LINT_CMD' | 'E2E_STEP' | 'CHECK_MUTATION' | 'BASELINE_FIXES' | 'BASELINE'
-  | 'BASELINE_RED' | 'TDD_FIXES' | 'TDD_RED';
+  | 'BASELINE_RED' | 'TDD_FIXES' | 'TDD_RED' | 'CARGO_SELECTOR' | 'CARGO_PROBE' | 'CARGO_INSTRUMENT';
 
 export type RenderVars = Partial<Record<RenderVar, string>>;
 
@@ -27,6 +27,7 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
   ['STORY_BASE', 'STORY_BASE'], ['HEAD_SHA', 'HEAD_SHA'], ['BASE_SHA', 'BASE_SHA'], ['ROUND', 'ROUND'],
   ['REPO_RULES', 'REPO_RULES_TEXT'], ['VITEST_CMD', 'VITEST_CMD'], ['BUILD_CMD', 'BUILD_CMD'], ['LINT_CMD', 'LINT_CMD'],
   ['E2E_STEP', 'E2E_STEP'],
+  ['CARGO_SELECTOR', 'CARGO_SELECTOR'], ['CARGO_PROBE', 'CARGO_PROBE'], ['CARGO_INSTRUMENT', 'CARGO_INSTRUMENT'],
   ['CHECK_MUTATION', 'CHECK_MUTATION'],
   ['BASELINE_FIXES', 'BASELINE_FIXES'],
   ['TDD_FIXES', 'TDD_FIXES'],
@@ -42,7 +43,9 @@ const ORDER: ReadonlyArray<readonly [string, RenderVar]> = [
 /** The names whose empty value is a die when the SOURCE uses `{{<name>}}`.
  *  The list says STORY_TEXT, and no file writes {{STORY_TEXT}}, so {{STORY}}
  *  is never guarded; REPO_RULES is exempt on purpose (a target need not add
- *  rules), and so is E2E_STEP (', then <E2E_CMD>', empty when the repo runs none). Kept as it is, pinned by a test. */
+ *  rules), and so is E2E_STEP (', then <E2E_CMD>', empty when the repo runs none). Kept as it is, pinned by a test.
+ *  The CARGO_* names are exempt too: they are empty when the target's RUNNERS
+ *  do not list cargo, so a vitest-only target's prompts stay byte for byte. */
 const GUARDED: readonly RenderVar[] = [
   'STORY_ID', 'RULES', 'REVIEW_TEXT', 'STORY_TEXT', 'INTENT', 'STORY_BASE', 'HEAD_SHA', 'BASE_SHA', 'ROUND',
   'VITEST_CMD', 'BUILD_CMD', 'LINT_CMD', 'CHECK_MUTATION', 'BASELINE_FIXES', 'BASELINE', 'BASELINE_RED', 'TDD_FIXES', 'TDD_RED',

@@ -66,6 +66,7 @@ import { COMPUTED_SEP, REASON_END, formatIsoSeconds, renderRoundSection } from '
 import { runBashTo } from './lib/proc.ts';
 import { procsInWorktree as realProcsInWorktree, storyTrees } from './lib/procs.ts';
 import { RenderError, leftoverLine, renderPrompt, type RenderVars } from './lib/render.ts';
+import { runnerVars } from './lib/runner-prompts.ts';
 import { readReview } from './lib/review.ts';
 import { checkScope } from './lib/scope.ts';
 import { tddCounts, tddForBuilder } from './lib/tdd-check.ts';
@@ -516,6 +517,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         E2E_STEP: cfg.e2eCmd !== undefined ? `, then ${cfg.e2eCmd}` : '',
         BASELINE: state.baseline, BASELINE_FIXES: String(knobs.baselineFixes), BASELINE_RED: state.baselineRed,
         TDD_FIXES: String(knobs.tddFixes), TDD_RED: state.tddRed,
+        ...runnerVars(file, cfg),
       };
       let r;
       try {
