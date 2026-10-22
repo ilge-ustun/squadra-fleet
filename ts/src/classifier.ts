@@ -2,7 +2,8 @@
 // (ts/src/lib/evidence.ts, in-process) and for a builder checking its own
 // evidence (`fleet check-mutation`), so the two can never disagree.
 //
-// A mutation is ACn-<slug>.patch with a .test (vitest selector) or .cmd (any
+// A mutation is ACn-<slug>.patch with a .test (a vitest selector, or a
+// `cargo:` selector when the target's RUNNERS list cargo) or .cmd (any
 // command) beside it. In a clean tree:
 //
 //   git apply --check   → else PATCH_INVALID, before anything is run
@@ -13,9 +14,11 @@
 //                         pre-run of the same selector at the same HEAD
 //                         stands for this one (L-39); a red one never does
 //   git apply           → else PATCH_INVALID
-//   run, mutated        → RED needs a REAL failure (.test: numFailedTests > 0;
-//                         zero tests collected is NO_TESTS, never RED — L-08.
-//                         .cmd: non-zero exit). GREEN = the mutation survived
+//   run, mutated        → RED needs a REAL failure (.test: numFailedTests > 0,
+//                         or a failed libtest result for cargo:; zero tests
+//                         collected, or a crate that does not compile, is
+//                         NO_TESTS, never RED — L-08. .cmd: non-zero exit).
+//                         GREEN = the mutation survived
 //   restore             → the tree must be clean again, or nothing measured
 //                         after can be trusted: DirtyTreeError, and the run stops
 //
@@ -23,6 +26,7 @@
 import { appendFileSync, copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { apply, applyCheck, applyReverse, checkoutClean, porcelain, revParse } from './lib/git.ts';
+import { cargoArgs, classFromLibtest, parseCargoSelector } from './lib/libtest.ts';
 import { runBashTo } from './lib/proc.ts';
 import type { MutationClass, Restore, RunClass, SelectorKind } from './lib/types.ts';
 import { classFromVitestJson, readVitestJson } from './lib/vitest-json.ts';
@@ -63,7 +67,13 @@ export interface RunSelectorInput {
   rawPrefix: string;
   /** The target's VITEST_CMD; must accept `<selector> --reporter json --outputFile <f>`. */
   vitestCmd: string;
+  /** The target's CARGO_CMD, present exactly when its RUNNERS list cargo;
+   *  a `cargo:` selector's arguments are appended to it. */
+  cargoCmd?: string;
 }
+
+/** The selector on a .test's first line, when it is one. */
+export const CARGO_PREFIX = 'cargo:';
 
 /** One run of a selector in the tree as it stands. The first line of the
  *  selector file is the selector; it is handed to bash unquoted, by
@@ -76,6 +86,7 @@ export function runSelector(i: RunSelectorInput): RunClass {
   rmSync(raw, { force: true });
   switch (i.kind) {
     case 'test': {
+      if (line.startsWith(CARGO_PREFIX)) return runCargo(i, line, log);
       runBashTo(`${i.vitestCmd} ${line} --reporter json --outputFile '${raw}'`, { cwd: i.wt, logFile: log });
       return classFromVitestJson(readVitestJson(raw));
     }
@@ -83,6 +94,25 @@ export function runSelector(i: RunSelectorInput): RunClass {
       return runBashTo(line, { cwd: i.wt, logFile: log }) === 0 ? 'GREEN' : 'RED';
     }
   }
+}
+
+/** A `cargo:` selector: parsed first, so nothing but a package, a target and
+ *  a test path ever reaches the shell, then run as CARGO_CMD with its
+ *  arguments. A repo whose RUNNERS do not list cargo, and a line that is not
+ *  a selector, name no test: NO_TESTS, which a pre-run reports as
+ *  SELECTOR_INVALID. */
+function runCargo(i: RunSelectorInput, line: string, log: string): RunClass {
+  if (i.cargoCmd === undefined) {
+    writeFileSync(log, `${line}\nthis repo's RUNNERS do not list cargo, so a cargo: selector names no test\n`);
+    return 'NO_TESTS';
+  }
+  const sel = parseCargoSelector(line);
+  if (sel === undefined) {
+    writeFileSync(log, `${line}\nnot a cargo selector: cargo:<package>[/<target>][::<test path>], names and :: only\n`);
+    return 'NO_TESTS';
+  }
+  const status = runBashTo(`${i.cargoCmd} ${cargoArgs(sel)}`, { cwd: i.wt, logFile: log });
+  return classFromLibtest(readFileSync(log, 'utf8'), status);
 }
 
 /** Two ways back to the committed tree, both safe only because the tree was

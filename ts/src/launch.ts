@@ -503,6 +503,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       }
     }
     const checkMutation = `bash ${o.fleetHome}/fleet check-mutation ${cfg.name}`;
+    // CARGO_CMD for the evidence runners, when the target's RUNNERS list cargo.
+    const cargoRunner = cfg.cargoCmd !== undefined ? { cargoCmd: cfg.cargoCmd } : {};
 
     // The variables the prompts are rendered with, as the round goes on.
     const state = { rules: '', headSha: '', round: '', baseline: '', baselineRed: '', tddRed: '' };
@@ -788,7 +790,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         const record = new Map<string, KnownRun>();
         let rows;
         try {
-          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
+          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
         } catch (e) {
           if (!(e instanceof RunnerError)) throw e;
           if (e.before !== undefined) dieMessage(e.before);
@@ -966,8 +968,11 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let mutRows;
       let probeRows;
       try {
-        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, log, known: tddKnown, preRuns });
-        probeRows = runProbes({ wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, log });
+        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log, known: tddKnown, preRuns });
+        probeRows = runProbes({
+          wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner,
+          ...(cfg.cargoProbeDir !== undefined ? { cargoProbeDir: cfg.cargoProbeDir } : {}), log,
+        });
       } catch (e) {
         if (!(e instanceof RunnerError)) throw e;
         if (e.before !== undefined) dieMessage(e.before);

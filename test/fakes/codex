@@ -34,6 +34,7 @@
 #             fleet/test/fakes/vitest in `marker` mode fails iff that line exists.
 #             The tree is left clean (patch generated, then reverted).
 #   cmd       same patch, but AC1-marker.cmd instead of .test
+#   cargo     same patch, its .test a `cargo:` selector (test/fakes/cargo)
 #   badpatch  AC1-bad.patch that does not apply, + .test
 #   ac2only   the marker patch filed as AC2-marker (AC1 has no mutation)
 #   twice     the marker patch twice for AC1, AC1-again and AC1-marker, one
@@ -47,6 +48,8 @@
 #   none   (default) writes nothing — probes are optional and zero is not a finding
 #   green  a probe the fake vitest passes (no regression found)
 #   red    a probe the fake vitest fails (a regression the suite did not cover)
+#   cargo-green | cargo-red   the same as a Rust probe, probe-<green|red>.rs,
+#          which the fake cargo passes or fails by its target's name
 #
 # FAKE_REVIEWER_USED=<model> writes a session file the way real codex does,
 # under $CODEX_HOME/sessions/YYYY/MM/DD, whose turn_context names the cwd and
@@ -103,6 +106,7 @@ marker_patch() {                      # marker_patch <ac> <ext> [keep] — write
   [[ -n "$keep" ]] || git checkout -q -- src/marker.txt
   case "$ext" in
     test) printf 'fake.test.tsx\n' > "$out/$ac-marker.test" ;;
+    cargo) printf 'cargo:fake-core/scan::marker_absent\n' > "$out/$ac-marker.test" ;;
     cmd)  printf 'grep -q FLEET_MUTANT_MARKER src/marker.txt && exit 1 || exit 0\n' > "$out/$ac-marker.cmd" ;;
   esac
 }
@@ -111,6 +115,7 @@ case "${FAKE_MUTATIONS:-none}" in
   none)     : ;;
   patch)    marker_patch AC1 test ;;
   cmd)      marker_patch AC1 cmd ;;
+  cargo)    marker_patch AC1 cargo ;;
   ac2only)  marker_patch AC2 test ;;
   twice)    marker_patch AC1 test
             cp .review-out/mutations/AC1-marker.patch .review-out/mutations/AC1-again.patch
@@ -130,6 +135,9 @@ case "${FAKE_PROBES:-none}" in
   green|red) mkdir -p .review-out/probes
              printf '// fake probe (%s)\n' "$FAKE_PROBES" \
                > ".review-out/probes/probe-$FAKE_PROBES.test.tsx" ;;
+  cargo-green|cargo-red) mkdir -p .review-out/probes
+             printf '// fake Rust probe (%s)\n#[test]\nfn probe() {}\n' "$FAKE_PROBES" \
+               > ".review-out/probes/probe-${FAKE_PROBES#cargo-}.rs" ;;
   *) echo "fleet/test/fakes/codex: unknown FAKE_PROBES='$FAKE_PROBES'" >&2; exit 2 ;;
 esac
 

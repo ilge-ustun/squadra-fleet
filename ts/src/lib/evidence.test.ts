@@ -9,6 +9,7 @@ import { RunnerError, mutationDigest, runMutations, runProbes, writeResultFile, 
 // and round-N/probes, run by the harness in the reviewer's worktree, a
 // .result beside each.
 const FAKE_VITEST = resolve(import.meta.dirname, '../../../test/fakes/vitest');
+const FAKE_CARGO = `${resolve(import.meta.dirname, '../../../test/fakes/cargo')} test`;
 
 let dir: string; let wt: string; let ev: string; let runs: string;
 const saved: Record<string, string | undefined> = {};
@@ -33,13 +34,13 @@ beforeEach(() => {
   writeFileSync(join(wt, 'src/marker.txt'), 'the fake agents mutate this file\n');
   runSync('git', ['init', '-q', '-b', 'base', wt]);
   git(['add', '-A']); git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'one']);
-  for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) saved[k] = process.env[k];
+  for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR', 'FAKE_CARGO']) saved[k] = process.env[k];
   process.env['FAKE_TRACE_DIR'] = join(dir, 'trace');
   process.env['FAKE_VITEST'] = 'marker';
   logged.length = 0;
 });
 afterEach(() => {
-  for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  for (const k of ['FAKE_VITEST', 'FAKE_TRACE_DIR', 'FAKE_CARGO']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   rmSync(dir, { recursive: true, force: true });
 });
 const rawPrefix = (name: string): string => join(runs, `900-round1-${name}`);
@@ -206,6 +207,56 @@ describe('runProbes', () => {
     writeFileSync(join(p, 'x.test.ts'), '//\n');
     writeFileSync(join(wt, 'dirty.txt'), 'x\n');
     expect(() => runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, log })).toThrow('probe runner: tree dirty before x.test.ts');
+  });
+
+  describe('Rust probes, when the target lists cargo', () => {
+    /** A crate whose tests/ is CARGO_PROBE_DIR, committed so the tree is clean. */
+    const crate = (toml = '[package]\nname = "fake-core"\nversion = "0.1.0"\n'): void => {
+      mkdirSync(join(wt, 'crates/fake-core/tests'), { recursive: true });
+      writeFileSync(join(wt, 'crates/fake-core/Cargo.toml'), toml);
+      writeFileSync(join(wt, 'crates/fake-core/tests/scan.rs'), '#[test]\nfn x() {}\n');
+      git(['add', '-A']); git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'crate']);
+    };
+    const cargo = { cargoCmd: FAKE_CARGO, cargoProbeDir: 'crates/fake-core/tests' };
+
+    it('*.rs after the vitest probes, sorted; each its own test target fleet_probe_<name>, run by cargo, removed', () => {
+      crate();
+      const p = join(ev, 'probes'); mkdirSync(p);
+      process.env['FAKE_VITEST'] = 'pass';
+      process.env['FAKE_CARGO'] = 'pass';
+      for (const n of ['probe-red.rs', 'probe-green.rs', 'a.test.ts']) writeFileSync(join(p, n), `// ${n}\n`);
+      const rows = runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, ...cargo, log });
+      expect(rows).toEqual([
+        { name: 'a.test.ts', cls: 'GREEN' },
+        { name: 'probe-green.rs', cls: 'GREEN' },
+        { name: 'probe-red.rs', cls: 'RED' },
+      ]);
+      expect(readFileSync(join(p, 'probe-red.rs.result'), 'utf8')).toBe('RED\n');
+      expect(readFileSync(`${rawPrefix('probe-probe-red.rs')}.sel`, 'utf8')).toBe('cargo:fake-core/fleet_probe_probe_red\n');
+      expect(readFileSync(join(dir, 'trace/calls'), 'utf8')).toMatch(/^cargo test -p fake-core --test fleet_probe_probe_red$/m);
+      expect(readdirSync(join(wt, 'crates/fake-core/tests'))).toEqual(['scan.rs']);
+    });
+
+    it('without cargo in RUNNERS a .rs file is not a probe, like notes.txt', () => {
+      const p = join(ev, 'probes'); mkdirSync(p);
+      writeFileSync(join(p, 'probe-red.rs'), '//\n');
+      expect(runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, log })).toEqual([]);
+    });
+
+    it('a CARGO_PROBE_DIR that is not in the worktree is a die, naming it', () => {
+      const p = join(ev, 'probes'); mkdirSync(p);
+      writeFileSync(join(p, 'x.rs'), '//\n');
+      expect(() => runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, ...cargo, log }))
+        .toThrow('probe runner: CARGO_PROBE_DIR crates/fake-core/tests does not exist in the worktree');
+    });
+
+    it('a CARGO_PROBE_DIR with no package beside it is a die: no package, no selector', () => {
+      crate('[workspace]\nmembers = []\n');
+      const p = join(ev, 'probes'); mkdirSync(p);
+      writeFileSync(join(p, 'x.rs'), '//\n');
+      expect(() => runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, ...cargo, log }))
+        .toThrow(/no \[package\] name in crates\/fake-core\/Cargo\.toml/);
+    });
   });
 
   it('a runner that throws is its message and then the launcher\'s (case 107)', () => {

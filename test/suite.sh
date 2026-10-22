@@ -92,7 +92,7 @@ assert_not_contains() { [[ "$1" == *"$2"* ]] && fail "$3: unexpected '$2'" || ok
 
 shadow_check() {                      # shadow_check <fleet-copy> — die unless the fakes are what resolves
   local fleet="$1" name got
-  for name in claude codex npm systemd-run systemctl; do
+  for name in claude codex npm systemd-run systemctl cargo; do
     got="$(PATH="$fleet/test/fakes:$PATH" command -v "$name")"
     if [[ "$got" != "$fleet/test/fakes/$name" ]]; then
       echo "suite: '$name' resolves to '$got', not the fake — refusing to run the launcher" >&2
@@ -3557,7 +3557,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_160_story_reds_are_real case_161_answered_question_does_not_block_again
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
        case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
-       case_166_runners_config)
+       case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
+       case_168_cargo_probes)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -4969,6 +4970,115 @@ EOF
   printf "RUNNERS='vitest cargo'\nCARGO_CMD='cargo test --locked'\nCARGO_PROBE_DIR=core/tests\n" >> "$d/a/target/.fleet/config"
   probe
   assert_eq "$out" "vitest cargo|cargo test --locked|core/tests" "the keys come from the file like every other"
+}
+
+# A target whose RUNNERS list cargo: its config names the fake cargo as
+# CARGO_CMD and a crate, fake-core, whose tests/ is CARGO_PROBE_DIR.
+cargo_target() {                      # cargo_target — after fixture
+  printf "RUNNERS='vitest cargo'\nCARGO_CMD='%s test'\nCARGO_PROBE_DIR=crates/fake-core/tests\n" "$FLEET/test/fakes/cargo" >> "$REPO/.fleet/config"
+  mkdir -p "$REPO/crates/fake-core/tests"
+  printf '[package]\nname = "fake-core"\nversion = "0.1.0"\nedition = "2021"\n' > "$REPO/crates/fake-core/Cargo.toml"
+  printf '#[test]\nfn marker_absent() {}\n' > "$REPO/crates/fake-core/tests/scan.rs"
+  git -C "$REPO" add -A; git -C "$REPO" commit -qm "fixture: a cargo target"; git -C "$REPO" push -q origin base
+}
+
+# 22 Oct. A Rust test is evidence like a vitest one: a .test whose line is
+# `cargo:<package>[/<target>][::<test path>]` runs as `$CARGO_CMD -p … --
+# --exact` and its libtest output becomes the same classes. Every case checks
+# the trace as well as the class: the fake vitest decides by the marker
+# alone, so without the trace a cargo selector handed to vitest would look
+# caught.
+#
+# Red while classifier.ts hands every .test line to VITEST_CMD: no cargo call
+# is traced, and 167c/d/f come out RED where they must not.
+case_167_cargo_evidence() {
+  local want='cargo test -p fake-core --test scan marker_absent -- --exact'
+  CASE="167 a cargo: mutation the Rust test catches is RED"; fixture c167; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +RED +marker' "$REPO/.review/$STORY.md" "row in the Machine table"
+  assert_grep "^$want\$" "$TRACE/calls" "run by cargo, as CARGO_CMD and the parsed selector"
+  assert_eq "$(field status)" done "a caught Rust mutation passes like a vitest one"
+
+  CASE="167b a cargo: mutation that survives is GREEN and vetoes"; fixture c167b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=pass
+  assert_grep '^computed: FAIL — .*AC1 marker GREEN' "$REPO/.review/$STORY.md" "the veto names it"
+  assert_grep "^$want\$" "$TRACE/calls" "run by cargo"
+
+  CASE="167c a cargo: mutation that breaks the build is NO_TESTS, never RED"; fixture c167c; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker-nocompile
+  assert_grep '^AC1 +NO_TESTS +marker' "$REPO/.review/$STORY.md" "a compile error is not a caught mutation (L-08)"
+
+  CASE="167d a cargo: selector that names no test is SELECTOR_INVALID"; fixture c167d; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=nomatch
+  assert_grep '^AC1 +SELECTOR_INVALID +marker' "$REPO/.review/$STORY.md" "zero tests ran before the patch"
+
+  CASE="167e a builder's tdd pair may name a Rust test"; fixture c167e; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_BUILDER_MUTATIONS=cargo-red FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_CARGO=marker
+  assert_grep '^AC1 +RED +tdd-observed-red' "$REPO/.review/$STORY.md" "the tdd check ran it"
+  assert_grep "^$want\$" "$TRACE/calls" "through cargo"
+
+  CASE="167f a cargo: selector in a repo whose RUNNERS do not list cargo names no test"; fixture c167f
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +SELECTOR_INVALID +marker' "$REPO/.review/$STORY.md" "refused, not handed to vitest"
+  assert_not_grep '^cargo ' "$TRACE/calls" "and cargo never runs"
+  assert_not_grep 'vitest cargo:' "$TRACE/calls" "nor vitest"
+
+  CASE="167g fleet check-mutation runs a cargo: pair as the verdict does"; fixture c167g; cargo_target
+  local m="$REPO/.review-out/mutations" out rc
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'cargo:fake-core/scan::marker_absent\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass FAKE_CARGO=marker \
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"; rc=$?
+  assert_contains "$out" "RED AC1-tdd-marker" "caught"
+  assert_eq "$rc" 0 "and exits 0"
+  assert_grep "^$want\$" "$TRACE/calls" "through cargo"
+}
+
+# One classifier for cargo too: the verdict and fleet check-mutation both
+# reach ts/src/lib/libtest.ts. Replace it with a stub that answers GREEN to
+# everything, and a cargo mutation the fake cargo would catch comes out GREEN
+# from both. Red when either caller classifies cargo output without it.
+case_167h_one_cargo_classifier() {
+  CASE="167h the verdict and fleet check-mutation share one cargo classifier"; fixture c167h; cargo_target
+  cat >> "$FLEET/ts/src/lib/libtest.ts" <<'STUB'
+export function classFromLibtestStubbed(): RunClass { return 'GREEN'; }
+STUB
+  sed -i 's/^export function classFromLibtest(log: string, status: number): RunClass {$/export function classFromLibtest(_log: string, _status: number): RunClass { return classFromLibtestStubbed(); }\nfunction unused(log: string, status: number): RunClass {/' "$FLEET/ts/src/lib/libtest.ts"
+  local m="$REPO/.review-out/mutations" out
+  mkdir -p "$m"
+  printf '\nFLEET_MUTANT_MARKER\n' >> "$REPO/src/marker.txt"
+  git -C "$REPO" diff -- src/marker.txt > "$m/AC1-tdd-marker.patch"
+  git -C "$REPO" checkout -q -- src/marker.txt
+  printf 'cargo:fake-core/scan::marker_absent\n' > "$m/AC1-tdd-marker.test"
+  out="$( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_VITEST=pass FAKE_CARGO=marker \
+          bash "$FLEET/fleet" check-mutation t "$m/AC1-tdd-marker.patch" --wt "$REPO" 2>&1 )"
+  assert_contains "$out" "GREEN AC1-tdd-marker" "check-mutation gives the stub's answer"
+  rm -rf "$m"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 FAKE_MUTATIONS=cargo FAKE_CARGO=marker
+  assert_grep '^AC1 +GREEN +marker' "$REPO/.review/$STORY.md" "the verdict gives the stub's answer"
+}
+
+# A reviewer's Rust probe: .review-out/probes/<name>.rs, copied into
+# CARGO_PROBE_DIR as its own integration-test target fleet_probe_<name>, run
+# by cargo, removed. RED vetoes, as a vitest probe's does. Red while
+# runProbes reads only *.test.ts(x): the .rs probe never runs and no row
+# appears.
+case_168_cargo_probes() {
+  CASE="168 a green Rust probe is recorded and changes nothing"; fixture c168; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=cargo-green MAX_ROUNDS=1 FAKE_CARGO=pass
+  assert_eq "$(field status)" done "a probe that finds nothing does not block"
+  assert_grep '^GREEN +probe-green.rs' "$REPO/.review/$STORY.md" "row in the Machine table"
+  assert_grep '^cargo test -p fake-core --test fleet_probe_probe_green$' "$TRACE/calls" "run as its own target in the package"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-green.rs" "probe committed"
+
+  CASE="168b a red Rust probe vetoes"; fixture c168b; cargo_target
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS FAKE_PROBES=cargo-red MAX_ROUNDS=1 FAKE_CARGO=pass
+  assert_eq "$(review_line 3)" "verdict: FAIL" "machine veto over model PASS"
+  assert_grep '^computed: FAIL — .*probe probe-red.rs RED' "$REPO/.review/$STORY.md" "reason names the probe"
+  assert_contains "$(tracked)" ".review/$STORY/round-1/probes/probe-red.rs" "kept for the next story"
 }
 
 for c in "${CASES[@]}"; do

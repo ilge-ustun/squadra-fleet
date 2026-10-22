@@ -1,7 +1,8 @@
-// The one place a runner's JSON becomes RED, GREEN or NO_TESTS. Every
-// classification the fleet makes — the verdict's, and a builder checking
-// its own evidence — passes through here, so the two cannot disagree. It
-// is also where an adapter for a runner that is not vitest would begin.
+// The one place vitest's JSON becomes RED, GREEN or NO_TESTS. Every
+// classification of a vitest selector — the verdict's, and a builder checking
+// its own evidence — passes through here, so the two cannot disagree. The
+// cargo runner's counterpart is lib/libtest.ts; classifier.ts picks one by
+// the selector's form, and no other file turns a runner's output into a class.
 //
 // A file it cannot use — empty, unparseable, or without the counts — falls
 // through every test to GREEN. A stricter reading is a decision for later,
