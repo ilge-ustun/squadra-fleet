@@ -21,6 +21,7 @@ usage() {
 usage: fleet <command> [args…]
 
   status <repo> [--json|--epics|--bot] [--all] [id]        what the fleet is doing and what it decided
+  events <repo> [id|epic/<name>] [--backfill] [--journal]  what the fleet did, pass by pass, as JSON lines
   write-story <repo> <id> "<intent>" [--base epic/<name>]  an intent → a draft story, linted
   lint-story <repo> <id|path> [--strict]                   mechanical checks against the story's base
   promote <repo> <id> [--by <who>]                         a story to ready, committed, and a drain started — /promote at a terminal
@@ -42,7 +43,7 @@ EOF
 cmd="${1:-}"
 (( $# )) && shift
 case "$cmd" in
-  status|write-story|lint-story|promote|new-epic|launch|run-queue|merge|revert|reset|test-deploy|telegram)
+  status|events|write-story|lint-story|promote|new-epic|launch|run-queue|merge|revert|reset|test-deploy|telegram)
     program=("$FLEET_HOME/ts/src/bin/$cmd.ts") ;;
   check-mutation)
     program=("$FLEET_HOME/ts/src/bin/mutation.ts" check) ;;

@@ -13,6 +13,12 @@ describe('runSync', () => {
     expect(r.stderr).toBe('err\n');
   });
 
+  it('keeps stdout past the default 1 MiB when maxBuffer allows it, and fails it otherwise', () => {
+    const big = 'head -c 3000000 /dev/zero | tr "\\0" x';
+    expect(runSync('bash', ['-c', big], { maxBuffer: 8 * 1024 * 1024 }).stdout.length).toBe(3_000_000);
+    expect(runSync('bash', ['-c', big]).status).not.toBe(0);
+  });
+
   it('runs in the given directory', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fleet-proc-'));
     try {

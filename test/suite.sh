@@ -3588,7 +3588,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_173_writer_and_lint_write_events
        case_174_promote
        case_175_answers_and_epics_are_marked
-       case_176_revert_reset_and_test_deploy_are_logged)
+       case_176_revert_reset_and_test_deploy_are_logged
+       case_177_fleet_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3675,7 +3676,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
+  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5397,6 +5398,36 @@ case_176_revert_reset_and_test_deploy_are_logged() {
   assert_grep '"name":"deploy".*"result":"FAILED","exit":1,"reason":"build failed' "$REPO/.runs/events.jsonl" "with the step that failed"
   assert_not_grep '^open ' "$FX/rows" "nothing left open"
   td --stop
+}
+
+# fleet events prints the log as JSON lines, oldest first, all of it, a
+# story's or an epic's; --backfill adds what git, the Machine blocks and the
+# evidence files say the log did not see, each line with its source, and
+# shows a launch the log has once. It writes nothing. Red while there is no
+# fleet events.
+case_177_fleet_events() {
+  CASE="177 fleet events: the log as JSON lines, a story's or an epic's"; epic_story c177
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local out n; n="$(wc -l < "$REPO/.runs/events.jsonl")"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | wc -l)" "$n" "every line of the log"
+  assert_eq "$(printf '%s\n' "$out" | head -1 | jq -r '.pass + " " + .event')" "launch start" "oldest first"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t 901 | wc -l)" 0 "another story's: none"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t epic/test | wc -l)" "$n" "the epic's: its story's"
+  local before; before="$(git -C "$REPO" status --porcelain; md5sum < "$REPO/.runs/events.jsonl")"
+
+  CASE="177b --backfill adds the status commits from git, and the launch the log has once"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --backfill 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="status") | .name + " " + .source' | tr '\n' ',')" "in_progress git,done git," "git's status marks"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch" and .event=="start") | .source' | tr '\n' ',')" "log," "one launch start, the log's"
+  assert_eq "$(git -C "$REPO" status --porcelain; md5sum < "$REPO/.runs/events.jsonl")" "$before" "nothing was written"
+
+  CASE="177c a story the log never saw: its launch from git, its round from the Machine block"
+  rm "$REPO/.runs/events.jsonl"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --backfill 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch") | .event + " " + .source + " " + (.result // "-")' | tr '\n' ',')" "start git -,end git PASS," "the launch, from git"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="verdict") | .source + " " + .result' | tr '\n' ',')" "machine PASS," "the verdict, from the Machine block"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t --bogus 2>&1 >/dev/null | grep -c 'usage: fleet events')" 1 "an unknown flag is the usage"
 }
 
 for c in "${CASES[@]}"; do
