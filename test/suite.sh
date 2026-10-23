@@ -288,6 +288,29 @@ wait_for() {                          # wait_for <seconds> <command…> — poll
 }
 open_gate() { : > "$TRACE/gate-open"; }   # releases every FAKE_REVIEWER=gate reviewer
 
+# The event log (lib/events.ts): <target>/.runs/events.jsonl. events_rows
+# prints one line per event — `event pass name result` with `-` for what a
+# line lacks — and, after them, `open <span>` for every span a run started
+# and never ended, and `bad <line>` for a line that is not JSON or lacks a
+# field every line carries.
+events_rows() {                       # events_rows [file] → stdout
+  node -e '
+    const fs = require("fs");
+    const open = new Map();
+    for (const l of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+      if (l === "") continue;
+      let e;
+      try { e = JSON.parse(l); } catch { console.log(`bad ${l}`); continue; }
+      if (e.v !== 1 || !e.ts || !e.run_id || !e.repo || !e.pass || !e.event || e.source !== "log") console.log(`bad ${l}`);
+      console.log([e.event, e.pass, e.name ?? "-", e.result ?? "-"].join(" "));
+      const k = `${e.run_id} ${e.span}`;
+      if (e.event === "start") open.set(k, e.span);
+      if (e.event === "end") open.delete(k);
+    }
+    for (const span of open.values()) console.log(`open ${span}`);
+  ' "${1:-$REPO/.runs/events.jsonl}"
+}
+
 # ── cases ────────────────────────────────────────────────────────────────────
 
 # Red when the outcome block's `set_status "$STORY_ID" done` is deleted.
@@ -3558,7 +3581,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
        case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
        case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
-       case_168_cargo_probes case_169_prompts_name_the_runners)
+       case_168_cargo_probes case_169_prompts_name_the_runners
+       case_170_launch_writes_its_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5116,6 +5140,49 @@ case_169_prompts_name_the_runners() {
   assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/codex-prompt-1" "the reviewer's mutation files"
   assert_grep 'target in crates/fake-core/tests' "$TRACE/codex-prompt-1" "and where a Rust probe lands"
   assert_not_grep 'unsubstituted' "$LOG" "no placeholder left"
+}
+
+# The launcher writes the story's life to <target>/.runs/events.jsonl: the
+# launch, each round, each builder call, each baseline step, the scope,
+# the reviewer, each mutation and the computed verdict, every span ended —
+# also when the story stops at a question or a builder is killed. Red while
+# launch.ts writes no event.
+case_170_launch_writes_its_events() {
+  CASE="170 a launch writes its passes to .runs/events.jsonl"; fixture c170
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "exit code"
+  assert_file "$REPO/.runs/events.jsonl" "the log exists"
+  events_rows > "$FX/rows"
+  assert_not_grep '^bad ' "$FX/rows" "every line is JSON with v, ts, run_id, repo, pass, event, source"
+  assert_not_grep '^open ' "$FX/rows" "every span that started ended"
+  local want
+  for want in 'start launch - -' 'end launch - PASS' 'start round - -' 'end round - PASS' 'end install builder OK' \
+              'end builder build OK' 'end baseline all GREEN' 'end baseline test GREEN' 'end baseline build GREEN' \
+              'end baseline lint GREEN' 'end install reviewer OK' 'mark scope - CLEAN' 'end reviewer - OK' \
+              'end mutation AC1-marker RED' 'mark verdict - PASS'; do
+    assert_grep "^$want\$" "$FX/rows" "an event: $want"
+  done
+  assert_grep '"pass":"builder".*"model":"sonnet"' "$REPO/.runs/events.jsonl" "the builder's model is named"
+  assert_grep '"pass":"verdict","event":"mark","result":"PASS","reviewer":"PASS"' "$REPO/.runs/events.jsonl" "the verdict mark says what the reviewer said"
+  assert_grep '"pass":"launch","event":"start".*"pid":[0-9]' "$REPO/.runs/events.jsonl" "the launch start carries its pid"
+  assert_grep '"story":"900"' "$REPO/.runs/events.jsonl" "lines name the story"
+  assert_not_contains "$(tracked)" ".runs/events.jsonl" "the log is not committed"
+
+  CASE="170b a question ends the launch BLOCKED, with a blocked mark"; fixture c170b
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  events_rows > "$FX/rows"
+  assert_grep '^mark blocked ' "$FX/rows" "the question is marked"
+  assert_grep '^end builder build BLOCKED$' "$FX/rows" "the builder ended BLOCKED"
+  assert_grep '^end launch - BLOCKED$' "$FX/rows" "the launch ended BLOCKED"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
+
+  CASE="170c a killed builder ends TIMEOUT, and the launch DIED with the reason"; fixture c170c
+  run "$STORY" FAKE_BUILDER=hang FAKE_REVIEWER=PASS AGENT_TIMEOUT=2 MAX_ROUNDS=1
+  events_rows > "$FX/rows"
+  assert_grep '^end builder build TIMEOUT$' "$FX/rows" "the builder ended TIMEOUT"
+  assert_grep '^end launch - DIED$' "$FX/rows" "the launch DIED"
+  assert_grep '"result":"DIED".*exceeded AGENT_TIMEOUT' "$REPO/.runs/events.jsonl" "with the die's text"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
 }
 
 for c in "${CASES[@]}"; do

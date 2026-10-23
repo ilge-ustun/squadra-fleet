@@ -77,7 +77,14 @@ export interface MutationsInput {
   /** GREEN pre-runs to share with another call at the same HEAD (L-39);
    *  a map of its own when absent. */
   preRuns?: Map<string, string>;
+  /** Told as each patch starts (no class) and ends: the event log's
+   *  mutations. */
+  onRun?: OnRun;
 }
+
+/** A run's start (cls absent) or end; `reused` when a class already made
+ *  at this head stands for the run. */
+export type OnRun = (r: { name: string; ac: string; cls?: string; reused?: boolean }) => void;
 
 /** `AC*-*.patch` in glob order (code point), `ac` before the first `-`,
  *  `slug` after it; the classifier restores by checkout (a throwaway tree);
@@ -100,11 +107,13 @@ export function runMutations(i: MutationsInput): MutRow[] {
     const sel = findSelector(patch);
     const digest = head === '' ? '' : mutationDigest(head, patch, sel);
     const seen = i.known?.get(name);
+    i.onRun?.({ name, ac });
     if (seen !== undefined && seen.digest === digest) {
       if (!existsSync(join(mdir, `${name}.result`))) writeFileSync(join(mdir, `${name}.result`), `${seen.cls}\n`);
       i.record?.set(name, seen);
       rows.push({ ac, cls: seen.cls, slug });
       i.log(`mutation ${name}: ${seen.cls} (run by the tdd check at this head)`);
+      i.onRun?.({ name, ac, cls: seen.cls, reused: true });
       continue;
     }
     let cls: string;
@@ -126,6 +135,7 @@ export function runMutations(i: MutationsInput): MutRow[] {
     i.record?.set(name, { digest, cls });
     rows.push({ ac, cls, slug });
     i.log(`mutation ${name}: ${cls}`);
+    i.onRun?.({ name, ac, cls });
   }
   return rows;
 }
@@ -144,6 +154,8 @@ export interface ProbesInput {
   log: (msg: string) => void;
   /** The selector runner; the classifier's unless a test injects one. */
   runSelector?: (i: RunSelectorInput) => RunClass;
+  /** Told as each probe starts and ends; `ac` is ''. */
+  onRun?: OnRun;
 }
 
 /** The package a CARGO_PROBE_DIR's tests belong to: `name` under
@@ -197,6 +209,7 @@ export function runProbes(i: ProbesInput): ProbeRow[] {
     }
     const raw = i.rawPrefix(`probe-${name}`);
     if (porcelain(i.wt) !== '') throw new RunnerError(`probe runner: tree dirty before ${name}`);
+    i.onRun?.({ name, ac: '' });
     copyFileSync(join(pdir, name), join(i.wt, dest));
     writeFileSync(`${raw}.sel`, `${selector}\n`);
     let cls: RunClass;
@@ -213,6 +226,7 @@ export function runProbes(i: ProbesInput): ProbeRow[] {
     writeFileSync(join(pdir, `${name}.result`), `${cls}\n`);
     rows.push({ name, cls });
     i.log(`probe ${name}: ${cls}`);
+    i.onRun?.({ name, ac: '', cls });
   }
   return rows;
 }

@@ -50,6 +50,16 @@ describe('runBaseline', () => {
   const run = (o: { vitestCmd?: string; buildCmd?: string; lintCmd?: string } = {}) =>
     runBaseline({ wt, evidenceDir: ev, rawJson: raw, installCmd: 'npm ci', vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true' });
 
+  it('tells onStep when each step starts and ends, with its colour, in the order they run', () => {
+    process.env['FAKE_VITEST'] = 'pass';
+    const seen: string[] = [];
+    runBaseline({
+      wt, evidenceDir: ev, rawJson: raw, installCmd: 'npm ci', vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'false',
+      onStep: (step, colour) => seen.push(`${step} ${colour ?? 'start'}`),
+    });
+    expect(seen).toEqual(['test start', 'test GREEN', 'build start', 'build GREEN', 'lint start', 'lint RED']);
+  });
+
   it('all green: the three colours, the summary in jq\'s shape, the logs', () => {
     process.env['FAKE_VITEST'] = 'pass';
     expect(run()).toEqual({ test: 'GREEN', build: 'GREEN', lint: 'GREEN' });
@@ -148,6 +158,17 @@ describe('runMergeBaseline', () => {
       testLog: join(runs, '900-merge-test.log'), buildLog: join(runs, '900-merge-build.log'), lintLog: join(runs, '900-merge-lint.log'),
       e2eLog: join(runs, '900-merge-e2e.log'), vitestCmd: o.vitestCmd ?? FAKE_VITEST, buildCmd: o.buildCmd ?? 'true', lintCmd: o.lintCmd ?? 'true',
     });
+
+  it('tells onStep when each step starts and ends, as the story baseline does', () => {
+    process.env['FAKE_VITEST'] = 'fail';
+    const seen: string[] = [];
+    runMergeBaseline({
+      wt, rawJson: join(runs, '900-merge-baseline.json'), testLog: join(runs, 't.log'), buildLog: join(runs, 'b.log'), lintLog: join(runs, 'l.log'),
+      e2eLog: join(runs, 'e.log'), vitestCmd: FAKE_VITEST, buildCmd: 'true', lintCmd: 'true', e2eCmd: 'true',
+      onStep: (step, colour) => seen.push(`${step} ${colour ?? 'start'}`),
+    });
+    expect(seen).toEqual(['test start', 'test RED', 'build start', 'build GREEN', 'lint start', 'lint GREEN', 'e2e start', 'e2e GREEN']);
+  });
 
   it('all green: the three colours, the four files under .runs and nothing else — no summary', () => {
     process.env['FAKE_VITEST'] = 'pass';
