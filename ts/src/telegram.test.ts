@@ -127,6 +127,8 @@ beforeEach(() => {
   mkdirSync(join(root, '.review'));
   mkdirSync(join(root, '.blocked'));
   writeFileSync(join(root, '.stories', '900.md'), '---\nstatus: draft\nround: 0\n---\n\n# Story 900: fixture\n');
+  // As in every target: .runs/ — the event log among it — is the machine's.
+  writeFileSync(join(root, '.gitignore'), '.runs/\n');
   runSync('git', ['init', '-q', '-b', 'base', root]);
   git('config', 'user.name', 'fleet-test'); git('config', 'user.email', 'fleet-test@localhost');
   git('add', '.'); git('commit', '-q', '-m', 'fixture');

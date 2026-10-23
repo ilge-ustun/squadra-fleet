@@ -3585,7 +3585,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_170_launch_writes_its_events
        case_171_queue_writes_its_events
        case_172_merge_writes_its_events
-       case_173_writer_and_lint_write_events)
+       case_173_writer_and_lint_write_events
+       case_174_promote)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3672,7 +3673,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status write-story lint-story new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
+  for c in status write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5278,6 +5279,58 @@ case_173_writer_and_lint_write_events() {
   local before; before="$(wc -l < "$REPO/.runs/events.jsonl")"
   ( cd "$FX" && bash "$FLEET/fleet" lint-story t "$FX/draft.md" ) > "$FX/lint2.log" 2>&1
   assert_eq "$(wc -l < "$REPO/.runs/events.jsonl")" "$before" "a file outside .stories/ writes nothing"
+}
+
+# fleet promote does at a terminal what /promote does from the phone: the
+# status to ready, one commit, a push, the repo's drain started through
+# QUEUE_START_CMD. Both are one path (src/promote.ts) and both write a
+# promote mark. Red while there is no fleet promote, and while either
+# writes no mark.
+promote_run() {                       # promote_run [args…] → PLOG PRC
+  PLOG="$FX/promote.log"
+  ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 QUEUE_START_CMD="touch $FX/queue-started-{repo}" \
+      bash "$FLEET/fleet" promote t "$@" ) > "$PLOG" 2>&1
+  PRC=$?
+}
+case_174_promote() {
+  CASE="174 fleet promote: ready, one commit, pushed, a drain started, a promote mark"; fixture c174 draft
+  promote_run "$STORY"
+  assert_eq "$PRC" 0 "exit code"
+  assert_eq "$(field status)" ready "the story is ready"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (fleet promote)" "one commit, named"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$REPO" rev-parse origin/base)" "pushed"
+  assert_file "$FX/queue-started-t" "the repo's drain was started"
+  assert_contains "$(cat "$PLOG")" "$STORY is ready — a drain is starting" "and it says so"
+  assert_grep '"story":"900","pass":"promote","event":"mark","by":"fleet promote","from":"draft","result":"READY","queue":"started"' "$REPO/.runs/events.jsonl" "a promote mark"
+
+  CASE="174b promoted again: nothing to do, 0; a story a launcher has: refused, 1"
+  rm -f "$FX/queue-started-t"
+  promote_run "$STORY"
+  assert_eq "$PRC" 0 "already ready is not an error"
+  assert_contains "$(cat "$PLOG")" "$STORY was already ready" "and says so"
+  assert_no_file "$FX/queue-started-t" "no drain started"
+  sed -i '0,/^status:.*/s//status: in_progress/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "a launcher has it"
+  promote_run "$STORY"
+  assert_eq "$PRC" 1 "exit code"
+  assert_contains "$(cat "$PLOG")" "$STORY is in_progress — a launcher has it" "says why"
+  assert_eq "$(field status)" in_progress "untouched"
+  promote_run 999
+  assert_eq "$PRC" 1 "an unknown story is 1"
+  promote_run "$STORY" --by
+  assert_contains "$(cat "$PLOG")" "usage: fleet promote" "--by without a name is the usage"
+
+  CASE="174c --by names who promoted it, in the commit and the mark"; fixture c174c draft
+  promote_run "$STORY" --by "coordinator, delegated by the human"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (coordinator, delegated by the human)" "the commit names who"
+  assert_grep '"by":"coordinator, delegated by the human"' "$REPO/.runs/events.jsonl" "so does the mark"
+
+  CASE="174d /promote takes the same path: the same commit, and a mark by telegram"; fixture c174d draft
+  update 102 42 "/promote t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "status changed"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (telegram)" "the bot's commit, as before"
+  assert_grep '"pass":"promote","event":"mark","by":"telegram","from":"draft"' "$REPO/.runs/events.jsonl" "a promote mark by telegram"
 }
 
 for c in "${CASES[@]}"; do

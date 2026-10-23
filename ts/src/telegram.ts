@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { loadRepo as loadRepoThroughBash, type RepoConfig } from './lib/config.ts';
 import { readEnvFile } from './lib/env-file.ts';
 import { deleteFrontmatterField, replaceFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
-import { add, commit, pushQuiet, stagedIsEmpty } from './lib/git.ts';
+import { add, commit, pushQuiet } from './lib/git.ts';
 import { lockPath, withFleetLock } from './lib/lock.ts';
 import { log as logLine, warn as warnLine } from './lib/log.ts';
 import { runSync } from './lib/proc.ts';
@@ -38,7 +38,10 @@ import { readReview } from './lib/review.ts';
 import { byCodePoint } from './status.ts';
 import { getUpdates as apiGetUpdates, sendMessage as apiSendMessage } from './lib/telegram-api.ts';
 import { splitCommand } from './launch.ts';
+import { QUEUE_START_DEFAULT, launcherHas, promote, queueStartArgv, storyOk } from './promote.ts';
 import { branchNameOk } from './test-deploy.ts';
+
+export { storyOk };
 
 export const TAG = { tag: 'bot' };
 
@@ -112,7 +115,7 @@ export function readBotKnobs(env: NodeJS.ProcessEnv): BotKnobs {
     timeoutSec: num(env['TELEGRAM_TIMEOUT'], 20),
     sendMax: num(env['SEND_MAX'], 3800),
     lockWait: num(env['FLEET_LOCK_WAIT'], 120),
-    queueStartCmd: env['QUEUE_START_CMD'] ?? 'systemctl --user start --no-block fleet-queue@{repo}.service',
+    queueStartCmd: env['QUEUE_START_CMD'] ?? QUEUE_START_DEFAULT,
     detachCmd: env['DETACH_CMD'] ?? 'systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME',
   };
 }
@@ -286,10 +289,6 @@ export function parseCommand(text: string): Command {
   return { verb: m?.[1] ?? '', repo: m?.[2] ?? '', arg: m?.[3] ?? '', rest: m?.[4] ?? '' };
 }
 
-export function storyOk(root: string, id: string): boolean {
-  return /^[0-9]{3}$/.test(id) && existsSync(join(root, '.stories', `${id}.md`));
-}
-
 /** `date -Iseconds`: local time, the zone offset, no fraction. */
 export function isoSeconds(d: Date): string {
   const p = (n: number): string => String(n).padStart(2, '0');
@@ -371,7 +370,7 @@ function cmdHelp(c: BotContext): string {
 
 /** Starts one repo's drain: QUEUE_START_CMD with {repo} replaced. */
 function startQueue(c: BotContext, repo: string): boolean {
-  return c.deps.runCommand(splitCommand(c.knobs.queueStartCmd).map((w) => w.replaceAll('{repo}', repo))) === 0;
+  return c.deps.runCommand(queueStartArgv(c.knobs.queueStartCmd, repo)) === 0;
 }
 
 /** /run [repo]: that repo's drain, or with none every registered repo's.
@@ -397,30 +396,10 @@ function cmdWhy(cfg: RepoConfig, id: string): string {
   return machineBlockBody(readFileSync(f, 'utf8'));
 }
 
-/** While a story is in_progress its status is the launcher's: neither verb
- *  may write `ready` over it. A launcher that died leaves it to the next
- *  drain's reap, which checks the story's trees first (L-31). */
-function launcherHas(root: string, id: string): string | undefined {
-  if (storyField(root, id, 'status') !== 'in_progress') return undefined;
-  return `${id} is in_progress — a launcher has it; if that launcher died, the next drain returns it to the queue`;
-}
-
-/** A promotion is wanted now (L-39): after its commit it starts a drain with
- *  the command /run uses. A drain already running takes the story after its
- *  current one (run-queue's nextToRun), so a second start is a no-op. */
+/** /promote: src/promote.ts, the path `fleet promote` takes too, with the
+ *  command /run uses to start the drain. */
 function cmdPromote(c: BotContext, cfg: RepoConfig, id: string): string {
-  if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
-  const running = launcherHas(cfg.root, id);
-  if (running !== undefined) return running;
-  const rel = `.stories/${id}.md`;
-  replaceFrontmatterField(join(cfg.root, rel), 'status', 'ready');
-  add(cfg.root, rel);
-  if (stagedIsEmpty(cfg.root)) return `${id} was already ready`;
-  if (commit(cfg.root, `story(${id}): promoted to ready (telegram)`) !== 0) return `${id} could not be committed`;
-  pushQuiet(cfg.root);
-  return startQueue(c, cfg.name)
-    ? `${id} is ready — a drain is starting, or the one running takes it next`
-    : `${id} is ready — could not start a drain now; the next one picks it up`;
+  return promote(cfg, id, { by: 'telegram', startQueue: () => startQueue(c, cfg.name), warn: c.deps.io.warn }).reply;
 }
 
 function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): string {
