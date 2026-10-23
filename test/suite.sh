@@ -3583,7 +3583,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
        case_168_cargo_probes case_169_prompts_name_the_runners
        case_170_launch_writes_its_events
-       case_171_queue_writes_its_events)
+       case_171_queue_writes_its_events
+       case_172_merge_writes_its_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5210,6 +5211,44 @@ case_171_queue_writes_its_events() {
   assert_grep '^mark queue held -$' "$FX/rows" "the hold is marked"
   assert_grep '"name":"held","reason":"only 1000 MB of memory is available' "$REPO/.runs/events.jsonl" "with its reason"
   assert_not_grep 'drain' "$FX/rows" "a drain that ran nothing has no span"
+}
+
+# fleet merge writes its span to the event log: a story merged into its
+# epic ends MERGED with the sha, with a SKIPPED mark when its round's
+# baseline stands (L-39); an epic landed is an epic_merge with the
+# post-merge baseline's steps inside it; a red baseline ends it RED. Red
+# while merge.ts writes no event.
+case_172_merge_writes_its_events() {
+  CASE="172 a story merged into its epic is a merge span, ended MERGED"; epic_story c172
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^start merge - -$' "$FX/rows" "the merge started"
+  assert_grep '^mark baseline merge SKIPPED$' "$FX/rows" "the round's baseline stood for it"
+  assert_grep '^end merge - MERGED$' "$FX/rows" "and it ended MERGED"
+  assert_grep '"branch":"story/900","into":"epic/test","sha":"[0-9a-f]{8}","pass":"merge","event":"end"' "$REPO/.runs/events.jsonl" "with the branch, the epic and the sha"
+
+  CASE="172b an epic landed is an epic_merge span, with the baseline's steps"
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 0 "precondition: landed"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^end epic_merge - MERGED$' "$FX/rows" "the epic landed"
+  local step
+  for step in test build lint; do assert_grep "^end baseline $step GREEN\$" "$FX/rows" "its $step step"; done
+  assert_grep '^end baseline merge GREEN$' "$FX/rows" "and the whole baseline"
+  assert_grep '"epic":"epic/test","branch":"epic/test","into":"base".*"pass":"epic_merge","event":"end"' "$REPO/.runs/events.jsonl" "naming the epic and the integration branch"
+
+  CASE="172c a red post-merge baseline ends the merge RED, with the die's text"; epic_story c172c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  merge_epic "$FX/merge-epic.log" BUILD_CMD=false
+  events_rows > "$FX/rows"
+  assert_grep '^end baseline build RED$' "$FX/rows" "the build step was RED"
+  assert_grep '^end epic_merge - RED$' "$FX/rows" "the epic merge ended RED"
+  assert_grep '"result":"RED","exit":1,"reason":"post-merge baseline is red' "$REPO/.runs/events.jsonl" "with why"
 }
 
 for c in "${CASES[@]}"; do
