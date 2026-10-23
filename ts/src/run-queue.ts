@@ -15,6 +15,11 @@
 // what keeps a debugging session from landing something. AUTO_MERGE=0 turns
 // the merge off without turning the fleet off.
 //
+// Each pickup is a `queue` mark in the target's .runs/events.jsonl
+// (lib/events.ts), with the time the story became ready and how long it
+// waited; a drain that picks up a story is a `drain` span, and a drain held
+// back — a refused review, low memory, another launch — is a `held` mark.
+//
 // Each story runs as a child process (`fleet launch <repo> <id>`, then, on a
 // computed PASS, `fleet merge <repo> <id>`) with stdio fully inherited — not
 // called in-process. That process boundary isolates one story's crash or Die
@@ -23,11 +28,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { Die } from './lib/die.ts';
+import { formatIsoMs, openEventLog } from './lib/events.ts';
 import { storyField } from './lib/frontmatter.ts';
 import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, pushQuiet, revListCount, upstreamBranch } from './lib/git.ts';
 import { EXIT_AGENT_REFUSED, readKnobs, splitCommand } from './launch.ts';
 import { EXIT_LAUNCH_BUSY, launchLockHolder, withFleetLock } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
+import { readySince } from './lib/history.ts';
 import { formatIsoSeconds } from './lib/machine-block.ts';
 import { readMemAvailableMb } from './lib/meminfo.ts';
 import { runInherit } from './lib/proc.ts';
@@ -181,6 +188,8 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   };
   const max = readMax(o.argv, o.env);
   const autoMerge = o.env['AUTO_MERGE'] ?? '1';
+  const ev = openEventLog({ root, repo: cfg.name, subject: 'drain', warn: (m) => warn(m, TAG) });
+  const held = (reason: string): void => ev.mark('queue', { name: 'held', reason });
 
   // A crash leaves a story at `in_progress` with nothing running. Any scan
   // for `ready` misses it, so the queue would report itself empty while a
@@ -193,6 +202,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   log('reaping orphans from any interrupted run', TAG);
   if (runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, '--reap']) === EXIT_LAUNCH_BUSY) {
     log(busyLine(launchLockHolder(root)), TAG);
+    held(busyLine(launchLockHolder(root)));
     return 0;
   }
 
@@ -215,6 +225,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     if (hold !== '') {
       log(hold, TAG);
       stopped = hold;
+      held(hold);
       break;
     }
     const id = nextToRun(root);
@@ -235,18 +246,29 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     if (free !== undefined && free < minFree) {
       stopped = lowMemoryLine(free, minFree);
       log(stopped, TAG);
+      held(stopped);
       break;
     }
     prev = id;
     n += 1;
 
     log(`story ${id} (${n} of at most ${max})`, TAG);
+    // The drain's span starts at its first pickup: the timer starts a drain
+    // every fifteen minutes, and one that runs nothing writes nothing.
+    if (ev.open().length === 0) ev.start('drain', 'queue', { name: 'drain', max });
+    const since = readySince(root, id);
+    const epic = storyField(root, id, 'base');
+    ev.mark('queue', {
+      name: 'pickup', story: id, epic: epic.startsWith('epic/') ? epic : undefined, n,
+      ready_since: since === undefined ? undefined : formatIsoMs(since), wait_s: since === undefined ? undefined : Math.round((Date.now() - since.getTime()) / 1000),
+    });
     const rc = runInherit('bash', [`${o.fleetHome}/fleet`, 'launch', cfg.name, id]);
     // The lock was taken between the reap and this launch, which touched
     // nothing: not a story that ran, not news.
     if (rc === EXIT_LAUNCH_BUSY) {
       log(busyLine(launchLockHolder(root)), TAG);
       stopped = 'another launch holds the repo';
+      held(busyLine(launchLockHolder(root)));
       break;
     }
 
@@ -299,6 +321,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
   }
 
   if (n >= max) warn(`stopped at the --max ceiling of ${max} stories`, TAG);
+  if (ev.open().length > 0) ev.end('drain', { result: n >= max ? 'MAX' : 'DONE', reason: stopped, stories: ran.map((r) => r.id).join(' ') });
 
   out('\n');
   out(`${DIM}─── queue finished, started ${started} ───${RST}\n`);

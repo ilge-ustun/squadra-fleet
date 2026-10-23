@@ -3582,7 +3582,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
        case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
        case_168_cargo_probes case_169_prompts_name_the_runners
-       case_170_launch_writes_its_events)
+       case_170_launch_writes_its_events
+       case_171_queue_writes_its_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5183,6 +5184,32 @@ case_170_launch_writes_its_events() {
   assert_grep '^end launch - DIED$' "$FX/rows" "the launch DIED"
   assert_grep '"result":"DIED".*exceeded AGENT_TIMEOUT' "$REPO/.runs/events.jsonl" "with the die's text"
   assert_not_grep '^open ' "$FX/rows" "nothing left open"
+}
+
+# The queue writes its pickups to the event log: the story, when it became
+# ready (from git) and how long it waited; a drain that ran a story is a
+# span, and a drain held back is a `held` mark with the reason. Red while
+# run-queue.ts writes no event.
+case_171_queue_writes_its_events() {
+  CASE="171 a pickup is a queue mark with the wait, inside a drain span"; fixture c171
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  events_rows > "$FX/rows"
+  assert_not_grep '^bad ' "$FX/rows" "every line is well formed"
+  assert_not_grep '^open ' "$FX/rows" "every span ended"
+  assert_grep '^start queue drain -$' "$FX/rows" "the drain started"
+  assert_grep '^mark queue pickup -$' "$FX/rows" "the story was picked up"
+  assert_grep '^end queue drain DONE$' "$FX/rows" "the drain ended"
+  assert_grep '"story":"900","pass":"queue","event":"mark","name":"pickup","n":1,"ready_since":"[0-9-]+T[0-9:.]+[+-][0-9:]+","wait_s":[0-9]+' "$REPO/.runs/events.jsonl" "with the time it became ready, from git, and the wait"
+  assert_grep '^end launch - PASS$' "$FX/rows" "and the launch it started wrote its own"
+
+  CASE="171b a drain held back by low memory is a held mark, and no drain span"; fixture c171b
+  printf 'MemAvailable:  1024000 kB\n' > "$FX/meminfo"
+  queue FLEET_MEMINFO="$FX/meminfo" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  events_rows > "$FX/rows"
+  assert_grep '^mark queue held -$' "$FX/rows" "the hold is marked"
+  assert_grep '"name":"held","reason":"only 1000 MB of memory is available' "$REPO/.runs/events.jsonl" "with its reason"
+  assert_not_grep 'drain' "$FX/rows" "a drain that ran nothing has no span"
 }
 
 for c in "${CASES[@]}"; do
