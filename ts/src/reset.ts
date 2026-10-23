@@ -10,10 +10,12 @@
 // a human does, from the fleet-verdict skill.
 //
 // Pinned: status: and round: are replaced in the frontmatter only, never in
-// the body.
+// the body. A reset is a `reset` mark in .runs/events.jsonl (lib/events.ts):
+// the evidence it removes is gone, and the log is where its rounds remain.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { replaceFrontmatterField, storyField } from './lib/frontmatter.ts';
 import {
   addAll, branchDelete, branchExists, commit, logOneline, lsFilesTracked, pushQuiet, refExists, revListCount, stagedIsEmpty,
@@ -132,6 +134,8 @@ export function reset(cfg: RepoConfig, o: ResetOptions): number {
     if (pushStatus === '1' && pushQuiet(root) !== 0) warn('push failed — the reset is not visible remotely');
   }
 
+  openEventLog({ root, repo: cfg.name, subject: id, story: id, epic: storyBase.startsWith('epic/') ? storyBase : undefined, warn })
+    .mark('reset', { result: newStatus.toUpperCase(), force: force || undefined });
   log(`${id} is ${newStatus}, round 0`);
   return 0;
 }

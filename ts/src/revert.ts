@@ -12,10 +12,12 @@
 // been taken back.
 //
 // Pinned: .runs/ is created before the revert log; the `merged:` line is
-// removed from the frontmatter only, never from the body.
+// removed from the frontmatter only, never from the body. A revert that
+// lands is a `revert` mark in .runs/events.jsonl (lib/events.ts).
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { deleteFrontmatterField, storyField } from './lib/frontmatter.ts';
 import {
   add, branchExists, branchForce, commit, fetch, isAncestor, pushQuiet, pushRef, revParse, revertAbort, revertMerge, stagedIsEmpty,
@@ -98,6 +100,8 @@ export function revert(cfg: RepoConfig, o: RevertOptions): number {
       warn(`could not move the local ${base} — it is checked out somewhere`);
     }
     log(`${base} reverted: ${short(sha)} is undone`);
+    openEventLog({ root, repo: cfg.name, subject: id, story: id, epic: base.startsWith('epic/') ? base : undefined, warn })
+      .mark('revert', { result: 'REVERTED', sha: short(sha), into: base, evidence: `.runs/${id}-revert.log` });
 
     // The story is no longer merged, and says so, or the next status would
     // claim a merge that has been taken back.

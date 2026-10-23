@@ -25,12 +25,18 @@
 // server is light and outlives this process: it is a transient unit of its
 // own (systemd-run), so an SSH session or the bot's job can end without
 // taking it along (L-34).
+//
+// A deploy is a `test_deploy` span in the target's .runs/events.jsonl
+// (lib/events.ts), with its install, build and start inside: UP with the
+// branch and the sha, FAILED with why, or a BUSY mark when the launch lock
+// stayed held.
 import { copyFileSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
 import { readEnvFile } from './lib/env-file.ts';
+import { openEventLog } from './lib/events.ts';
 import { fetch as gitFetch, refExists, revParse, revParseShort, worktreeAdd, worktreePaths, worktreePrune, worktreeRemoveForce } from './lib/git.ts';
 import { EXIT_LAUNCH_BUSY, takeLaunchLock } from './lib/lock.ts';
 import { log, warn } from './lib/log.ts';
@@ -258,10 +264,12 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
     throw new Die(`TEST_DEPLOY_URL is not set — put the URL the web server answers on in ${join(o.fleetHome, '.env.fleet')} (TEST_DEPLOY_URL=https://…); docs/operations.md has the one-time setup`);
   }
   const what = `test-deploy ${o.branch}`;
+  const ev = openEventLog({ root, repo: cfg.name, subject: 'test-deploy', warn });
   let lock = takeLaunchLock(root, what);
   if (!lock.held) {
     const line = waitingLine(cfg.name, o.branch, lock.holder, o.knobs.lockWaitSec);
     log(line);
+    ev.mark('test_deploy', { name: 'waiting', branch: o.branch, reason: line });
     writeFileSync(waitingFile(o.fleetHome), `${process.pid}\n${line}\n`);
     try {
       lock = takeLaunchLock(root, what, o.knobs.lockWaitSec);
@@ -270,15 +278,26 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
     }
     if (!lock.held) {
       warn(`the launch lock is still held by ${lock.holder || 'unknown'} — nothing was touched`);
+      ev.mark('test_deploy', { name: 'busy', branch: o.branch, result: 'BUSY', reason: `the launch lock is still held by ${lock.holder || 'unknown'}` });
       return EXIT_LAUNCH_BUSY;
     }
   }
+  /** One step of the deploy as a span inside the deploy's. */
+  const timed = <T>(name: string, fn: () => T): T => {
+    ev.start(`test_deploy.${name}`, 'test_deploy', { name });
+    const v = fn();
+    ev.end(`test_deploy.${name}`, { result: 'OK' });
+    return v;
+  };
+  let up = false;
+  ev.start('test_deploy', 'test_deploy', { name: 'deploy', branch: o.branch });
   try {
     if (gitFetch(root, 'origin') !== 0) throw new Die(`git fetch origin failed in ${root}`);
     const tip = branchTip(root, o.branch);
     if (tip === undefined) throw new Die(`no branch ${o.branch} on origin or in ${root}`);
     const short = revParseShort(root, tip.sha);
     log(`test deploy of ${cfg.name} ${o.branch} at ${short} (${tip.ref})`);
+    ev.context({ sha: short });
 
     stopUnit();
     rmSync(stateFile(o.fleetHome), { force: true });
@@ -292,8 +311,9 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
       if (!existsSync(join(root, f))) throw new Die(`${f} is missing from ${root} — the build would not behave like production`);
       copyFileSync(join(root, f), join(dir, f));
     }
-    step('install', cfg.installCmd, dir);
-    step('build', cfg.buildCmd, dir);
+    timed('install', () => step('install', cfg.installCmd, dir));
+    timed('build', () => step('build', cfg.buildCmd, dir));
+    ev.start('test_deploy.start', 'test_deploy', { name: 'start' });
 
     const start = cfg.startCmd ?? 'npm start';
     log(`start: ${start}, PORT=${o.knobs.port}, as ${UNIT}`);
@@ -316,9 +336,14 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
     const st: Deployed = { repo: cfg.name, root, branch: o.branch, sha: tip.sha, short, url: o.knobs.url, since: localMinute(new Date()) };
     writeFileSync(stateFile(o.fleetHome), `${JSON.stringify(st, null, 2)}\n`);
     log(`${cfg.name} ${o.branch} (${short}) is up at ${o.knobs.url}`);
+    up = true;
     return 0;
+  } catch (e) {
+    ev.endOpen({ result: 'FAILED', exit: 1, reason: e instanceof Error ? e.message : String(e) });
+    throw e;
   } finally {
     lock.release();
+    ev.endOpen({ result: up ? 'UP' : 'ENDED' });
   }
 }
 

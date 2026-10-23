@@ -3587,7 +3587,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_172_merge_writes_its_events
        case_173_writer_and_lint_write_events
        case_174_promote
-       case_175_answers_and_epics_are_marked)
+       case_175_answers_and_epics_are_marked
+       case_176_revert_reset_and_test_deploy_are_logged)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5359,6 +5360,43 @@ case_175_answers_and_epics_are_marked() {
   CASE="175d fleet new-epic is an epic mark, with the sha it was cut at"; fixture c175d
   ( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/fleet" new-epic t search ) > "$FX/epic.log" 2>&1
   assert_grep "\"epic\":\"epic/search\",\"pass\":\"epic\",\"event\":\"mark\",\"name\":\"created\",\"result\":\"CREATED\",\"from\":\"base\",\"sha\":\"$(git -C "$REPO" rev-parse --short origin/epic/search)\"" "$REPO/.runs/events.jsonl" "an epic mark"
+}
+
+# A revert and a reset are marks; a test deploy is a span with its
+# install, build and start inside, ended UP or FAILED. Red while revert.ts,
+# reset.ts and test-deploy.ts write no event.
+case_176_revert_reset_and_test_deploy_are_logged() {
+  CASE="176 a revert is a revert mark with the sha it undid"; epic_story c176
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  local sha; sha="$(field merged)"
+  revert_run
+  assert_eq "$RVRC" 0 "precondition: reverted"
+  assert_grep "\"pass\":\"revert\",\"event\":\"mark\",\"result\":\"REVERTED\",\"sha\":\"${sha:0:8}\",\"into\":\"epic/test\"" "$REPO/.runs/events.jsonl" "a revert mark"
+
+  CASE="176b a reset is a reset mark with the status it set"
+  reset_run "$STORY" --force --draft
+  assert_eq "$RRC" 0 "precondition: reset"
+  assert_grep '"pass":"reset","event":"mark","result":"DRAFT","force":true' "$REPO/.runs/events.jsonl" "a reset mark"
+
+  CASE="176c a test deploy is a span, its steps inside, ended UP"; fixture c176c; td_setup
+  td epic/test
+  assert_eq "$TDRC" 0 "precondition: up"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  local step
+  for step in install build; do assert_grep "^end test_deploy $step OK\$" "$FX/rows" "its $step step"; done
+  assert_grep '^end test_deploy deploy UP$' "$FX/rows" "the deploy ended UP"
+  assert_grep "\"sha\":\"$(git -C "$REPO" rev-parse --short origin/epic/test)\",\"pass\":\"test_deploy\",\"event\":\"end\",\"name\":\"deploy\",\"branch\":\"epic/test\"" "$REPO/.runs/events.jsonl" "naming the branch and the sha"
+
+  CASE="176d a red build ends the deploy FAILED, with why"
+  BUILD_CMD=false td epic/test
+  assert_eq "$TDRC" 1 "precondition: the build failed"
+  events_rows > "$FX/rows"
+  assert_grep '^end test_deploy deploy FAILED$' "$FX/rows" "the deploy ended FAILED"
+  assert_grep '"name":"deploy".*"result":"FAILED","exit":1,"reason":"build failed' "$REPO/.runs/events.jsonl" "with the step that failed"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
+  td --stop
 }
 
 for c in "${CASES[@]}"; do
