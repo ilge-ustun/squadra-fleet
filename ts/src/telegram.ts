@@ -20,6 +20,10 @@
 // when its sender is TELEGRAM_CHAT_ID. Everything else is dropped without a
 // reply — a reply would confirm the bot exists.
 //
+// An answer, a /wait and a /fallback are `answer` marks in the target's
+// .runs/events.jsonl (lib/events.ts); a /promote is a `promote` mark
+// (src/promote.ts).
+//
 // Nothing here dies. A fleet whose notifications fail must still run: a
 // notification is not part of a verdict, and killing a round because
 // Telegram was unreachable would be strictly worse than being told late.
@@ -29,6 +33,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 import { loadRepo as loadRepoThroughBash, type RepoConfig } from './lib/config.ts';
 import { readEnvFile } from './lib/env-file.ts';
+import { openEventLog } from './lib/events.ts';
 import { deleteFrontmatterField, replaceFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, commit, pushQuiet } from './lib/git.ts';
 import { lockPath, withFleetLock } from './lib/lock.ts';
@@ -402,6 +407,13 @@ function cmdPromote(c: BotContext, cfg: RepoConfig, id: string): string {
   return promote(cfg, id, { by: 'telegram', startQueue: () => startQueue(c, cfg.name), warn: c.deps.io.warn }).reply;
 }
 
+/** An `answer` mark: the story is ready again by a human's word. */
+function answered(c: BotContext, cfg: RepoConfig, id: string, name: string): void {
+  const base = storyField(cfg.root, id, 'base');
+  openEventLog({ root: cfg.root, repo: cfg.name, subject: id, story: id, epic: base.startsWith('epic/') ? base : undefined, warn: c.deps.io.warn })
+    .mark('answer', { name, by: 'telegram', result: 'READY' });
+}
+
 function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
   const running = launcherHas(cfg.root, id);
@@ -414,6 +426,7 @@ function cmdAnswer(c: BotContext, cfg: RepoConfig, id: string, text: string): st
   add(cfg.root, `.stories/${id}.md`);
   if (commit(cfg.root, `story(${id}): answered, back to ready (telegram)`) !== 0) return `${id} could not be committed`;
   pushQuiet(cfg.root);
+  answered(c, cfg, id, 'answer');
   return `answered — ${id} is ready again`;
 }
 
@@ -430,30 +443,31 @@ function pausedOnReviewer(root: string, id: string): boolean {
 }
 
 /** Commit one story's frontmatter change and push it; the reply on
- *  success, or the failure's. */
-function commitStory(cfg: RepoConfig, id: string, subject: string, reply: string): string {
+ *  success, or the failure's. `done` runs after a commit that worked. */
+function commitStory(cfg: RepoConfig, id: string, subject: string, reply: string, done: () => void = () => {}): string {
   add(cfg.root, `.stories/${id}.md`);
   if (commit(cfg.root, `story(${id}): ${subject} (telegram)`) !== 0) return `${id} could not be committed`;
   pushQuiet(cfg.root);
+  done();
   return reply;
 }
 
 /** Wait for the reset: ready again with its not_before, which the queue
  *  holds for; then the story is reviewed first, with no builder round. */
-function cmdWait(cfg: RepoConfig, id: string): string {
+function cmdWait(c: BotContext, cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
   if (!pausedOnReviewer(cfg.root, id)) return `${id} is not waiting for a reviewer choice`;
   replaceFrontmatterField(join(cfg.root, '.stories', `${id}.md`), 'status', 'ready');
   const nb = storyField(cfg.root, id, 'not_before');
   return commitStory(cfg, id, 'wait for the reviewer, then review',
-    `${id} waits${nb === '' ? '' : ` until ${nb}`}, then is reviewed first; the queue holds until then`);
+    `${id} waits${nb === '' ? '' : ` until ${nb}`}, then is reviewed first; the queue holds until then`, () => answered(c, cfg, id, 'wait'));
 }
 
 /** Claude reviews it instead, at the next drain — for the rest of that
  *  launch, which removes the key when it claims the story. Not started from
  *  here: a drain started by the bot would hold its poll, and the fleet lock
  *  with it, for as long as the drain runs. */
-function cmdFallback(cfg: RepoConfig, id: string): string {
+function cmdFallback(c: BotContext, cfg: RepoConfig, id: string): string {
   if (!storyOk(cfg.root, id)) return `no such story: ${id}`;
   if (!pausedOnReviewer(cfg.root, id)) return `${id} is not waiting for a reviewer choice`;
   const file = join(cfg.root, '.stories', `${id}.md`);
@@ -461,7 +475,7 @@ function cmdFallback(cfg: RepoConfig, id: string): string {
   deleteFrontmatterField(file, 'not_before');
   setStoryField(cfg.root, id, 'reviewer', 'claude');
   return commitStory(cfg, id, 'reviewed by Claude instead',
-    `${id} will be reviewed by Claude (opus) at the next drain — /run to start one now. A weaker check: the same vendor as its builder.`);
+    `${id} will be reviewed by Claude (opus) at the next drain — /run to start one now. A weaker check: the same vendor as its builder.`, () => answered(c, cfg, id, 'fallback'));
 }
 
 // The script owns every refusal; this only reports what it said.
@@ -558,8 +572,8 @@ function dispatchRaw(c: BotContext, text: string): string {
       case '/why': return cmdWhy(cfg, r.arg);
       case '/promote': return locked(() => cmdPromote(c, cfg, r.arg));
       case '/answer': return r.rest !== '' ? locked(() => cmdAnswer(c, cfg, r.arg, r.rest)) : 'usage: /answer <repo> <id> <text>';
-      case '/wait': return locked(() => cmdWait(cfg, r.arg));
-      case '/fallback': return locked(() => cmdFallback(cfg, r.arg));
+      case '/wait': return locked(() => cmdWait(c, cfg, r.arg));
+      case '/fallback': return locked(() => cmdFallback(c, cfg, r.arg));
       case '/revert': return locked(() => cmdRevert(c, cfg, r.arg));
       case '/merge': return locked(() => cmdMerge(c, cfg, r.arg));
       case '/testdeploy': return cmdTestDeploy(c, cfg, r.arg);

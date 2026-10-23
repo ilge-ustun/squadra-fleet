@@ -3586,7 +3586,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_171_queue_writes_its_events
        case_172_merge_writes_its_events
        case_173_writer_and_lint_write_events
-       case_174_promote)
+       case_174_promote
+       case_175_answers_and_epics_are_marked)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5331,6 +5332,33 @@ case_174_promote() {
   assert_eq "$(field status)" ready "status changed"
   assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (telegram)" "the bot's commit, as before"
   assert_grep '"pass":"promote","event":"mark","by":"telegram","from":"draft"' "$REPO/.runs/events.jsonl" "a promote mark by telegram"
+}
+
+# A human's answer is an `answer` mark — /answer, /wait and /fallback — and
+# a new epic is an `epic` mark, the start of its chronology. Red while the
+# bot and new-epic write no mark.
+case_175_answers_and_epics_are_marked() {
+  CASE="175 /answer is an answer mark by telegram"; fixture c175
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  update 175 42 "/answer t $STORY use the moon"
+  bot poll
+  assert_eq "$(field status)" ready "precondition: answered"
+  assert_grep '"story":"900","pass":"answer","event":"mark","name":"answer","by":"telegram","result":"READY"' "$REPO/.runs/events.jsonl" "an answer mark"
+
+  CASE="175b /wait and /fallback are answer marks too"; fixture c175b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 176 42 "/wait t $STORY"
+  bot poll
+  assert_grep '"pass":"answer","event":"mark","name":"wait","by":"telegram"' "$REPO/.runs/events.jsonl" "a wait mark"
+  fixture c175c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 177 42 "/fallback t $STORY"
+  bot poll
+  assert_grep '"pass":"answer","event":"mark","name":"fallback","by":"telegram"' "$REPO/.runs/events.jsonl" "a fallback mark"
+
+  CASE="175d fleet new-epic is an epic mark, with the sha it was cut at"; fixture c175d
+  ( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/fleet" new-epic t search ) > "$FX/epic.log" 2>&1
+  assert_grep "\"epic\":\"epic/search\",\"pass\":\"epic\",\"event\":\"mark\",\"name\":\"created\",\"result\":\"CREATED\",\"from\":\"base\",\"sha\":\"$(git -C "$REPO" rev-parse --short origin/epic/search)\"" "$REPO/.runs/events.jsonl" "an epic mark"
 }
 
 for c in "${CASES[@]}"; do
