@@ -3584,7 +3584,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_168_cargo_probes case_169_prompts_name_the_runners
        case_170_launch_writes_its_events
        case_171_queue_writes_its_events
-       case_172_merge_writes_its_events)
+       case_172_merge_writes_its_events
+       case_173_writer_and_lint_write_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5249,6 +5250,34 @@ case_172_merge_writes_its_events() {
   assert_grep '^end baseline build RED$' "$FX/rows" "the build step was RED"
   assert_grep '^end epic_merge - RED$' "$FX/rows" "the epic merge ended RED"
   assert_grep '"result":"RED","exit":1,"reason":"post-merge baseline is red' "$REPO/.runs/events.jsonl" "with why"
+}
+
+# The writer is a span in the event log, and its start keeps the intent:
+# the one place an intent is kept, never the story file, which is the
+# builder's prompt. The lint after it is a span too, PASS or FAIL with the
+# first error; a draft linted from outside .stories/ is not logged. Red
+# while write-story.ts and lint-story.ts write no event.
+case_173_writer_and_lint_write_events() {
+  CASE="173 the writer keeps the intent on its start; the lint ends PASS"; fixture c173
+  git -C "$REPO" push -q origin base:epic/test
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=950 FAKE_BUILDER=story \
+      bash "$FLEET/fleet" write-story t 950 "the moon toggle should show a moon" --base epic/test ) > "$FX/write.log" 2>&1
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^start writer - -$' "$FX/rows" "the writer started"
+  assert_grep '^end writer - OK$' "$FX/rows" "and ended OK"
+  assert_grep '"story":"950","epic":"epic/test","pass":"writer","event":"start".*"model":"opus".*"intent":"the moon toggle should show a moon"' "$REPO/.runs/events.jsonl" "its start keeps the intent"
+  assert_not_grep 'moon toggle' "$REPO/.stories/950.md" "the story file does not"
+  assert_grep '^end lint - PASS$' "$FX/rows" "the lint passed"
+
+  CASE="173b a lint with errors ends FAIL with the first error; a draft from elsewhere is not logged"
+  sed -i '/^\*\*AC1/d' "$REPO/.stories/950.md"
+  ( cd "$FX" && bash "$FLEET/fleet" lint-story t 950 ) > "$FX/lint.log" 2>&1
+  assert_grep '"pass":"lint","event":"end".*"result":"FAIL".*"reason":"no acceptance criteria' "$REPO/.runs/events.jsonl" "FAIL, with the first error"
+  cp "$REPO/.stories/950.md" "$FX/draft.md"
+  local before; before="$(wc -l < "$REPO/.runs/events.jsonl")"
+  ( cd "$FX" && bash "$FLEET/fleet" lint-story t "$FX/draft.md" ) > "$FX/lint2.log" 2>&1
+  assert_eq "$(wc -l < "$REPO/.runs/events.jsonl")" "$before" "a file outside .stories/ writes nothing"
 }
 
 for c in "${CASES[@]}"; do

@@ -17,9 +17,13 @@
 //                  asserting them is noise that cannot fail independently.
 //   base, model    a base is the integration branch or epic/*; a model is
 //                  one of the live aliases, never a pinned id.
+//
+// A lint of one of the repo's own stories is a `lint` span in the target's
+// .runs/events.jsonl (lib/events.ts): PASS or FAIL, and the first error.
 import { existsSync, readFileSync, writeSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { frontmatterField } from './lib/frontmatter.ts';
 import { catFileExists, refExists, showLineCount } from './lib/git.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -154,13 +158,15 @@ export interface LintStoryOptions {
 
 /** The lint's own err()/warn(): these count, so ../lib/log.ts's warn is
  *  deliberately not used. */
-function makeCounters(): { err: (msg: string) => void; warn: (msg: string) => void; errors: () => number; warnings: () => number } {
+function makeCounters(): { err: (msg: string) => void; warn: (msg: string) => void; errors: () => number; warnings: () => number; first: () => string } {
   let errors = 0;
   let warnings = 0;
+  let first = '';
   return {
     err: (msg) => {
       writeSync(2, `${RED}ERROR${RST}   ${msg}\n`);
       errors += 1;
+      if (first === '') first = msg;
     },
     warn: (msg) => {
       writeSync(1, `${YLW}warning${RST} ${msg}\n`);
@@ -168,6 +174,7 @@ function makeCounters(): { err: (msg: string) => void; warn: (msg: string) => vo
     },
     errors: () => errors,
     warnings: () => warnings,
+    first: () => first,
   };
 }
 
@@ -182,7 +189,13 @@ export function lintStory(cfg: RepoConfig, o: LintStoryOptions): number {
     return 1;
   }
 
-  const { err, warn, errors, warnings } = makeCounters();
+  const { err, warn, errors, warnings, first } = makeCounters();
+  // Only a story of this repo's .stories/ is logged: a draft linted from
+  // elsewhere is not the repo's yet.
+  const id = basename(storyFile, '.md');
+  const own = resolve(storyFile) === resolve(join(cfg.root, '.stories', `${id}.md`));
+  const ev = own ? openEventLog({ root: cfg.root, repo: cfg.name, subject: id, story: id, warn: (m) => writeSync(2, `${m}\n`) }) : undefined;
+  ev?.start('lint', 'lint', { evidence: `.stories/${id}.md`, strict: strict || undefined });
   const text = readFileSync(storyFile, 'utf8');
   const lines = text.split('\n');
   const field = (key: string): string => frontmatterField(storyFile, key);
@@ -260,6 +273,11 @@ export function lintStory(cfg: RepoConfig, o: LintStoryOptions): number {
 
   // ── verdict ───────────────────────────────────────────────────────────
   writeSync(1, `\n${basename(storyFile)}: ${errors()} error(s), ${warnings()} warning(s), ${checked} citation(s) checked against ${citeRef || 'the checkout'}, ${acs.length} AC(s)\n`);
+  const failed = errors() > 0 || (strict && warnings() > 0);
+  ev?.end('lint', {
+    epic: base.startsWith('epic/') ? base : undefined, result: failed ? 'FAIL' : 'PASS', errors: errors(), warnings: warnings(), acs: acs.length,
+    reason: first() !== '' ? first() : failed ? '--strict: warnings are fatal' : undefined,
+  });
 
   if (errors() > 0) return 1;
   if (strict && warnings() > 0) {
