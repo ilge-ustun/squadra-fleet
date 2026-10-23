@@ -185,12 +185,34 @@ deploys — belongs to that target, not here.
   Still open: a suite run against the `/testdeploy` URL after a test
   deploy, the live-data smoke, is not built.
 
+- **The journal keeps about five days.** On 23 Oct 2026 the queue units'
+  journal began on 18 Oct; an hour before, it began on 11 Oct. Each drain
+  prints the whole `fleet status` table every fifteen minutes (about 135
+  lines for khaita), and journald rotates the older days away. `fleet events
+  --journal` reads only what is left. Open: print the table only when a
+  drain ran a story, or save the journal's backfill
+  (`fleet events <repo> --journal > file`) before it goes.
+- **The event log is machine-local.** `.runs/events.jsonl` is gitignored,
+  so another clone of a target has no log. Nothing rotates it; one story
+  writes about a hundred lines. `fleet reset` keeps it (it removes
+  `.runs/<id>-*` only), so a story's earlier rounds stay in the log after
+  their evidence is gone.
+
 ## Decided, and why
 
 - **TypeScript, run as is.** Node strips the types as it loads
   `ts/src/**/*.ts`: no build, no `dist/`, nothing stale to deploy. `tsc`
   only type-checks. The human's language, and one toolchain across the
   harness and its web-app targets.
+- **The event log never fails a run** (22 Oct 2026, with the event
+  design). A line that cannot be written is a warning, once: the log
+  records what happened and must not change it, as `notify` must not.
+- **The intent lives on the writer's start event, not in the story** (23
+  Oct 2026). The story file is the builder's prompt (`{{STORY_TEXT}}`), so
+  an intent there would change what every builder reads.
+- **The reviewer's span ends OK, not with its verdict.** Only
+  `lib/verdict.ts` reads the reviewer's line (case 108). The verdict mark
+  carries what the reviewer said, as `reviewer`.
 - **Zero runtime dependencies.** A call from a systemd timer or a builder's
   session must work whether or not `npm ci` ever ran; the suite proves it on
   every run.
