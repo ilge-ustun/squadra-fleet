@@ -247,7 +247,7 @@ run() {                               # run <story-id> [VAR=value …] → LOG R
 queue() {                             # queue [VAR=value …] → $FX/queue.log QRC   (QUEUE_TARGET=--all for every repo)
   ( cd "$FX" && env PATH="$(FAKES)" \
       PUSH_STATUS=1 FAKE_MUTATIONS=patch FAKE_VITEST=marker FLEET_NOTIFY_CMD=true \
-      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" "$@" \
+      FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID="$STORY" CODEX_HOME="$FX/codex-home" FLEET_CARGO_CACHE="$FX/cargo-cache" "$@" \
       bash "$FLEET/fleet" run-queue "${QUEUE_TARGET:-t}" ) > "$FX/queue.log" 2>&1
   QRC=$?
 }
@@ -3589,7 +3589,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_174_promote
        case_175_answers_and_epics_are_marked
        case_176_revert_reset_and_test_deploy_are_logged
-       case_177_fleet_events)
+       case_177_fleet_events
+       case_178_drain_prunes_the_build_cache)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5428,6 +5429,34 @@ case_177_fleet_events() {
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch") | .event + " " + .source + " " + (.result // "-")' | tr '\n' ',')" "start git -,end git PASS," "the launch, from git"
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="verdict") | .source + " " + .result' | tr '\n' ',')" "machine PASS," "the verdict, from the Machine block"
   assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t --bogus 2>&1 >/dev/null | grep -c 'usage: fleet events')" 1 "an unknown flag is the usage"
+}
+
+# A cargo target keeps one build folder per worktree outside it,
+# ~/.cache/fleet-cargo/<repo>/<worktree's name> (README, the runner
+# contract); nothing deleted them, and on 26 Oct 34 of them held 99 GB of a
+# 154 GB disk. Each drain deletes the folders whose worktree is gone
+# (lib/buildcache.ts). The queue helper points FLEET_CARGO_CACHE into the
+# fixture, so no case touches the real one. Red while run-queue.ts deletes
+# nothing.
+case_178_drain_prunes_the_build_cache() {
+  CASE="178 a drain deletes each build folder whose worktree is gone"; fixture c178 draft
+  local c="$FX/cargo-cache/t" n
+  git -C "$REPO" worktree add -q --detach "$FX/wt-live"
+  git -C "$REPO" worktree add -q --detach "$FX/wt-hand"; rm -rf "$FX/wt-hand"   # removed by hand: git still lists it
+  for n in repo wt-live wt-hand wt-gone merge-epic-x; do mkdir -p "$c/$n/debug"; : > "$c/$n/debug/lib.rlib"; done
+  queue
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_eq "$(ls "$c" | tr '\n' ' ')" "repo wt-live " "the checkout's and the live worktree's folders stay, the rest go"
+  assert_file "$c/wt-live/debug/lib.rlib" "a live folder keeps what it built"
+  assert_grep 'build cache: removed merge-epic-x wt-gone wt-hand' "$FX/queue.log" "the drain says which it removed"
+
+  CASE="178b after a story, the folder of the worktree its launch removed goes"; fixture c178b
+  c="$FX/cargo-cache/t"; mkdir -p "$c/repo"
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1 INSTALL_CMD='mkdir -p "$FLEET_CARGO_CACHE/t/${PWD##*/}"'
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  assert_grep 'build cache: removed .*wt-900-review' "$FX/queue.log" "the reviewer's folder, made by its install, is removed"
+  assert_eq "$([[ -d "$c/wt-900" ]] && echo kept || echo gone)" "$([[ -d "$FX/wt-900" ]] && echo kept || echo gone)" "the builder's folder goes exactly when its worktree did"
+  assert_eq "$([[ -d "$c/repo" ]] && echo kept)" kept "the checkout's own folder stays"
 }
 
 for c in "${CASES[@]}"; do

@@ -20,6 +20,10 @@
 // waited; a drain that picks up a story is a `drain` span, and a drain held
 // back — a refused review, low memory, another launch — is a `held` mark.
 //
+// A cargo target's build folders live outside its worktrees
+// (lib/buildcache.ts). Every drain deletes those whose worktree is gone:
+// after the reap, and after each story, whose launch and merge removed some.
+//
 // Each story runs as a child process (`fleet launch <repo> <id>`, then, on a
 // computed PASS, `fleet merge <repo> <id>`) with stdio fully inherited — not
 // called in-process. That process boundary isolates one story's crash or Die
@@ -27,10 +31,11 @@
 // once per repo rather than looping over loaded configs in one process.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { buildCacheDir, pruneBuildCache } from './lib/buildcache.ts';
 import { Die } from './lib/die.ts';
 import { formatIsoMs, openEventLog } from './lib/events.ts';
 import { storyField } from './lib/frontmatter.ts';
-import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, pushQuiet, revListCount, upstreamBranch } from './lib/git.ts';
+import { fetchQuiet, gitDir, mergeAbort, mergeNoEditQuiet, pushQuiet, revListCount, upstreamBranch, worktreePaths } from './lib/git.ts';
 import { EXIT_AGENT_REFUSED, readKnobs, splitCommand } from './launch.ts';
 import { EXIT_LAUNCH_BUSY, launchLockHolder, withFleetLock } from './lib/lock.ts';
 import { log, out, warn } from './lib/log.ts';
@@ -133,6 +138,21 @@ export function refreshFromOrigin(root: string, pushStatus: string, lockWait: nu
   });
 }
 
+/** Deletes the repo's build folders whose worktree is gone
+ *  (lib/buildcache.ts); a worktree whose directory was deleted by hand is
+ *  gone, though git lists it until a prune. Never fails the drain: what
+ *  cannot be deleted is a warning, and the next drain tries again. */
+export function pruneBuildFolders(cfg: RepoConfig, env: NodeJS.ProcessEnv): void {
+  const dir = buildCacheDir(env, cfg.name);
+  if (dir === '') return;
+  try {
+    const removed = pruneBuildCache(dir, worktreePaths(cfg.root).filter((p) => existsSync(p)));
+    if (removed.length > 0) log(`build cache: removed ${removed.join(' ')} — their worktrees are gone`, TAG);
+  } catch (e) {
+    warn(`build cache: ${e instanceof Error ? e.message : String(e)} — the next drain tries again`, TAG);
+  }
+}
+
 /** `"$FLEET_REGISTRY_DIR"/*.env`, sorted the way a shell
  *  glob is: the walk order --all uses. */
 export function registeredRepos(fleetHome: string, env: NodeJS.ProcessEnv): string[] {
@@ -205,6 +225,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
     held(busyLine(launchLockHolder(root)));
     return 0;
   }
+  pruneBuildFolders(cfg, o.env);
 
   log('refreshing from origin before scan', TAG);
   refreshFromOrigin(root, knobs.pushStatus, knobs.lockWait);
@@ -318,6 +339,7 @@ export function runQueue(cfg: RepoConfig, o: RunQueueOptions): number {
         warn(`${id}: ended as '${status || 'unknown'}' (launcher exit ${rc})`, TAG);
         notify(`${id} ended as '${status || 'unknown'}' (launcher exit ${rc}) — that is not a state the queue expects`);
     }
+    pruneBuildFolders(cfg, o.env);
   }
 
   if (n >= max) warn(`stopped at the --max ceiling of ${max} stories`, TAG);

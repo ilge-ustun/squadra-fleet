@@ -963,3 +963,26 @@ manager's start (`OnStartupSec=2min`) and has no `Persistent`;
 `systemd/README.md` says how to see the failure after a reboot.
 
 **Enforced by:** `case_162_queue_timer_fires_after_any_boot`.
+
+### L-46 — build folders outside the worktrees filled the disk
+
+On 26 Oct the disk was 98% full: 151 of 154 GB, 3.5 GB free. 99 GB of it
+was `~/.cache/fleet-cargo/qr-desktop-scanner/`: about 34 Rust build folders,
+most of 3–4 GB, one for each worktree the fleet had made for qr since 21 Oct:
+`wt-NNN`, `wt-NNN-review`, `merge-*`. The qr config puts them outside the
+trees on purpose, so a tree made again at every head reuses what the last
+one compiled; its own comment said "clear ~/.cache/fleet-cargo now and
+then". Nobody did, and no check saw it. journald keeps 4 GB free, so the
+user journal shrank to 20 hours: the queue's log from 23 Oct 23:14 to 25
+Oct 16:12 was lost (no story ran then). The next qr story, two new folders,
+would likely have filled the disk and stopped every install, build and
+commit.
+
+**Lesson:** anything the fleet makes outside a worktree needs an owner that
+deletes it. "Now and then" in a comment is nobody's job.
+
+**Prevention:** by construction — each drain deletes the folders whose
+worktree is gone (`ts/src/lib/buildcache.ts`), after the reap and after
+each story.
+
+**Enforced by:** `case_178_drain_prunes_the_build_cache`.

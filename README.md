@@ -225,6 +225,12 @@ CARGO_CMD='export PATH="$HOME/.cargo/bin:$PATH" CARGO_TARGET_DIR="$HOME/.cache/f
 CARGO_PROBE_DIR=core/tests
 ```
 
+Each worktree gets its own build folder, outside the tree, so the reviewer's
+tree, made again at every head, reuses what the last head compiled. A folder
+is 3–4 GB and outlives its worktree, so each drain deletes the folders under
+`~/.cache/fleet-cargo/<repo>/` that no live worktree of the repo is named
+after (`ts/src/lib/buildcache.ts`, L-46). `FLEET_CARGO_CACHE` moves that root.
+
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
 (every patch, selector and `.result`), `probes/`, `reviewer.md`,
@@ -566,6 +572,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `REVIEWER_RETRY_MIN` | 60 | minutes until a refused review is tried again when no reset time is known |
 | `FALLBACK_REVIEWER_MODEL` | `opus` | the model Claude reviews with after `/fallback` |
 | `LAUNCH_MIN_FREE_MB` | 2500 | the memory (`MemAvailable`) a drain needs before it launches a story; below it the drain leaves the repo to its next one, saying so. One lane peaked at 1.8 GB. 0 turns the guard off; `FLEET_MEMINFO` is the file it reads (default `/proc/meminfo`) |
+| `FLEET_CARGO_CACHE` | `~/.cache/fleet-cargo` | where a cargo target's build folders live, one per worktree under the repo's name; each drain deletes those whose worktree is gone |
 | `AUTO_MERGE` | on | the queue merges a computed PASS into its epic |
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
@@ -622,6 +629,7 @@ ts/                 the harness, run by node as is:
   src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types events (the log) history journal (its backfill)
+                    buildcache
   fixtures/         the status and Machine-block goldens
 .nvmrc              the Node the units pin
 prompts/            the agents' prompts; README = the verdict contract
