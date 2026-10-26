@@ -3592,7 +3592,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_177_fleet_events
        case_178_drain_prunes_the_build_cache
        case_179_dashboard_bundle
-       case_180_dashboard_serve)
+       case_180_dashboard_serve
+       case_181_dashboard_page)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5532,6 +5533,27 @@ case_180_dashboard_serve() {
   out="$(cd "$FX" && bash "$FLEET/fleet" dashboard serve --host 0.0.0.0 2>&1)"; rc=$?
   assert_eq "$rc" 1 "exit 1"
   assert_contains "$out" "0.0.0.0 is not a loopback address" "and says why"
+}
+
+# The dashboard's page: its own files only, served under the server's
+# policy — the HTML loads app.js and style.css from the server, no file
+# names another host, and the script parses. Red while dashboard/ has no page.
+case_181_dashboard_page() {
+  CASE="181 the dashboard's page is its own files, served with its policy"; fixture c181
+  local f pid base out
+  for f in index.html app.js style.css icon.svg; do assert_file "$FLEET/dashboard/$f" "dashboard/$f is there"; done
+  assert_eq "$(node --check "$FLEET/dashboard/app.js" 2>&1; echo "rc=$?")" "rc=0" "app.js parses"
+  assert_eq "$(grep -l -E 'https?://' "$FLEET/dashboard/index.html" "$FLEET/dashboard/app.js" "$FLEET/dashboard/style.css" | tr '\n' ' ')" "" "no file names another host"
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  out="$(dash_get "$base/")"
+  assert_eq "$(head -1 <<< "$out")" "200 csp" "the page, with its policy"
+  assert_contains "$out" 'src="app.js"' "it loads its own script"
+  assert_contains "$out" 'href="style.css"' "and its own styles"
+  assert_eq "$(dash_get "$base/app.js" | head -1)" "200 csp" "the script is served"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 }
 
 for c in "${CASES[@]}"; do
