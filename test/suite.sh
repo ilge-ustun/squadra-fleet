@@ -3593,7 +3593,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_178_drain_prunes_the_build_cache
        case_179_dashboard_bundle
        case_180_dashboard_serve
-       case_181_dashboard_page)
+       case_181_dashboard_page
+       case_182_dashboard_unit)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5554,6 +5555,22 @@ case_181_dashboard_page() {
   assert_contains "$out" 'href="style.css"' "and its own styles"
   assert_eq "$(dash_get "$base/app.js" | head -1)" "200 csp" "the script is served"
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
+# The dashboard's unit: the server on its loopback port, and last in line
+# for memory, CPU and disk beside the drains and the other services on the
+# box. Red while systemd/ has no such unit.
+case_182_dashboard_unit() {
+  CASE="182 fleet-dashboard.service serves the dashboard, last in line for the machine"; fixture c182
+  local u="$FLEET/systemd/fleet-dashboard.service"
+  assert_file "$u" "the unit is in systemd/"
+  assert_grep '^ExecStart=.*/fleet dashboard serve --port 4300$' "$u" "it runs the server on its port"
+  assert_grep '^Environment=GIT_OPTIONAL_LOCKS=0$' "$u" "its git takes no lock a commit needs"
+  assert_grep '^OOMScoreAdjust=500$' "$u" "the kernel ends it first under memory pressure"
+  assert_grep '^MemoryMax=[0-9]+M$' "$u" "its memory has a ceiling"
+  assert_grep '^CPUWeight=20$' "$u" "it gets the CPU last"
+  assert_grep '^Restart=on-failure$' "$u" "a crash comes back"
+  assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
 }
 
 for c in "${CASES[@]}"; do
