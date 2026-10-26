@@ -24,6 +24,11 @@ swap (8 GB until 21 Oct, `vm.swappiness=10`) since the 20 Oct maintenance (2 CPU
 units' memory figures date from then). Users `ubuntu`
 (admin), `fleet` (the agents and every checkout under `~/work`), `hermes`.
 
+**Disk:** a cargo target's build folders are the large item, 3–4 GB for
+each worktree, in `~/.cache/fleet-cargo/<repo>/`; each drain deletes those
+whose worktree is gone (L-46). `df -h /` shows what is left; journald
+gives up its own history when less than 4 GB is free.
+
 **Installed under `fleet`:** Claude Code (it updates itself), Codex (an npm
 global under nvm; `fleet update-agents` updates it weekly), Node under nvm
 (the version in `.nvmrc`, which the units carry on `PATH`), flock
@@ -185,13 +190,15 @@ deploys — belongs to that target, not here.
   Still open: a suite run against the `/testdeploy` URL after a test
   deploy, the live-data smoke, is not built.
 
-- **The journal keeps about five days.** On 23 Oct 2026 the queue units'
-  journal began on 18 Oct; an hour before, it began on 11 Oct. Each drain
-  prints the whole `fleet status` table every fifteen minutes (about 135
-  lines for khaita), and journald rotates the older days away. `fleet events
-  --journal` reads only what is left. Open: print the table only when a
-  drain ran a story, or save the journal's backfill
-  (`fleet events <repo> --journal > file`) before it goes.
+- **The journal keeps little.** On 26 Oct 2026 the user journal held 20
+  hours. Two causes. The disk was 98% full (L-46), and journald keeps 4 GB
+  free, so the journal could not grow. And `fleet-remote-control@qr-desktop-scanner`
+  writes its six-line status screen every second, 96% of the journal's
+  lines; the drains' status tables are 3%. `fleet events --journal` reads
+  only what is left. The queue's lines from 18 Oct to 26 Oct are saved in
+  each target's `.runs/journal-2026-10.log`, except 23 Oct 23:14 to 25 Oct
+  16:12, when no story ran. Open: send the remote-control unit's stdout
+  nowhere (`StandardOutput=null`).
 - **The event log is machine-local.** `.runs/events.jsonl` is gitignored,
   so another clone of a target has no log. Nothing rotates it; one story
   writes about a hundred lines. `fleet reset` keeps it (it removes
