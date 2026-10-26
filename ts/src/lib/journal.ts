@@ -11,6 +11,8 @@
 // say stays unsaid: a reviewer's end is the Machine block's seconds after its
 // start (source `machine`), or unknown; a launch the journal loses without a
 // word — a reboot — keeps its spans open.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { formatIsoMs, runStamp, type EventKind, type EventSource, type EventValue, type FleetEvent } from './events.ts';
 import { runSync } from './proc.ts';
 
@@ -257,4 +259,39 @@ export function readJournal(repo: string, since?: string): string {
     '--grep', '^(\\x1b\\[[0-9;]*m)?(==>|!!|XX) |fleet-queue', ...(since !== undefined ? ['--since', since] : []),
   ], { maxBuffer: 256 * 1024 * 1024 });
   return r.status === 0 ? r.stdout : '';
+}
+
+/** The journal's copies a human saved in a target's `.runs/` before
+ *  journald rotated them away: `journal-*.log`, as `journalctl -o
+ *  short-iso-precise` printed them (docs/operations.md), by name. */
+export function savedJournals(root: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(join(root, '.runs')).filter((n) => /^journal-.*\.log$/.test(n)).sort();
+  } catch {
+    return [];
+  }
+  return names.map((n) => {
+    try {
+      return readFileSync(join(root, '.runs', n), 'utf8');
+    } catch {
+      return '';
+    }
+  });
+}
+
+/** Several journal texts as one: each line once, in time order — by the
+ *  instant, not the text, since the offset changes with the clocks. */
+export function mergeJournals(texts: readonly string[]): string {
+  const seen = new Set<string>();
+  const lines: { t: number; l: string }[] = [];
+  for (const text of texts) {
+    for (const l of text.split('\n')) {
+      if (l === '' || seen.has(l)) continue;
+      seen.add(l);
+      const t = Date.parse(l.slice(0, l.indexOf(' ')));
+      lines.push({ t: Number.isNaN(t) ? -Infinity : t, l });
+    }
+  }
+  return lines.sort((a, b) => a.t - b.t).map((x) => x.l).join('\n');
 }

@@ -5440,6 +5440,15 @@ case_177_fleet_events() {
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch") | .event + " " + .source + " " + (.result // "-")' | tr '\n' ',')" "start git -,end git PASS," "the launch, from git"
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="verdict") | .source + " " + .result' | tr '\n' ',')" "machine PASS," "the verdict, from the Machine block"
   assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t --bogus 2>&1 >/dev/null | grep -c 'usage: fleet events')" 1 "an unknown flag is the usage"
+
+  # journald rotates; a human saves the queue's lines in .runs/journal-*.log
+  # first (docs/operations.md), and --journal reads the copies with it.
+  CASE="177d --journal reads the journal's copies saved in .runs/journal-*.log"
+  printf '%s\n' \
+    '2026-10-18T04:21:38.100000+02:00 box fleet-queue-t[4322]: ==> story 900' \
+    '2026-10-18T04:21:39.100000+02:00 box fleet-queue-t[4322]: ==> round 1 of 2' > "$REPO/.runs/journal-2026-10.log"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --journal 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.source=="journal") | .pass + " " + .event' | tr '\n' ',')" "launch start,round start," "the saved launch and its round, from the copy"
 }
 
 # A cargo target keeps one build folder per worktree outside it,
