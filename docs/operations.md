@@ -190,15 +190,15 @@ deploys — belongs to that target, not here.
   Still open: a suite run against the `/testdeploy` URL after a test
   deploy, the live-data smoke, is not built.
 
-- **The journal keeps little.** On 26 Oct 2026 the user journal held 20
-  hours. Two causes. The disk was 98% full (L-46), and journald keeps 4 GB
-  free, so the journal could not grow. And `fleet-remote-control@qr-desktop-scanner`
-  writes its six-line status screen every second, 96% of the journal's
-  lines; the drains' status tables are 3%. `fleet events --journal` reads
-  only what is left. The queue's lines from 18 Oct to 26 Oct are saved in
-  each target's `.runs/journal-2026-10.log`, except 23 Oct 23:14 to 25 Oct
-  16:12, when no story ran. Open: send the remote-control unit's stdout
-  nowhere (`StandardOutput=null`).
+- **The journal kept little.** On 26 Oct 2026 the user journal held 20
+  hours. Two causes, both removed. The disk was 98% full (L-46), and
+  journald keeps 4 GB free, so the journal could not grow. And
+  `fleet-remote-control@qr-desktop-scanner` wrote its six-line screen every
+  second, 96% of the journal's lines; its stdout now goes nowhere
+  (`systemd/README.md`). The drains' status tables are 3%. `fleet events
+  --journal` reads only what is left. The queue's lines from 18 Oct to 26
+  Oct are saved in each target's `.runs/journal-2026-10.log`, except 23 Oct
+  23:14 to 25 Oct 16:12, when no story ran.
 - **The event log is machine-local.** `.runs/events.jsonl` is gitignored,
   so another clone of a target has no log. Nothing rotates it; one story
   writes about a hundred lines. `fleet reset` keeps it (it removes

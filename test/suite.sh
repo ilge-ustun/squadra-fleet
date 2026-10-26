@@ -4895,6 +4895,17 @@ EOF
   assert_grep '^ExecStart=.*/fleet remote-control %i$' "$t" "the instance is the repo"
   assert_grep '^Restart=always$' "$t" "it comes back after any exit"
   assert_grep '^WantedBy=default.target$' "$t" "started with the user manager"
+
+  # 26 Oct: the server draws its six-line screen again every second, and on
+  # stdout to the journal that was 96% of the user journal's lines, which
+  # pushed the queue's history out. A per-unit LogRateLimitBurst does not
+  # reach a user unit's journal (tried on systemd 255). Red while either
+  # unit sends stdout to the journal.
+  CASE="163f neither unit keeps the server's screen; its errors stay in the journal"
+  for u in "$u" "$t"; do
+    assert_grep '^StandardOutput=null$' "$u" "${u##*/}: the screen goes nowhere"
+    assert_grep '^StandardError=journal$' "$u" "${u##*/}: its errors are kept"
+  done
 }
 
 # 20 Oct. A second project will drain beside khaita on a 7.9 GB box, and one

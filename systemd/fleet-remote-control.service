@@ -28,7 +28,10 @@ ExecStart=/bin/bash /home/fleet/work/fleet/fleet remote-control
 Restart=always
 RestartSec=30
 
-StandardOutput=journal
+# stdout is the server's screen, drawn again every second: in the journal it
+# was 96% of the lines and pushed the queue's history out (26 Oct). Errors
+# go to stderr and stay; to see the screen, run the command in a terminal.
+StandardOutput=null
 StandardError=journal
 SyslogIdentifier=fleet-remote-control
 
