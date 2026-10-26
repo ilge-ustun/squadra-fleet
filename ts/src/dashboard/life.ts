@@ -127,7 +127,9 @@ function titleOf(x: Item): string {
     case 'baseline': return name === 'all' ? `Baseline${str(f['head']) !== undefined ? ` at ${String(f['head'])}` : ''}` : name;
     case 'reviewer': return 'Reviewer';
     case 'tdd': return name === 'check' ? `check ${String(f['check'] ?? '')}`.trim() : name;
-    case 'mutation': case 'probe': return `${name}${(x.e ?? x.s)?.['reused'] === true ? " (the tdd check's class stands)" : ''}`;
+    case 'mutation': case 'probe':
+      if (name === 'all') return f.pass === 'probe' ? 'Probes' : 'Mutations';
+      return `${name}${(x.e ?? x.s)?.['reused'] === true ? " (the tdd check's class stands)" : ''}`;
     case 'writer': return 'Story writer drafts the story';
     case 'lint': return 'fleet lint-story';
     case 'merge': return `Merge into ${String(f['into'] ?? '?')}`;
@@ -194,7 +196,8 @@ function folded(pass: string, xs: readonly Item[]): PassRow {
   if (xs.length === 1) return pass === 'tdd' ? { ...(kids[0] as PassRow), title: 'tdd check' } : kids[0] as PassRow;
   const red = kids.filter((k) => k.result === 'RED').length;
   const reused = kids.filter((k) => k.title.endsWith("(the tdd check's class stands)")).length;
-  const word = pass === 'mutation' ? `Mutations — ${xs.length} run, ${reused} taken from the tdd check` : pass === 'probe' ? `Probes — ${xs.length} run` : `tdd check — ${xs.length} runs`;
+  const word = pass === 'mutation' ? `Mutations — ${xs.length} run, ${reused} taken from the tdd check` : pass === 'probe' ? `Probes — ${xs.length} run`
+    : `tdd check — ${xs.length} ${kids.every((k) => k.name === 'check') ? 'runs' : 'pairs'}`;
   const first = kids[0] as PassRow;
   const last = kids.at(-1) as PassRow;
   const p: PassRow = { pass, title: word, start: first.start, end: last.end, result: pass === 'probe' ? (kids.every((k) => k.result === 'GREEN') ? 'GREEN' : `${kids.filter((k) => k.result !== 'GREEN').length} not GREEN`) : red === kids.length ? 'RED' : `${red}/${kids.length} RED`, children: kids };
@@ -215,7 +218,10 @@ function rowsOf(list: readonly Item[], question: string | null): Row[] {
     if (f.pass === 'tdd' || f.pass === 'mutation' || f.pass === 'probe') {
       const all = sorted.filter((y) => head(y).pass === f.pass && y.m === undefined);
       all.forEach((y) => used.add(y));
-      out.push({ kind: 'row', p: folded(f.pass, all) });
+      // The Machine block's span over the whole phase stands only when no
+      // run of it has its own.
+      const each = all.filter((y) => head(y).name !== 'all');
+      out.push({ kind: 'row', p: folded(f.pass, each.length > 0 ? each : all) });
       continue;
     }
     if (f.pass === 'baseline' && f.name === 'all' && f.span !== undefined) {
@@ -288,6 +294,8 @@ export function storyLife(o: LifeInput): Life {
   // The launches, each with its rounds and what followed it.
   const launches = all.filter((x) => x.s?.pass === 'launch');
   const launchRuns = new Set(launches.map((x) => head(x).run_id));
+  /** A merge is its own process: its lines are the merge's, never a launch's. */
+  const mergeRuns = new Set(all.filter((x) => ['merge', 'land'].includes(head(x).pass)).map((x) => head(x).run_id));
   const spans: { from: number; to: number }[] = launches.map((x, i) => ({ from: tOf(x) - 2000, to: i + 1 < launches.length ? tOf(launches[i + 1] as Item) - 2000 : Infinity }));
   const claimed = new Set<Item>(launches);
   launches.forEach((L, i) => {
@@ -295,12 +303,12 @@ export function storyLife(o: LifeInput): Life {
     const S = L.s as FleetEvent;
     const inWindow = (x: Item): boolean => tOf(x) >= w.from && tOf(x) < w.to;
     const member = (x: Item): boolean => !claimed.has(x) && (head(x).run_id === S.run_id
-      || (!launchRuns.has(head(x).run_id) && inWindow(x) && ['machine', 'mtime', 'journal'].includes(head(x).source) && !['merge', 'land', 'queue', 'writer', 'lint'].includes(head(x).pass)));
+      || (!launchRuns.has(head(x).run_id) && !mergeRuns.has(head(x).run_id) && inWindow(x) && ['machine', 'mtime', 'journal'].includes(head(x).source) && !['queue', 'writer', 'lint'].includes(head(x).pass)));
     const mine = all.filter(member);
     mine.forEach((x) => claimed.add(x));
     const merges = all.filter((x) => !claimed.has(x) && ['merge', 'land'].includes(head(x).pass) && inWindow(x));
-    const mergeRuns = new Set(merges.map((x) => head(x).run_id));
-    const mergeItems = all.filter((x) => !claimed.has(x) && mergeRuns.has(head(x).run_id));
+    const myMerges = new Set(merges.map((x) => head(x).run_id));
+    const mergeItems = all.filter((x) => !claimed.has(x) && myMerges.has(head(x).run_id));
     mergeItems.forEach((x) => claimed.add(x));
 
     const pre = mine.filter((x) => head(x).round === undefined && head(x).pass !== 'round').map((x) => passRow(x));
@@ -318,7 +326,7 @@ export function storyLife(o: LifeInput): Life {
       if (machine !== undefined) r.machine = machine;
       return r;
     });
-    const after = [...mergeRuns].map((run) => {
+    const after = [...myMerges].map((run) => {
       const ofRun = mergeItems.filter((x) => head(x).run_id === run);
       const main = ofRun.find((x) => ['merge', 'land'].includes(head(x).pass)) as Item;
       const p = passRow(main);

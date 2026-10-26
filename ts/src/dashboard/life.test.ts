@@ -112,4 +112,40 @@ describe('storyLife', () => {
   });
 });
 
+describe('storyLife, from the journal and the files', () => {
+  const J = (ts: string, f: Partial<FleetEvent> & { pass: string; event: FleetEvent['event'] }): FleetEvent => ({ v: 1, ts, run_id: 'k.135.J', repo: 'k', story: '135', source: 'journal', ...f } as FleetEvent);
+  const events: FleetEvent[] = [
+    J(T('11:00:00'), { pass: 'launch', event: 'start', span: 'launch', pid: 77 }),
+    J(T('11:00:01'), { pass: 'round', event: 'start', span: 'r1', round: 1 }),
+    J(T('11:01:00'), { pass: 'tdd', event: 'start', span: 'r1.tdd.1.AC1-x', round: 1, name: 'AC1-x', check: 1 }),
+    J(T('11:02:00'), { pass: 'tdd', event: 'end', span: 'r1.tdd.1.AC1-x', round: 1, name: 'AC1-x', result: 'RED' }),
+    J(T('11:02:00'), { pass: 'tdd', event: 'start', span: 'r1.tdd.1.AC2-y', round: 1, name: 'AC2-y', check: 1 }),
+    J(T('11:03:00'), { pass: 'tdd', event: 'end', span: 'r1.tdd.1.AC2-y', round: 1, name: 'AC2-y', result: 'RED' }),
+    // The Machine block's whole mutation phase, and each mutation from its file's time.
+    { v: 1, ts: T('11:10:00'), run_id: 'k.135.M', repo: 'k', story: '135', span: 'r1.mut', round: 1, pass: 'mutation', event: 'start', name: 'all', source: 'machine' },
+    { v: 1, ts: T('11:10:00'), run_id: 'k.135.M', repo: 'k', story: '135', span: 'r1.mut.AC1-a', round: 1, pass: 'mutation', event: 'start', name: 'AC1-a', source: 'machine' },
+    { v: 1, ts: T('11:11:00'), run_id: 'k.135.M', repo: 'k', story: '135', span: 'r1.mut.AC1-a', round: 1, pass: 'mutation', event: 'end', name: 'AC1-a', result: 'RED', source: 'mtime' },
+    { v: 1, ts: T('11:12:00'), run_id: 'k.135.M', repo: 'k', story: '135', span: 'r1.mut', round: 1, pass: 'mutation', event: 'end', name: 'all', source: 'machine' },
+    J(T('11:12:00'), { pass: 'verdict', event: 'mark', round: 1, result: 'PASS' }),
+    J(T('11:12:00'), { pass: 'round', event: 'end', span: 'r1', round: 1, result: 'PASS' }),
+    J(T('11:12:01'), { pass: 'launch', event: 'end', span: 'launch', result: 'PASS' }),
+    // The queue's merge, another process: its lines are the merge's.
+    J(T('11:12:30'), { pass: 'merge', event: 'start', span: 'merge', run_id: 'k.135.Q', into: 'epic/cards' }),
+    J(T('11:12:31'), { pass: 'baseline', event: 'mark', run_id: 'k.135.Q', name: 'merge', result: 'SKIPPED', reason: 'the round stands' }),
+    J(T('11:12:40'), { pass: 'merge', event: 'end', span: 'merge', run_id: 'k.135.Q', into: 'epic/cards', result: 'MERGED' }),
+  ];
+  const life = storyLife({ story: story({ mergedAt: null, landedAt: null, history: story().history.slice(0, 4) }), events, machine: {}, baseBranch: 'develop', alive: new Set() });
+  const l = life.entries.find((e): e is { kind: 'launch'; l: LaunchView } => e.kind === 'launch')?.l;
+
+  it('a merge\'s own lines are the merge\'s, not the launch\'s', () => {
+    expect(l?.pre).toEqual([]);
+    expect(l?.after.map((p) => `${p.title} ${p.result} · ${p.reason}`)).toEqual(['Merge into epic/cards MERGED · post-merge baseline SKIPPED — the round stands']);
+  });
+
+  it('the tdd check\'s pairs, and the mutations without the Machine block\'s total', () => {
+    const rows = l?.rounds[0]?.rows.flatMap((x) => (x.kind === 'row' ? [x.p] : [])) ?? [];
+    expect(rows.map((p) => `${p.title} ${p.result}`)).toEqual(['tdd check — 2 pairs RED', 'AC1-a RED']);
+  });
+});
+
 const ms = (iso: string): number => Date.parse(iso);
