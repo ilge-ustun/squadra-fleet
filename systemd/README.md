@@ -168,6 +168,42 @@ The models each round actually ran on are in the review's Machine block
 (`builder:  sonnet → claude-sonnet-5`, `reviewer: codex → gpt-6-astra`), so
 a release that changes behaviour shows up in the verdicts' history.
 
+### The dashboard (a service, no timer)
+
+`fleet-dashboard.service` runs `fleet dashboard serve --port 4300`: the
+read-only dashboard (`README.md`, "The dashboard") on `127.0.0.1:4300`, and
+only there.
+
+```bash
+ln -sf ~/work/fleet/systemd/fleet-dashboard.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fleet-dashboard.service
+curl -s 127.0.0.1:4300/api/health    # {"ok":true,…} after its first read, about 10 s
+```
+
+The outside reaches it through Caddy, with a password. That is root's edit,
+once, as `ubuntu`: a site of its own, so the test URL's site and the song
+service's routes stay as they are. Caddy 2.6 calls the directive
+`basicauth`; `caddy hash-password` makes the hash.
+
+```
+fleet.179-237-101-204.sslip.io {
+	basicauth {
+		<user> <hash>
+	}
+	reverse_proxy 127.0.0.1:4300
+}
+```
+
+Then `sudo caddy validate --config /etc/caddy/Caddyfile` and `sudo
+systemctl reload caddy`. A reload lets every request in flight finish, and
+Caddy refuses a file with an error and keeps the old one running. It gets
+the new name's certificate by itself.
+
+The server keeps the code and the page it loaded: after the live checkout
+moves, `systemctl --user restart fleet-dashboard`. Nothing waits for it, and
+a restart loses nothing.
+
 ### Before the bot pair will do anything
 
 Create the bot with **@BotFather** on Telegram (`/newbot`), then send it any
@@ -245,6 +281,9 @@ systemctl --user stop fleet-queue@<repo>.timer     # re-enable with `start`
 | transient | `fleet-test-deploy` | the test server, started by `fleet test-deploy` with `systemd-run --user`; no unit file, gone after a reboot. `fleet-test-deploy-build` is `/testdeploy`'s build, one at a time by its fixed name |
 | `fleet-remote-control.service` | `Restart=always`, `StartLimitIntervalSec=0` | the server is there whenever the app is opened, whatever ended it, and a long network outage does not leave the unit failed |
 | `bin/remote-control.sh` | `--capacity 2` | each session took ~250 MB beside the server's ~150 MB, on a box where a drain may take 2.5 GB |
+| `fleet-dashboard.service` | `--port 4300`, loopback only | Caddy publishes it with a password; the server refuses any other address |
+| `fleet-dashboard.service` | `OOMScoreAdjust=500` `CPUWeight=20` `IOWeight=20` `Nice=10` `MemoryHigh=400M` `MemoryMax=512M` | last in line beside the drains, the test server and the song service. Measured 26 Oct: the server ~120 MB; ~210 MB more while a child builds the next bundle |
+| `fleet-dashboard.service` | `GIT_OPTIONAL_LOCKS=0` | its git never holds the index lock that a launcher's or the bot's commit needs |
 | `fleet-bot.timer` | `Persistent=false` | a missed poll is not worth catching up; the offset means nothing is lost by being late |
 
 ## Promoting stories remotely
