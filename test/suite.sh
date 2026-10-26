@@ -3590,7 +3590,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_175_answers_and_epics_are_marked
        case_176_revert_reset_and_test_deploy_are_logged
        case_177_fleet_events
-       case_178_drain_prunes_the_build_cache)
+       case_178_drain_prunes_the_build_cache
+       case_179_dashboard_bundle)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3677,7 +3678,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
+  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents dashboard; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5477,6 +5478,28 @@ case_178_drain_prunes_the_build_cache() {
   assert_grep 'build cache: removed .*wt-900-review' "$FX/queue.log" "the reviewer's folder, made by its install, is removed"
   assert_eq "$([[ -d "$c/wt-900" ]] && echo kept || echo gone)" "$([[ -d "$FX/wt-900" ]] && echo kept || echo gone)" "the builder's folder goes exactly when its worktree did"
   assert_eq "$([[ -d "$c/repo" ]] && echo kept)" kept "the checkout's own folder stays"
+}
+
+# fleet dashboard bundle: everything the dashboard shows, read once — the
+# catalog, the events with their backfill, each round's Machine block, and
+# the present. Read-only. Red while the fleet has no dashboard command.
+case_179_dashboard_bundle() {
+  CASE="179 fleet dashboard bundle reads every repo, and writes nothing"; fixture c179
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local before out rc
+  before="$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard bundle 2>"$FX/bundle.err")"; rc=$?
+  assert_eq "$rc" 0 "exit 0"
+  assert_eq "$(printf '%s' "$out" | jq -r '[.repos[].name] | join(",")')" t "the registered repo"
+  assert_eq "$(printf '%s' "$out" | jq -r '.repos[0].stories[] | select(.id=="900") | [.history[].kind] | join(",")')" "in_progress,done" "its story's history, from git"
+  assert_eq "$(printf '%s' "$out" | jq -r '.repos[0].stories[] | select(.id=="900") | .rounds[0].computed + " " + (.rounds[0].timing.total | type)')" "PASS number" "its round, from the Machine block"
+  assert_eq "$(printf '%s' "$out" | jq -r '[.events.t[] | select(.source=="log" and .pass=="launch") | .event] | join(",")')" "start,end" "the log's launch"
+  assert_eq "$(printf '%s' "$out" | jq -r '.machine.t["900"]["1"] | startswith("baseline:")')" true "and the round's Machine block"
+  assert_eq "$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)" "$before" "nothing was written"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard bogus 2>&1)"; rc=$?
+  assert_eq "$rc" 1 "an unknown subcommand fails"
+  assert_contains "$out" "usage: fleet dashboard" "with the usage"
 }
 
 for c in "${CASES[@]}"; do
