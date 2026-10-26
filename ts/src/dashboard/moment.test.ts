@@ -61,10 +61,12 @@ describe('momentAt', () => {
     expect(m.repos['k']?.lock).toEqual({ known: true, held: true, pid: 4242, what: 'launch 140' });
   });
 
-  it('a launch the unit killed stays dead until the story moves on', () => {
-    const killed = [...launch, ev(T('11:25'), { pass: 'launch', event: 'end', span: 'launch', story: '140', result: 'KILLED', reason: "Main process exited, code=killed, status=9/KILL", source: 'journal' })];
+  it('a launch the unit killed stays dead until the story moves on, in the pass it died in', () => {
+    // The journal ends every span the unit's death left open, at its time.
+    const why = 'Main process exited, code=killed, status=9/KILL';
+    const killed = [...launch, ...['r1.baseline.1', 'r1', 'launch'].map((span) => ev(T('11:25'), { pass: span === 'launch' ? 'launch' : span === 'r1' ? 'round' : 'baseline', event: 'end', span, story: '140', result: 'KILLED', reason: why, source: 'journal' }))];
     const m = momentAt({ repos: [repo([running])], events: { k: killed }, now: NOW, generatedAt: T('18:00'), at: T('12:00') });
-    expect(m.repos['k']?.running['140']?.dead).toEqual({ ts: T('11:25'), src: 'journal', why: 'Main process exited, code=killed, status=9/KILL' });
+    expect(m.repos['k']?.running['140']).toMatchObject({ round: 1, pass: 'baseline', name: 'all', since: T('11:20'), dead: { ts: T('11:25'), src: 'journal', why } });
   });
 
   it('why a story stopped: its verdict, a timeout, a question', () => {

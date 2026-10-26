@@ -141,8 +141,11 @@ function runningAt(o: { story: (id: string) => CatalogStory | undefined; state: 
       }
     }
     // The innermost span open at t: the last one started and not yet ended.
-    const ended = new Set(o.events.filter((e) => e.run_id === L.run_id && e.event === 'end' && ms(e.ts) <= o.t).map((e) => e.span));
-    const open = o.events.filter((e) => e.run_id === L.run_id && e.event === 'start' && e.pass !== 'launch' && ms(e.ts) <= o.t && !ended.has(e.span));
+    // A launch that died is shown in the pass it died in: what was open just
+    // before its death, which ended every span with it.
+    const tIn = v.dead?.ts != null ? ms(v.dead.ts) - 1 : o.t;
+    const ended = new Set(o.events.filter((e) => e.run_id === L.run_id && e.event === 'end' && ms(e.ts) <= tIn).map((e) => e.span));
+    const open = o.events.filter((e) => e.run_id === L.run_id && e.event === 'start' && e.pass !== 'launch' && ms(e.ts) <= tIn && !ended.has(e.span));
     const rounds = open.filter((e) => e.pass === 'round');
     const inner = open.filter((e) => e.pass !== 'round').at(-1) ?? rounds.at(-1);
     const round = rounds.at(-1)?.round ?? inner?.round;
