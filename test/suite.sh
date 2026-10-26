@@ -3591,7 +3591,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_176_revert_reset_and_test_deploy_are_logged
        case_177_fleet_events
        case_178_drain_prunes_the_build_cache
-       case_179_dashboard_bundle)
+       case_179_dashboard_bundle
+       case_180_dashboard_serve)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5500,6 +5501,37 @@ case_179_dashboard_bundle() {
   out="$(cd "$FX" && bash "$FLEET/fleet" dashboard bogus 2>&1)"; rc=$?
   assert_eq "$rc" 1 "an unknown subcommand fails"
   assert_contains "$out" "usage: fleet dashboard" "with the usage"
+}
+
+# fleet dashboard serve: the page and its JSON on a loopback port, read-only
+# — GET and HEAD only, a fixed list of routes, nothing from the disk but the
+# page's own files. Red while the dashboard has no server.
+dash_get() {                          # dash_get <url> [method] → "<status> <csp?>" then the body
+  node -e 'const [u, m] = process.argv.slice(1); fetch(u, { method: m || "GET" }).then(async (r) => { process.stdout.write(`${r.status}${r.headers.get("content-security-policy") ? " csp" : ""}\n${await r.text()}`); })' "$@"
+}
+case_180_dashboard_serve() {
+  CASE="180 fleet dashboard serve answers the page and the fleet, on loopback, read-only"; fixture c180
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local before pid base out rc
+  before="$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l)"
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  assert_eq "$(dash_get "$base/api/health" | head -1)" "200 csp" "an answer, with its policy"
+  assert_eq "$(dash_get "$base/api/catalog" | tail -n +2 | jq -r '.repos[0].name')" t "the catalog names the repo"
+  assert_eq "$(dash_get "$base/api/story?repo=t&id=900" | tail -n +2 | jq -r '.story.id + " " + (.life.entries | map(.kind) | index("launch") | type)')" "900 number" "a story's life holds its launch"
+  assert_eq "$(dash_get "$base/api/moment" | tail -n +2 | jq -r '.now')" true "the moment is now"
+  assert_eq "$(dash_get "$base/api/catalog" POST | head -1 | cut -d" " -f1)" 405 "a POST is refused"
+  assert_eq "$(dash_get "$base/../repos/t.env" | head -1 | cut -d" " -f1)" 404 "no path reaches the disk"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_eq "$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l)" "$before" "nothing was written"
+
+  CASE="180b a host that is not loopback is refused"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard serve --host 0.0.0.0 2>&1)"; rc=$?
+  assert_eq "$rc" 1 "exit 1"
+  assert_contains "$out" "0.0.0.0 is not a loopback address" "and says why"
 }
 
 for c in "${CASES[@]}"; do
