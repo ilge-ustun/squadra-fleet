@@ -142,6 +142,11 @@ started in `~` had, `~/work/.claude/settings.local.json` names it:
 
 `systemctl --user restart fleet-remote-control` ends every open session.
 
+The server's stdout is its screen, drawn again every second; in the journal
+it was 96% of the lines and pushed the queue's history out, so both units
+send it nowhere (`StandardOutput=null`). Its errors, on stderr, stay in the
+journal. To see the screen, run `fleet remote-control [repo]` in a terminal.
+
 #### One coordinator per project
 
 `fleet-remote-control@<repo>.service` runs `fleet remote-control <repo>`: a
@@ -203,7 +208,7 @@ systemctl --user list-timers 'fleet-*'           # when they next fire
 journalctl --user -u fleet-queue@khaita -f              # live (a repo's drains)
 journalctl --user -u 'fleet-queue@*' --since today      # what every repo's drain did
 journalctl --user -u fleet-bot --since today     # what was asked of it
-journalctl --user -u fleet-remote-control -b     # the Remote Control server since boot
+journalctl --user -u fleet-remote-control -b     # the Remote Control server's starts, exits and errors since boot
 ./fleet status <repo>                            # where every story of one repo stands
 ```
 
