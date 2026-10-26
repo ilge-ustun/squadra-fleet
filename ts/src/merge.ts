@@ -20,10 +20,17 @@
 // only; a seed file that cannot be copied is a die, as in the launcher; a
 // story with no review or no verdict line is refused in words. No fleet lock
 // here: the bot holds it around this command.
+//
+// Each merge is a span in the target's .runs/events.jsonl (lib/events.ts):
+// `merge` (a story into its epic), `land` (a story onto the integration
+// branch) or `epic_merge`, ended MERGED with the sha, ALREADY, PR, CONFLICT,
+// RED or FAILED; the post-merge baseline's steps inside it, or a SKIPPED
+// mark when the round's baseline stands.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { baselineCommands, baselineGreen, baselineLine, runMergeBaseline, type BaselineCommands } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { recordMergedSha } from './lib/frontmatter.ts';
 import { readLastRound, type LastRound } from './lib/review.ts';
 import {
@@ -196,10 +203,21 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     if (isDir(mwt)) worktreeRemoveForce(root, mwt);
   };
   o.onExit(cleanup);
+  const ev = openEventLog({
+    root, repo: cfg.name, subject: logId, story: a.mode === 'story' ? a.id : undefined, epic: a.mode === 'epic' ? a.id : undefined, warn,
+  });
+  o.onExit(() => ev.endOpen({ result: 'KILLED', reason: 'the merge was stopped by a signal' }));
+  /** How the merge ended, for its end event. */
+  let outcome = '';
+  ev.start('merge', a.mode === 'epic' ? 'epic_merge' : a.land ? 'land' : 'merge');
   try {
     return run();
+  } catch (e) {
+    ev.endOpen({ result: outcome || 'FAILED', exit: 1, reason: e instanceof Error ? e.message : String(e) });
+    throw e;
   } finally {
     cleanup();
+    ev.endOpen({ result: outcome || 'ENDED' });
   }
 
   function run(): number {
@@ -233,8 +251,10 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       mergeRef = `origin/${branch}`;
       if (fetch(root, 'origin') !== 0) throw new Die('fetch failed');
       if (!refExists(root, `origin/${branch}`)) throw new Die(`origin has no ${branch}`);
+      ev.context({ branch, into: base });
       if (isAncestor(root, `origin/${branch}`, `origin/${base}`)) {
         log(`${branch} is already in ${base}`);
+        outcome = 'ALREADY';
         return 0;
       }
     } else {
@@ -244,9 +264,11 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       if (st.stories.length !== 1) throw new Die(`status did not report exactly one story for ${id}`);
       const row = st.stories[0]!;
       const r = refusal(row, { id, land: a.land, baseBranch: cfg.baseBranch, repoName: cfg.name });
+      ev.context({ epic: row.base.startsWith('epic/') ? row.base : undefined, branch: row.branch, into: row.base });
       if (r.kind === 'die') throw new Die(r.message);
       if (r.kind === 'already') {
         log(`${id} is already merged into ${row.base}`);
+        outcome = 'ALREADY';
         return 0;
       }
       branch = row.branch;
@@ -274,6 +296,7 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       if (r.status !== 0) throw new Die(`PR_CMD failed:\n${text}`);
       out(`${text}\n`);
       log(`nothing merged here — the request is merged on the host and lands in origin/${base}`);
+      outcome = 'PR';
       return 0;
     }
 
@@ -291,6 +314,7 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     mkdirSync(`${root}/.runs`, { recursive: true });
     if (mergeNoFf(mwt, mergeRef, `merge(${id}): ${branch} into ${base}`, `${root}/.runs/${logId}-merge.log`) !== 0) {
       mergeAbort(mwt);
+      outcome = 'CONFLICT';
       throw new Die(`${branch} does not merge cleanly into ${base} — a human has to resolve it`);
     }
 
@@ -298,13 +322,18 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
     const reuse = reuseOfReview();
     if (reuse.reuse) {
       log(`post-merge baseline: SKIPPED — the merged tree is the tree round ${reuse.round} checked GREEN at ${short(reuse.head)}, with the same commands`);
+      ev.mark('baseline', { name: 'merge', result: 'SKIPPED', reason: `the merged tree is the tree round ${reuse.round} checked GREEN at ${short(reuse.head)}` });
     } else {
       log(`post-merge baseline: running — ${reuse.why}`);
       seedMergeWorktree(root, mwt, cfg.seedFiles);
       log('installing deps in the merge worktree');
-      if (runBashTo(cfg.installCmd, { cwd: mwt, logFile: `${root}/.runs/${logId}-merge-install.log` }) !== 0) {
+      ev.start('merge.install', 'install', { name: 'merge', evidence: `.runs/${logId}-merge-install.log` });
+      const installed = runBashTo(cfg.installCmd, { cwd: mwt, logFile: `${root}/.runs/${logId}-merge-install.log` });
+      ev.end('merge.install', { result: installed === 0 ? 'OK' : 'FAILED', exit: installed });
+      if (installed !== 0) {
         throw new Die(`install failed in the merge worktree — see .runs/${logId}-merge-install.log`);
       }
+      ev.start('merge.baseline', 'baseline', { name: 'merge', reason: reuse.why });
       const b = runMergeBaseline({
         wt: mwt,
         rawJson: `${root}/.runs/${logId}-merge-baseline.json`,
@@ -317,9 +346,15 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
         lintCmd: cfg.lintCmd,
         ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
         ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
+        onStep: (step, colour) => {
+          if (colour === undefined) ev.start(`merge.baseline.${step}`, 'baseline', { name: step, evidence: `.runs/${logId}-merge-${step}.log` });
+          else ev.end(`merge.baseline.${step}`, { result: colour });
+        },
       });
       log(`post-merge baseline: ${baselineLine(b)}`);
+      ev.end('merge.baseline', { result: baselineGreen(b) ? 'GREEN' : 'RED', reason: baselineLine(b) });
       if (!baselineGreen(b)) {
+        outcome = 'RED';
         // Nothing was pushed, so there is nothing to undo: the merge exists only
         // in a worktree the cleanup is about to delete.
         throw new Die(`post-merge baseline is red (${baselineLine(b)}) — ${base} is untouched, logs in .runs/${logId}-merge-*`);
@@ -343,6 +378,8 @@ export function merge(cfg: RepoConfig, o: MergeOptions): number {
       } else if (branchForce(root, base, mergeSha) !== 0) warn(`could not move local ${base} to ${short(mergeSha)}`);
     }
     log(`${base} is now ${short(mergeSha)}`);
+    outcome = 'MERGED';
+    ev.context({ sha: short(mergeSha) });
 
     if (a.mode === 'epic') {
       log(`${id} merged into ${base} — nothing recorded: an epic is not a story, and this was a human's call`);

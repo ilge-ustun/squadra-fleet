@@ -2,8 +2,10 @@
 // being: cut from ORIGIN's integration branch, not the local one, and
 // pushed at once — the launcher cuts every worktree from origin, so the
 // next story can use it. The checkout is never touched: no checkout, no
-// switch.
+// switch. The epic's birth is an `epic` mark in the target's
+// .runs/events.jsonl (lib/events.ts): the start of its chronology.
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { branchExists, fetch, fetchRef, pushRef, refExists, revParseShort } from './lib/git.ts';
 import { log, warn } from './lib/log.ts';
 import type { RepoConfig } from './lib/config.ts';
@@ -28,7 +30,9 @@ export function newEpic(cfg: RepoConfig, o: NewEpicOptions): number {
 
   if (pushRef(cfg.root, `origin/${cfg.baseBranch}`, epic) !== 0) throw new Die(`could not push ${epic}`);
   if (fetchRef(cfg.root, 'origin', epic) !== 0) warn(`pushed, but could not fetch ${epic} back`);
-  log(`${epic} created on origin from origin/${cfg.baseBranch} (${revParseShort(cfg.root, `origin/${epic}`)})`);
+  const sha = revParseShort(cfg.root, `origin/${epic}`);
+  openEventLog({ root: cfg.root, repo: cfg.name, subject: `epic-${name}`, epic, warn }).mark('epic', { name: 'created', result: 'CREATED', from: cfg.baseBranch, sha });
+  log(`${epic} created on origin from origin/${cfg.baseBranch} (${sha})`);
   log(`next: fleet write-story ${cfg.name} <id> "<intent>" --base ${epic}`);
   return 0;
 }

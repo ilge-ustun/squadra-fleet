@@ -13,10 +13,16 @@
 // Unlike the launcher's two agent calls, this one has no wall-clock
 // timeout — a human is watching a one-off authoring session, not an
 // unattended round.
+//
+// The writer is a `writer` span in the target's .runs/events.jsonl
+// (lib/events.ts), its start carrying the intent: the one place the intent
+// is kept. It goes nowhere near the story file, which is the builder's
+// prompt. A writer started and never ended is a story being prepared.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { builderArgv, claudeRefusal, parseBuilderOutput } from './lib/agents.ts';
+import { builderArgv, builderModelUsed, builderUsage, claudeRefusal, parseBuilderOutput } from './lib/agents.ts';
 import { Die } from './lib/die.ts';
+import { openEventLog } from './lib/events.ts';
 import { fetch, refExists, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { log, out, warn } from './lib/log.ts';
 import { lintStory } from './lint-story.ts';
@@ -78,9 +84,12 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     if (isDir(wt)) worktreeRemoveForce(cfg.root, wt);
   };
   o.onExit(cleanup);
+  const ev = openEventLog({ root: cfg.root, repo: cfg.name, subject: storyId, story: storyId, epic: storyBase.startsWith('epic/') ? storyBase : undefined, warn });
+  o.onExit(() => ev.endOpen({ result: 'KILLED', reason: 'the writer was stopped by a signal' }));
 
   try {
     log(`story ${storyId} on ${storyBase}, model ${storyModel}`);
+    ev.start('writer', 'writer', { agent: 'claude', model: storyModel, base: storyBase, intent, evidence: `.stories/${storyId}.md` });
     fetch(cfg.root, 'origin');
     if (worktreeAdd(cfg.root, wt, { detach: `origin/${storyBase}` }) !== 0) throw new Die(`could not create a worktree at origin/${storyBase}`);
 
@@ -110,6 +119,8 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     if (!existsSync(writtenFile)) throw new Die(`no story was written (is_error=${parsed.isError}). Said: ${parsed.message}`);
 
     copyFileSync(writtenFile, storyFile);
+    const usage = builderUsage(r.stdout);
+    ev.end('writer', { result: 'OK', model_used: builderModelUsed(r.stdout), turns: usage.turns, cost_usd: usage.costUsd });
     const lines = (readFileSync(storyFile, 'utf8').match(/\n/g) ?? []).length;
     log(`wrote .stories/${storyId}.md (${lines} lines)`);
 
@@ -126,6 +137,9 @@ export async function writeStory(cfg: RepoConfig, o: WriteStoryOptions): Promise
     out('\n');
     warn('the draft has errors above. Fix them or rewrite before promoting it.');
     return 1;
+  } catch (e) {
+    ev.endOpen({ result: 'ERROR', exit: 1, reason: e instanceof Error ? e.message : String(e) });
+    throw e;
   } finally {
     cleanup();
   }

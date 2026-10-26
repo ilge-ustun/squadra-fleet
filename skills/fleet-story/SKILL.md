@@ -111,7 +111,8 @@ git -C <target> push
 The commit carries the human's name only — no trailer naming a harness or
 a model.
 
-Then promote it, and tell the human: the story id, its title, what it
+Then promote it — `./fleet promote <repo> <id> --by "coordinator, delegated
+by the human"` — and tell the human: the story id, its title, what it
 asks, any choice you made for them, any question still open, the harness and model that drafted it (the trials in
 `docs/COORDINATORS.md` are recorded from this message), and that you
 promoted it. Do not start a launcher.

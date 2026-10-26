@@ -191,6 +191,23 @@ export function parseBuilderOutput(output: string): BuilderOutput {
   return { isError, message, evidence };
 }
 
+/** What the CLI's result object says a call took: its turns and its cost
+ *  in dollars, each when it is a number. */
+export function builderUsage(output: string): { turns?: number; costUsd?: number } {
+  let v: unknown;
+  try {
+    v = JSON.parse(output);
+  } catch {
+    return {};
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return {};
+  const o = v as Record<string, unknown>;
+  return {
+    ...(typeof o['num_turns'] === 'number' ? { turns: o['num_turns'] } : {}),
+    ...(typeof o['total_cost_usd'] === 'number' ? { costUsd: o['total_cost_usd'] } : {}),
+  };
+}
+
 export interface ReviewerMessages {
   /** The agent_message texts joined with '\n', trailing newlines stripped;
    *  '' when there was none. */

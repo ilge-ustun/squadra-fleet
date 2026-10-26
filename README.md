@@ -295,6 +295,7 @@ Every view below is read-only and safe while a round is running.
 cd ~/work/fleet
 ./fleet status <repo>                  # the epics, then every story — landing state, round, verdict
 ./fleet status <repo> <id>             # one story, with its latest round's Machine block
+./fleet events <repo> <id> --backfill  # its life, pass by pass, as JSON lines (below)
 journalctl --user -u fleet-queue@<repo> -f    # a repo's drains, live (Ctrl-C to leave)
 journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
 ls -t <target>/.runs/ | grep ^<id> | head      # raw output, newest first
@@ -304,6 +305,57 @@ tail -f <target>/.runs/<id>-round1-*.log       # a mutation being run
 A story's row says `RUNNING` while something is live in its worktree. From
 the phone, `/status <repo>` is the first command above and `/why <repo>
 <id>` is the Machine block.
+
+## The event log
+
+Each command writes what it does to the target's `.runs/events.jsonl`
+(`ts/src/lib/events.ts`). The file is machine-local and gitignored. It has
+one JSON object per line, and lines are only appended. A pass that takes
+time is a `start` and an `end` with the same `span`. An instant is a `mark`.
+
+| pass | written by | result |
+|---|---|---|
+| `writer` | `write-story`; its start keeps the `intent` | OK, ERROR |
+| `lint` | `lint-story`, for a story in the repo's `.stories/` | PASS, FAIL, and the first error |
+| `promote` · `answer` | `fleet promote`, `/promote` · `/answer`, `/wait`, `/fallback` | READY |
+| `epic` | `new-epic` | CREATED, and the sha |
+| `queue` | `run-queue`: `pickup` (with `ready_since` and `wait_s`), `drain`, `held` | |
+| `launch` · `install` · `round` | `launch` | the verdict, BLOCKED, UNAVAILABLE, BUILDER_REFUSED, DIED, KILLED |
+| `builder` | `launch`: `build`, `baseline-fix-<n>`, `tdd-fix-<n>` | OK, ERROR, TIMEOUT, REFUSED, BLOCKED; `head`, `commits`, `turns`, `cost_usd` |
+| `baseline` | `launch` and `merge`: `all`, `test`, `build`, `lint`, `e2e` | GREEN, RED; SKIPPED when the round's stands (L-39) |
+| `tdd` · `mutation` · `probe` | `launch` | the class; `reused` when the tdd check's class stands |
+| `scope` | `launch` | CLEAN, VIOLATION |
+| `reviewer` | `launch` | OK, UNAVAILABLE, TIMEOUT; what it said is the verdict mark's `reviewer` |
+| `verdict` | `launch` | the computed verdict, and its reasons |
+| `blocked` · `reap` | `launch` | |
+| `merge` · `land` · `epic_merge` | `merge` | MERGED (and the sha), ALREADY, PR, CONFLICT, RED, FAILED |
+| `revert` · `reset` | `revert`, `reset` | |
+| `test_deploy` | `test-deploy`, with `install`, `build` and `start` inside | UP, FAILED; BUSY |
+
+Every line has `v`, `ts` (local time, milliseconds), `run_id`
+(`<repo>.<subject>.<start>.<pid>`, one for each process), `repo`, `pass`,
+`event` and `source`. Most lines also have `story`, `epic`, `round`,
+`name`, `result`, `reason` and `evidence` (a path in the target). Each start
+has the `pid`, and each end has `dur_s`. A span with no end, whose pid is
+gone, is a pass that died. A launcher stopped by a signal ends its spans
+KILLED. A line that cannot be written is a warning, once. It never stops a
+run.
+
+`fleet events <repo> [<id>|epic/<name>]` prints the log, oldest first, and
+writes nothing. `--backfill` adds the past that the log did not see. Each
+line says where its time comes from:
+
+- `git`: the status and merge commits, and each epic's first reflog line;
+- `machine`: each round's phases, placed by its Machine block (`approx`
+  where the order of phases is assumed);
+- `mtime`: the evidence files, when the time is inside the round;
+- `journal` (with `--journal`): the queue units' journal, each pass to the
+  second, for as long as journald keeps it.
+
+When two sources tell of one pass, the log wins, then the journal.
+
+A launcher keeps the code it loaded. A launch that runs while this code
+lands writes no events, and its story's log starts at its next launch.
 
 ## Commands
 
@@ -318,10 +370,11 @@ it from anywhere; it finds its tree through the link.
 | `fleet status <repo> --bot --all` | `/status-all <repo>` | the same, hiding nothing |
 | | `/repo` · `/help` | the repos this bot knows · the verbs, grouped |
 | `fleet status <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
+| `fleet events <repo> [id\|epic/<name>] [--backfill] [--journal]` | | what happened, pass by pass, as JSON lines (the event log) |
 | `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
 | `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
 | `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
-| edit `status: ready` | `/promote <repo> <id>` | into the queue; `/promote` also starts a drain, an edit waits for the timer or `/run` |
+| `fleet promote <repo> <id> [--by <who>]` | `/promote <repo> <id>` | into the queue: `status: ready`, one commit, a push, and a drain started. `--by` names who promoted it (`fleet promote` when absent). A status edited by hand waits for the timer or `/run` |
 | `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
 | `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
 | `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
@@ -517,7 +570,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `PUSH_STATUS` | 1 | 0 to work offline. A status or record push refused because the branch moved on origin merges origin in (never a rebase) and pushes once more; the queue's refresh pushes what its merge left ahead (L-36) |
 | `FLEET_NOTIFY_CMD` | `fleet telegram send` | how the fleet reaches a human |
 | `FLEET_LOCK_WAIT` `FLEET_REGISTRY_DIR` | | the lock, where the registry is |
-| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue@{repo}.service` | how `/run [repo]` (no repo: every registered repo), and `/promote` after its commit, start a repo's drain; `{repo}` is the repo's name, and a command without it runs as it is; it must return when the drain starts, not when it ends (the poll has two minutes) |
+| `QUEUE_START_CMD` | `systemctl --user start --no-block fleet-queue@{repo}.service` | how `/run [repo]` (no repo: every registered repo), and `/promote` and `fleet promote` after their commit, start a repo's drain; `{repo}` is the repo's name, and a command without it runs as it is; it must return when the drain starts, not when it ends (the poll has two minutes) |
 | `DETACH_CMD` | `systemd-run --user --collect --quiet --expand-environment=no --setenv=PATH --setenv=HOME` | what a bot job that outlives the poll (`/merge`, `/testdeploy`) runs under, before its `--unit=<name>`; a child forked inside the poll dies with it (L-34), and without `--expand-environment=no` systemd rewrites the job's `${…}` (L-35) |
 | `TELEGRAM_TIMEOUT` | 20 | seconds per Bot API request; `TELEGRAM_API_BASE` points the bot at the suite's fake API |
 | `TEST_DEPLOY_URL` | none, required | the URL `fleet test-deploy` reports; also read from `.env.fleet`, which is where it lives |
@@ -563,12 +616,12 @@ bin/lib.sh          FLEET_HOME and load_repo (the .fleet/config contract, read b
 bin/install-skills.sh  bin/update-agents.sh  bin/remote-control.sh   the bash chores
 ts/                 the harness, run by node as is:
   src/bin/          one entry point per command: launch merge revert reset run-queue lint-story
-                    new-epic write-story mutation (check-mutation) status telegram
+                    new-epic write-story promote events mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
-                    new-epic write-story classifier status status-views telegram
+                    new-epic write-story promote events classifier status status-views telegram
   src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
-                    exit-hooks telegram-api types
+                    exit-hooks telegram-api types events (the log) history journal (its backfill)
   fixtures/         the status and Machine-block goldens
 .nvmrc              the Node the units pin
 prompts/            the agents' prompts; README = the verdict contract

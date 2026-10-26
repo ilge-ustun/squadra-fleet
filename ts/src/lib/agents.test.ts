@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
+  ALLOWED_TOOLS, NO_ATTRIBUTION, builderArgv, builderModelUsed, builderUsage, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerArgv, reviewerModelUsed, reviewerMessages, reviewerRefusal, runBuilder, runReviewer,
 } from './agents.ts';
 
 const FAKES = resolve(import.meta.dirname, '../../../test/fakes');
@@ -46,6 +46,17 @@ describe('the argv the CLIs get', () => {
 //   isError    = jq -r 'if has("is_error") then (.is_error|tostring) else "parse-failed" end'  (stderr dropped)
 //   message    = jq -r '.result // "no result field"'                                             (stderr dropped)
 //   evidence   = jq . || the raw text
+describe('builderUsage — the turns and the cost the CLI reports', () => {
+  it('reads num_turns and total_cost_usd from the result object', () => {
+    expect(builderUsage('{"type":"result","num_turns":31,"total_cost_usd":1.2345,"is_error":false}')).toEqual({ turns: 31, costUsd: 1.2345 });
+  });
+  it('is empty for output that is not that object, or a field that is not a number', () => {
+    expect(builderUsage('not json')).toEqual({});
+    expect(builderUsage('[1]')).toEqual({});
+    expect(builderUsage('{"num_turns":"31"}')).toEqual({});
+  });
+});
+
 describe('parseBuilderOutput — the jq rows', () => {
   it.each([
     ['not json {', '', '', 'not json {', 'not JSON: jq fails, both empty, raw kept'],

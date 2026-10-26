@@ -44,10 +44,12 @@ The human, 20 Oct 2026, standing for every epic: "you answer questions,
 promote stories, deploy to test when it's ready. answer questions — if you
 have 'recommended' — answer, don't send it to me." So you:
 
-- **Promote** a story you have reviewed and linted: `status: ready`, commit
-  `story(<id>): promoted to ready (coordinator, delegated by the human)`,
-  push, `systemctl --user start --no-block fleet-queue@<repo>.service` — what
-  `/promote` does.
+- **Promote** a story you have reviewed and linted:
+  `./fleet promote <repo> <id> --by "coordinator, delegated by the human"`.
+  It does what `/promote` does: `status: ready`, the commit
+  `story(<id>): promoted to ready (coordinator, delegated by the human)`, a
+  push, and the repo's drain started. It also writes the promotion to the
+  event log.
 - **Answer** a `.blocked/<id>.md` question when you have a recommended
   option, as `/answer` does: append `## Answer (coordinator, <date>)` and
   the answer, `status: ready`, one commit with any story edit the answer

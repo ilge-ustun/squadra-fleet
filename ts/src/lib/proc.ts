@@ -22,6 +22,9 @@ export interface RunOptions {
   /** 'inherit' passes the child's stderr through to ours (a bash `die` that
    *  should reach the terminal unchanged); the result's stderr is then ''. */
   stderr?: 'inherit';
+  /** Bytes of output kept; past it the child is killed and fails. Node's
+   *  default, 1 MiB, when absent. */
+  maxBuffer?: number;
 }
 
 /** Run a program with an argument array (no shell), capturing both streams. */
@@ -32,6 +35,7 @@ export function runSync(cmd: string, args: readonly string[], o: RunOptions = {}
     encoding: 'utf8',
     stdio: [o.input !== undefined ? 'pipe' : 'ignore', 'pipe', o.stderr ?? 'pipe'],
     ...(o.input !== undefined ? { input: o.input } : {}),
+    ...(o.maxBuffer !== undefined ? { maxBuffer: o.maxBuffer } : {}),
   });
   return {
     status: r.status ?? -1,

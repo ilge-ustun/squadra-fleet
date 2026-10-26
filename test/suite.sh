@@ -288,6 +288,29 @@ wait_for() {                          # wait_for <seconds> <command…> — poll
 }
 open_gate() { : > "$TRACE/gate-open"; }   # releases every FAKE_REVIEWER=gate reviewer
 
+# The event log (lib/events.ts): <target>/.runs/events.jsonl. events_rows
+# prints one line per event — `event pass name result` with `-` for what a
+# line lacks — and, after them, `open <span>` for every span a run started
+# and never ended, and `bad <line>` for a line that is not JSON or lacks a
+# field every line carries.
+events_rows() {                       # events_rows [file] → stdout
+  node -e '
+    const fs = require("fs");
+    const open = new Map();
+    for (const l of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+      if (l === "") continue;
+      let e;
+      try { e = JSON.parse(l); } catch { console.log(`bad ${l}`); continue; }
+      if (e.v !== 1 || !e.ts || !e.run_id || !e.repo || !e.pass || !e.event || e.source !== "log") console.log(`bad ${l}`);
+      console.log([e.event, e.pass, e.name ?? "-", e.result ?? "-"].join(" "));
+      const k = `${e.run_id} ${e.span}`;
+      if (e.event === "start") open.set(k, e.span);
+      if (e.event === "end") open.delete(k);
+    }
+    for (const span of open.values()) console.log(`open ${span}`);
+  ' "${1:-$REPO/.runs/events.jsonl}"
+}
+
 # ── cases ────────────────────────────────────────────────────────────────────
 
 # Red when the outcome block's `set_status "$STORY_ID" done` is deleted.
@@ -3558,7 +3581,15 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_162_queue_timer_fires_after_any_boot case_163_remote_control
        case_164_queue_waits_for_free_memory case_165_queue_unit_per_repo
        case_166_runners_config case_167_cargo_evidence case_167h_one_cargo_classifier
-       case_168_cargo_probes case_169_prompts_name_the_runners)
+       case_168_cargo_probes case_169_prompts_name_the_runners
+       case_170_launch_writes_its_events
+       case_171_queue_writes_its_events
+       case_172_merge_writes_its_events
+       case_173_writer_and_lint_write_events
+       case_174_promote
+       case_175_answers_and_epics_are_marked
+       case_176_revert_reset_and_test_deploy_are_logged
+       case_177_fleet_events)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3645,7 +3676,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status write-story lint-story new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
+  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5116,6 +5147,287 @@ case_169_prompts_name_the_runners() {
   assert_grep 'cargo:<package>\[/<target>\]\[::<test path>\]' "$TRACE/codex-prompt-1" "the reviewer's mutation files"
   assert_grep 'target in crates/fake-core/tests' "$TRACE/codex-prompt-1" "and where a Rust probe lands"
   assert_not_grep 'unsubstituted' "$LOG" "no placeholder left"
+}
+
+# The launcher writes the story's life to <target>/.runs/events.jsonl: the
+# launch, each round, each builder call, each baseline step, the scope,
+# the reviewer, each mutation and the computed verdict, every span ended —
+# also when the story stops at a question or a builder is killed. Red while
+# launch.ts writes no event.
+case_170_launch_writes_its_events() {
+  CASE="170 a launch writes its passes to .runs/events.jsonl"; fixture c170
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "exit code"
+  assert_file "$REPO/.runs/events.jsonl" "the log exists"
+  events_rows > "$FX/rows"
+  assert_not_grep '^bad ' "$FX/rows" "every line is JSON with v, ts, run_id, repo, pass, event, source"
+  assert_not_grep '^open ' "$FX/rows" "every span that started ended"
+  local want
+  for want in 'start launch - -' 'end launch - PASS' 'start round - -' 'end round - PASS' 'end install builder OK' \
+              'end builder build OK' 'end baseline all GREEN' 'end baseline test GREEN' 'end baseline build GREEN' \
+              'end baseline lint GREEN' 'end install reviewer OK' 'mark scope - CLEAN' 'end reviewer - OK' \
+              'end mutation AC1-marker RED' 'mark verdict - PASS'; do
+    assert_grep "^$want\$" "$FX/rows" "an event: $want"
+  done
+  assert_grep '"pass":"builder".*"model":"sonnet"' "$REPO/.runs/events.jsonl" "the builder's model is named"
+  assert_grep '"pass":"verdict","event":"mark","result":"PASS","reviewer":"PASS"' "$REPO/.runs/events.jsonl" "the verdict mark says what the reviewer said"
+  assert_grep '"pass":"launch","event":"start".*"pid":[0-9]' "$REPO/.runs/events.jsonl" "the launch start carries its pid"
+  assert_grep '"story":"900"' "$REPO/.runs/events.jsonl" "lines name the story"
+  assert_not_contains "$(tracked)" ".runs/events.jsonl" "the log is not committed"
+
+  CASE="170b a question ends the launch BLOCKED, with a blocked mark"; fixture c170b
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  events_rows > "$FX/rows"
+  assert_grep '^mark blocked ' "$FX/rows" "the question is marked"
+  assert_grep '^end builder build BLOCKED$' "$FX/rows" "the builder ended BLOCKED"
+  assert_grep '^end launch - BLOCKED$' "$FX/rows" "the launch ended BLOCKED"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
+
+  CASE="170c a killed builder ends TIMEOUT, and the launch DIED with the reason"; fixture c170c
+  run "$STORY" FAKE_BUILDER=hang FAKE_REVIEWER=PASS AGENT_TIMEOUT=2 MAX_ROUNDS=1
+  events_rows > "$FX/rows"
+  assert_grep '^end builder build TIMEOUT$' "$FX/rows" "the builder ended TIMEOUT"
+  assert_grep '^end launch - DIED$' "$FX/rows" "the launch DIED"
+  assert_grep '"result":"DIED".*exceeded AGENT_TIMEOUT' "$REPO/.runs/events.jsonl" "with the die's text"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
+}
+
+# The queue writes its pickups to the event log: the story, when it became
+# ready (from git) and how long it waited; a drain that ran a story is a
+# span, and a drain held back is a `held` mark with the reason. Red while
+# run-queue.ts writes no event.
+case_171_queue_writes_its_events() {
+  CASE="171 a pickup is a queue mark with the wait, inside a drain span"; fixture c171
+  queue FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$QRC" 0 "the drain exits cleanly"
+  events_rows > "$FX/rows"
+  assert_not_grep '^bad ' "$FX/rows" "every line is well formed"
+  assert_not_grep '^open ' "$FX/rows" "every span ended"
+  assert_grep '^start queue drain -$' "$FX/rows" "the drain started"
+  assert_grep '^mark queue pickup -$' "$FX/rows" "the story was picked up"
+  assert_grep '^end queue drain DONE$' "$FX/rows" "the drain ended"
+  assert_grep '"story":"900","pass":"queue","event":"mark","name":"pickup","n":1,"ready_since":"[0-9-]+T[0-9:.]+[+-][0-9:]+","wait_s":[0-9]+' "$REPO/.runs/events.jsonl" "with the time it became ready, from git, and the wait"
+  assert_grep '^end launch - PASS$' "$FX/rows" "and the launch it started wrote its own"
+
+  CASE="171b a drain held back by low memory is a held mark, and no drain span"; fixture c171b
+  printf 'MemAvailable:  1024000 kB\n' > "$FX/meminfo"
+  queue FLEET_MEMINFO="$FX/meminfo" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  events_rows > "$FX/rows"
+  assert_grep '^mark queue held -$' "$FX/rows" "the hold is marked"
+  assert_grep '"name":"held","reason":"only 1000 MB of memory is available' "$REPO/.runs/events.jsonl" "with its reason"
+  assert_not_grep 'drain' "$FX/rows" "a drain that ran nothing has no span"
+}
+
+# fleet merge writes its span to the event log: a story merged into its
+# epic ends MERGED with the sha, with a SKIPPED mark when its round's
+# baseline stands (L-39); an epic landed is an epic_merge with the
+# post-merge baseline's steps inside it; a red baseline ends it RED. Red
+# while merge.ts writes no event.
+case_172_merge_writes_its_events() {
+  CASE="172 a story merged into its epic is a merge span, ended MERGED"; epic_story c172
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  assert_eq "$MRC" 0 "precondition: merged"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^start merge - -$' "$FX/rows" "the merge started"
+  assert_grep '^mark baseline merge SKIPPED$' "$FX/rows" "the round's baseline stood for it"
+  assert_grep '^end merge - MERGED$' "$FX/rows" "and it ended MERGED"
+  assert_grep '"branch":"story/900","into":"epic/test","sha":"[0-9a-f]{8}","pass":"merge","event":"end"' "$REPO/.runs/events.jsonl" "with the branch, the epic and the sha"
+
+  CASE="172b an epic landed is an epic_merge span, with the baseline's steps"
+  merge_epic "$FX/merge-epic.log"
+  assert_eq "$?" 0 "precondition: landed"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^end epic_merge - MERGED$' "$FX/rows" "the epic landed"
+  local step
+  for step in test build lint; do assert_grep "^end baseline $step GREEN\$" "$FX/rows" "its $step step"; done
+  assert_grep '^end baseline merge GREEN$' "$FX/rows" "and the whole baseline"
+  assert_grep '"epic":"epic/test","branch":"epic/test","into":"base".*"pass":"epic_merge","event":"end"' "$REPO/.runs/events.jsonl" "naming the epic and the integration branch"
+
+  CASE="172c a red post-merge baseline ends the merge RED, with the die's text"; epic_story c172c
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  merge_epic "$FX/merge-epic.log" BUILD_CMD=false
+  events_rows > "$FX/rows"
+  assert_grep '^end baseline build RED$' "$FX/rows" "the build step was RED"
+  assert_grep '^end epic_merge - RED$' "$FX/rows" "the epic merge ended RED"
+  assert_grep '"result":"RED","exit":1,"reason":"post-merge baseline is red' "$REPO/.runs/events.jsonl" "with why"
+}
+
+# The writer is a span in the event log, and its start keeps the intent:
+# the one place an intent is kept, never the story file, which is the
+# builder's prompt. The lint after it is a span too, PASS or FAIL with the
+# first error; a draft linted from outside .stories/ is not logged. Red
+# while write-story.ts and lint-story.ts write no event.
+case_173_writer_and_lint_write_events() {
+  CASE="173 the writer keeps the intent on its start; the lint ends PASS"; fixture c173
+  git -C "$REPO" push -q origin base:epic/test
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=950 FAKE_BUILDER=story \
+      bash "$FLEET/fleet" write-story t 950 "the moon toggle should show a moon" --base epic/test ) > "$FX/write.log" 2>&1
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  assert_grep '^start writer - -$' "$FX/rows" "the writer started"
+  assert_grep '^end writer - OK$' "$FX/rows" "and ended OK"
+  assert_grep '"story":"950","epic":"epic/test","pass":"writer","event":"start".*"model":"opus".*"intent":"the moon toggle should show a moon"' "$REPO/.runs/events.jsonl" "its start keeps the intent"
+  assert_not_grep 'moon toggle' "$REPO/.stories/950.md" "the story file does not"
+  assert_grep '^end lint - PASS$' "$FX/rows" "the lint passed"
+
+  CASE="173b a lint with errors ends FAIL with the first error; a draft from elsewhere is not logged"
+  sed -i '/^\*\*AC1/d' "$REPO/.stories/950.md"
+  ( cd "$FX" && bash "$FLEET/fleet" lint-story t 950 ) > "$FX/lint.log" 2>&1
+  assert_grep '"pass":"lint","event":"end".*"result":"FAIL".*"reason":"no acceptance criteria' "$REPO/.runs/events.jsonl" "FAIL, with the first error"
+  cp "$REPO/.stories/950.md" "$FX/draft.md"
+  local before; before="$(wc -l < "$REPO/.runs/events.jsonl")"
+  ( cd "$FX" && bash "$FLEET/fleet" lint-story t "$FX/draft.md" ) > "$FX/lint2.log" 2>&1
+  assert_eq "$(wc -l < "$REPO/.runs/events.jsonl")" "$before" "a file outside .stories/ writes nothing"
+}
+
+# fleet promote does at a terminal what /promote does from the phone: the
+# status to ready, one commit, a push, the repo's drain started through
+# QUEUE_START_CMD. Both are one path (src/promote.ts) and both write a
+# promote mark. Red while there is no fleet promote, and while either
+# writes no mark.
+promote_run() {                       # promote_run [args…] → PLOG PRC
+  PLOG="$FX/promote.log"
+  ( cd "$FX" && env PATH="$(FAKES)" PUSH_STATUS=1 QUEUE_START_CMD="touch $FX/queue-started-{repo}" \
+      bash "$FLEET/fleet" promote t "$@" ) > "$PLOG" 2>&1
+  PRC=$?
+}
+case_174_promote() {
+  CASE="174 fleet promote: ready, one commit, pushed, a drain started, a promote mark"; fixture c174 draft
+  promote_run "$STORY"
+  assert_eq "$PRC" 0 "exit code"
+  assert_eq "$(field status)" ready "the story is ready"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (fleet promote)" "one commit, named"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$REPO" rev-parse origin/base)" "pushed"
+  assert_file "$FX/queue-started-t" "the repo's drain was started"
+  assert_contains "$(cat "$PLOG")" "$STORY is ready — a drain is starting" "and it says so"
+  assert_grep '"story":"900","pass":"promote","event":"mark","by":"fleet promote","from":"draft","result":"READY","queue":"started"' "$REPO/.runs/events.jsonl" "a promote mark"
+
+  CASE="174b promoted again: nothing to do, 0; a story a launcher has: refused, 1"
+  rm -f "$FX/queue-started-t"
+  promote_run "$STORY"
+  assert_eq "$PRC" 0 "already ready is not an error"
+  assert_contains "$(cat "$PLOG")" "$STORY was already ready" "and says so"
+  assert_no_file "$FX/queue-started-t" "no drain started"
+  sed -i '0,/^status:.*/s//status: in_progress/' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "a launcher has it"
+  promote_run "$STORY"
+  assert_eq "$PRC" 1 "exit code"
+  assert_contains "$(cat "$PLOG")" "$STORY is in_progress — a launcher has it" "says why"
+  assert_eq "$(field status)" in_progress "untouched"
+  promote_run 999
+  assert_eq "$PRC" 1 "an unknown story is 1"
+  promote_run "$STORY" --by
+  assert_contains "$(cat "$PLOG")" "usage: fleet promote" "--by without a name is the usage"
+
+  CASE="174c --by names who promoted it, in the commit and the mark"; fixture c174c draft
+  promote_run "$STORY" --by "coordinator, delegated by the human"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (coordinator, delegated by the human)" "the commit names who"
+  assert_grep '"by":"coordinator, delegated by the human"' "$REPO/.runs/events.jsonl" "so does the mark"
+
+  CASE="174d /promote takes the same path: the same commit, and a mark by telegram"; fixture c174d draft
+  update 102 42 "/promote t $STORY"
+  bot poll
+  assert_eq "$(field status)" ready "status changed"
+  assert_eq "$(git -C "$REPO" log -1 --format=%s)" "story($STORY): promoted to ready (telegram)" "the bot's commit, as before"
+  assert_grep '"pass":"promote","event":"mark","by":"telegram","from":"draft"' "$REPO/.runs/events.jsonl" "a promote mark by telegram"
+}
+
+# A human's answer is an `answer` mark — /answer, /wait and /fallback — and
+# a new epic is an `epic` mark, the start of its chronology. Red while the
+# bot and new-epic write no mark.
+case_175_answers_and_epics_are_marked() {
+  CASE="175 /answer is an answer mark by telegram"; fixture c175
+  run "$STORY" FAKE_BUILDER=blocked FAKE_REVIEWER=PASS
+  update 175 42 "/answer t $STORY use the moon"
+  bot poll
+  assert_eq "$(field status)" ready "precondition: answered"
+  assert_grep '"story":"900","pass":"answer","event":"mark","name":"answer","by":"telegram","result":"READY"' "$REPO/.runs/events.jsonl" "an answer mark"
+
+  CASE="175b /wait and /fallback are answer marks too"; fixture c175b
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 176 42 "/wait t $STORY"
+  bot poll
+  assert_grep '"pass":"answer","event":"mark","name":"wait","by":"telegram"' "$REPO/.runs/events.jsonl" "a wait mark"
+  fixture c175c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  update 177 42 "/fallback t $STORY"
+  bot poll
+  assert_grep '"pass":"answer","event":"mark","name":"fallback","by":"telegram"' "$REPO/.runs/events.jsonl" "a fallback mark"
+
+  CASE="175d fleet new-epic is an epic mark, with the sha it was cut at"; fixture c175d
+  ( cd "$FX" && env PATH="$(FAKES)" bash "$FLEET/fleet" new-epic t search ) > "$FX/epic.log" 2>&1
+  assert_grep "\"epic\":\"epic/search\",\"pass\":\"epic\",\"event\":\"mark\",\"name\":\"created\",\"result\":\"CREATED\",\"from\":\"base\",\"sha\":\"$(git -C "$REPO" rev-parse --short origin/epic/search)\"" "$REPO/.runs/events.jsonl" "an epic mark"
+}
+
+# A revert and a reset are marks; a test deploy is a span with its
+# install, build and start inside, ended UP or FAILED. Red while revert.ts,
+# reset.ts and test-deploy.ts write no event.
+case_176_revert_reset_and_test_deploy_are_logged() {
+  CASE="176 a revert is a revert mark with the sha it undid"; epic_story c176
+  run "$STORY" FAKE_BUILDER=touch FAKE_TOUCH=README.md FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  merge_run
+  local sha; sha="$(field merged)"
+  revert_run
+  assert_eq "$RVRC" 0 "precondition: reverted"
+  assert_grep "\"pass\":\"revert\",\"event\":\"mark\",\"result\":\"REVERTED\",\"sha\":\"${sha:0:8}\",\"into\":\"epic/test\"" "$REPO/.runs/events.jsonl" "a revert mark"
+
+  CASE="176b a reset is a reset mark with the status it set"
+  reset_run "$STORY" --force --draft
+  assert_eq "$RRC" 0 "precondition: reset"
+  assert_grep '"pass":"reset","event":"mark","result":"DRAFT","force":true' "$REPO/.runs/events.jsonl" "a reset mark"
+
+  CASE="176c a test deploy is a span, its steps inside, ended UP"; fixture c176c; td_setup
+  td epic/test
+  assert_eq "$TDRC" 0 "precondition: up"
+  events_rows > "$FX/rows"
+  assert_not_grep '^(bad|open) ' "$FX/rows" "well formed, every span ended"
+  local step
+  for step in install build; do assert_grep "^end test_deploy $step OK\$" "$FX/rows" "its $step step"; done
+  assert_grep '^end test_deploy deploy UP$' "$FX/rows" "the deploy ended UP"
+  assert_grep "\"sha\":\"$(git -C "$REPO" rev-parse --short origin/epic/test)\",\"pass\":\"test_deploy\",\"event\":\"end\",\"name\":\"deploy\",\"branch\":\"epic/test\"" "$REPO/.runs/events.jsonl" "naming the branch and the sha"
+
+  CASE="176d a red build ends the deploy FAILED, with why"
+  BUILD_CMD=false td epic/test
+  assert_eq "$TDRC" 1 "precondition: the build failed"
+  events_rows > "$FX/rows"
+  assert_grep '^end test_deploy deploy FAILED$' "$FX/rows" "the deploy ended FAILED"
+  assert_grep '"name":"deploy".*"result":"FAILED","exit":1,"reason":"build failed' "$REPO/.runs/events.jsonl" "with the step that failed"
+  assert_not_grep '^open ' "$FX/rows" "nothing left open"
+  td --stop
+}
+
+# fleet events prints the log as JSON lines, oldest first, all of it, a
+# story's or an epic's; --backfill adds what git, the Machine blocks and the
+# evidence files say the log did not see, each line with its source, and
+# shows a launch the log has once. It writes nothing. Red while there is no
+# fleet events.
+case_177_fleet_events() {
+  CASE="177 fleet events: the log as JSON lines, a story's or an epic's"; epic_story c177
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  local out n; n="$(wc -l < "$REPO/.runs/events.jsonl")"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | wc -l)" "$n" "every line of the log"
+  assert_eq "$(printf '%s\n' "$out" | head -1 | jq -r '.pass + " " + .event')" "launch start" "oldest first"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t 901 | wc -l)" 0 "another story's: none"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t epic/test | wc -l)" "$n" "the epic's: its story's"
+  local before; before="$(git -C "$REPO" status --porcelain; md5sum < "$REPO/.runs/events.jsonl")"
+
+  CASE="177b --backfill adds the status commits from git, and the launch the log has once"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --backfill 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="status") | .name + " " + .source' | tr '\n' ',')" "in_progress git,done git," "git's status marks"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch" and .event=="start") | .source' | tr '\n' ',')" "log," "one launch start, the log's"
+  assert_eq "$(git -C "$REPO" status --porcelain; md5sum < "$REPO/.runs/events.jsonl")" "$before" "nothing was written"
+
+  CASE="177c a story the log never saw: its launch from git, its round from the Machine block"
+  rm "$REPO/.runs/events.jsonl"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --backfill 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch") | .event + " " + .source + " " + (.result // "-")' | tr '\n' ',')" "start git -,end git PASS," "the launch, from git"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="verdict") | .source + " " + .result' | tr '\n' ',')" "machine PASS," "the verdict, from the Machine block"
+  assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t --bogus 2>&1 >/dev/null | grep -c 'usage: fleet events')" 1 "an unknown flag is the usage"
 }
 
 for c in "${CASES[@]}"; do

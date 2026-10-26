@@ -194,6 +194,20 @@ export interface BaselineInput {
   e2eCmd?: string;
   /** Seconds before the e2e run's process group is killed; default 900. */
   e2eTimeoutSec?: number;
+  /** Told as each step starts (no colour) and ends (its colour): the
+   *  event log's baseline steps. */
+  onStep?: OnStep;
+}
+
+export type BaselineStep = 'test' | 'build' | 'lint' | 'e2e';
+export type OnStep = (step: BaselineStep, colour?: Colour) => void;
+
+/** One step, told to onStep before and after. */
+function stepped(step: BaselineStep, onStep: OnStep | undefined, run: () => Colour): Colour {
+  onStep?.(step);
+  const c = run();
+  onStep?.(step, c);
+  return c;
 }
 
 /** The suite with the JSON reporter, the raw file removed first so a stale
@@ -209,13 +223,16 @@ export function runBaseline(i: BaselineInput): Baseline {
   const ev = join(i.evidenceDir, 'baseline');
   mkdirSync(ev, { recursive: true });
   writeFileSync(join(ev, 'commands.json'), `${JSON.stringify(baselineCommands(i), null, 2)}\n`);
-  const text = runVitestJson(i.wt, i.vitestCmd, i.rawJson, join(ev, 'test.log'));
-  const test = baselineColour(text);
-  writeFileSync(join(ev, 'test.summary.json'), summary(text));
-  const build = tailed(i.buildCmd, i.wt, join(ev, 'build.log'));
-  const lint = tailed(i.lintCmd, i.wt, join(ev, 'lint.log'));
-  if (!i.e2eCmd) return { test, build, lint };
-  return { test, build, lint, e2e: runE2e(i.e2eCmd, i.wt, join(ev, 'e2e.log'), i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, true) };
+  const test = stepped('test', i.onStep, () => {
+    const text = runVitestJson(i.wt, i.vitestCmd, i.rawJson, join(ev, 'test.log'));
+    writeFileSync(join(ev, 'test.summary.json'), summary(text));
+    return baselineColour(text);
+  });
+  const build = stepped('build', i.onStep, () => tailed(i.buildCmd, i.wt, join(ev, 'build.log')));
+  const lint = stepped('lint', i.onStep, () => tailed(i.lintCmd, i.wt, join(ev, 'lint.log')));
+  const e2eCmd = i.e2eCmd;
+  if (!e2eCmd) return { test, build, lint };
+  return { test, build, lint, e2e: stepped('e2e', i.onStep, () => runE2e(e2eCmd, i.wt, join(ev, 'e2e.log'), i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, true)) };
 }
 
 /** The post-merge baseline in the merge worktree. The same rule for the
@@ -235,14 +252,16 @@ export interface MergeBaselineInput {
   lintCmd: string;
   e2eCmd?: string;
   e2eTimeoutSec?: number;
+  onStep?: OnStep;
 }
 
 export function runMergeBaseline(i: MergeBaselineInput): Baseline {
-  const test = baselineColour(runVitestJson(i.wt, i.vitestCmd, i.rawJson, i.testLog));
-  const build: Colour = runBashTo(i.buildCmd, { cwd: i.wt, logFile: i.buildLog }) === 0 ? 'GREEN' : 'RED';
-  const lint: Colour = runBashTo(i.lintCmd, { cwd: i.wt, logFile: i.lintLog }) === 0 ? 'GREEN' : 'RED';
-  if (!i.e2eCmd) return { test, build, lint };
-  return { test, build, lint, e2e: runE2e(i.e2eCmd, i.wt, i.e2eLog, i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, false) };
+  const test = stepped('test', i.onStep, () => baselineColour(runVitestJson(i.wt, i.vitestCmd, i.rawJson, i.testLog)));
+  const build = stepped('build', i.onStep, (): Colour => (runBashTo(i.buildCmd, { cwd: i.wt, logFile: i.buildLog }) === 0 ? 'GREEN' : 'RED'));
+  const lint = stepped('lint', i.onStep, (): Colour => (runBashTo(i.lintCmd, { cwd: i.wt, logFile: i.lintLog }) === 0 ? 'GREEN' : 'RED'));
+  const e2eCmd = i.e2eCmd;
+  if (!e2eCmd) return { test, build, lint };
+  return { test, build, lint, e2e: stepped('e2e', i.onStep, () => runE2e(e2eCmd, i.wt, i.e2eLog, i.e2eTimeoutSec ?? E2E_TIMEOUT_DEFAULT, false)) };
 }
 
 /** `test G | build G | lint G`, then ` | e2e G` when the repo ran one — the

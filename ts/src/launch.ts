@@ -39,6 +39,12 @@
 // Status changes are committed and pushed so the queue is visible from a
 // phone. .runs/<id>.json is machine-local (gitignored).
 //
+// EVENTS: each pass — the launch, a round, a builder call, a baseline step,
+// the tdd check, the scope, the reviewer, a mutation or probe, the verdict —
+// is a line in .runs/events.jsonl (lib/events.ts), with its start, end,
+// agent, model and result. A launch that stops, dies or is killed ends
+// every span it opened; one whose spans stay open was killed outright.
+//
 // PROMPTS live in prompts/*.md, rendered by lib/render.ts. The agents are
 // the `claude` and `codex` CLIs, started by lib/agents.ts with the prompt on
 // stdin.
@@ -52,11 +58,12 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { builderModelUsed, builderSessionId, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
+import { builderModelUsed, builderSessionId, builderUsage, claudeRefusal, parseBuilderOutput, reviewerMessages, reviewerModelUsed, reviewerRefusal, runBuilder, runReviewer } from './lib/agents.ts';
 import { reviewerResetAt } from './lib/codex-limits.ts';
 import { baselineCommands, baselineForBuilder, baselineForReviewer, baselineGreen, baselineLine, redSteps, runBaseline } from './lib/baseline.ts';
 import type { RepoConfig } from './lib/config.ts';
-import { RunnerError, runMutations, runProbes, type KnownRun } from './lib/evidence.ts';
+import { RunnerError, runMutations, runProbes, type KnownRun, type OnRun } from './lib/evidence.ts';
+import { openEventLog } from './lib/events.ts';
 import { deleteFrontmatterField, setStoryField, storyField } from './lib/frontmatter.ts';
 import { add, branchExists, commit, diffNameOnly, fetch, mergeBase, porcelain, pushFollowingUpstream, revListCount, revParse, stagedIsEmpty, worktreeAdd, worktreeRemoveForce } from './lib/git.ts';
 import { Die } from './lib/die.ts';
@@ -351,6 +358,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         if (pids.length > 0) throw new Die(`story ${id}: its launcher is gone but processes still run in ${wt} (pids: ${pids.join(' ')}) — kill them by cwd, then run again`);
       }
       warn(`orphan: ${id} was in_progress, nothing running in its trees — returning to queue`);
+      const base = storyField(root, id, 'base');
+      openEventLog({ root, repo: cfg.name, subject: id, story: id, epic: base.startsWith('epic/') ? base : undefined, warn })
+        .mark('reap', { result: 'READY', reason: 'in_progress, and nothing runs in its trees: its launcher is gone' });
       setStatus(id, 'ready');
     }
   };
@@ -446,8 +456,14 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
   };
   o.onExit(cleanupReviewer);
 
+  const ev = openEventLog({ root, repo: cfg.name, subject: storyId, story: storyId, epic: storyBase.startsWith('epic/') ? storyBase : undefined, warn });
+  o.onExit(() => ev.endOpen({ result: 'KILLED', reason: 'the launcher was stopped by a signal' }));
+  /** How the launch ended, for its end event: the verdict, or why it stopped. */
+  let outcome = '';
+
   try {
     log(`story ${storyId}`);
+    ev.start('launch', 'launch', { model: builderModel, round_start: roundStart, reviewer: fallbackReviewer ? 'claude' : undefined, reason: resumeAtReview ? 'resumes at its refused review' : undefined });
     // not_before was the wait for a refused reviewer; claimed, it is over.
     deleteFrontmatterField(storyFile, 'not_before');
     deleteFrontmatterField(storyFile, 'reviewer');
@@ -467,7 +483,10 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       seedEnv(builderWt);
       log('installing deps');
       mkdirSync(`${root}/.runs`, { recursive: true });
-      if (runBashTo(cfg.installCmd, { cwd: builderWt, logFile: `${root}/.runs/${storyId}-install-builder.log` }) !== 0) {
+      ev.start('install.builder', 'install', { name: 'builder', evidence: `.runs/${storyId}-install-builder.log` });
+      const installed = runBashTo(cfg.installCmd, { cwd: builderWt, logFile: `${root}/.runs/${storyId}-install-builder.log` });
+      ev.end('install.builder', { result: installed === 0 ? 'OK' : 'FAILED', exit: installed });
+      if (installed !== 0) {
         throw new Die(`install failed in the builder tree (${cfg.installCmd}) — see .runs/${storyId}-install-builder.log`);
       }
     }
@@ -562,6 +581,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       | { stop: false; secs: number; isError: string; message: string; used: string; sessionId: string; handedOver: boolean };
     const builderCall = async (o: {
       round: number; evidenceDir: string; prompt: string; model: string; resume?: string; replaceMutations?: boolean;
+      /** The event's name: `build`, `baseline-fix-1`, `tdd-fix-1`. */
+      name: string;
       /** In the die and the warnings: `the builder`, `the builder's baseline fix 1`. */
       who: string;
       /** In the shorter lines: `builder`, `baseline fix 1`. */
@@ -569,12 +590,16 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       json: string;
     }): Promise<BuilderCall> => {
       const t0 = secs();
+      const span = `r${o.round}.${o.name}`;
+      const before = revParse(builderWt, 'HEAD');
+      ev.start(span, 'builder', { name: o.name, agent: 'claude', model: o.model, evidence: `.review/${storyId}/round-${o.round}/${o.json}` });
       const b = await runBuilder({
         wt: builderWt, prompt: o.prompt, model: o.model, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout,
         ...(o.resume !== undefined ? { resume: o.resume } : {}),
       });
       const took = secs() - t0;
       if (b.timedOut) {
+        ev.end(span, { result: 'TIMEOUT', reason: `killed at AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s)` });
         setStatus(storyId, 'needs_human');
         throw new Die(`round ${o.round}: ${o.who} exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
       }
@@ -589,7 +614,10 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       // committed before the refusal stays on the branch, unreviewed — a
       // half-built round is not a round. The review file is untouched.
       const refused = claudeRefusal(buildOut);
+      const usage = builderUsage(buildOut);
       if (refused !== undefined) {
+        ev.end(span, { result: 'REFUSED', reason: refused });
+        outcome = 'BUILDER_REFUSED';
         warn(`round ${o.round}: Claude refused ${o.who} — ${refused}`);
         rmSync(newFile, { force: true });
         setStoryField(root, storyId, 'round', String(o.round - 1));
@@ -603,6 +631,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       }
 
       if (isFile(`${builderWt}/.blocked/${storyId}.md`)) {
+        ev.end(span, { result: 'BLOCKED', model_used: builderModelUsed(buildOut), turns: usage.turns, cost_usd: usage.costUsd });
+        ev.mark('blocked', { evidence: `.blocked/${storyId}.md`, reason: readFileSync(`${builderWt}/.blocked/${storyId}.md`, 'utf8').split('\n').find((l) => l.trim() !== '' && !l.startsWith('#')) });
+        outcome = 'BLOCKED';
         copyFileSync(`${builderWt}/.blocked/${storyId}.md`, `${root}/.blocked/${storyId}.md`);
         warn('BLOCKED — agent asked a question:');
         out(readFileSync(`${root}/.blocked/${storyId}.md`, 'utf8'));
@@ -624,15 +655,32 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         handedOver = true;
         log(`${o.tag} handed over TDD evidence`);
       }
+      const after = revParse(builderWt, 'HEAD');
+      ev.end(span, {
+        result: parsed.isError === 'true' ? 'ERROR' : 'OK', model_used: builderModelUsed(buildOut), head: after.slice(0, 8),
+        commits: revListCount(builderWt, `${before}..${after}`), handed_over: handedOver, turns: usage.turns, cost_usd: usage.costUsd,
+        reason: parsed.isError === 'true' ? parsed.message.slice(0, 300) : undefined,
+      });
       return {
         stop: false, secs: took, isError: parsed.isError, message: parsed.message, used: builderModelUsed(buildOut), sessionId: builderSessionId(buildOut), handedOver,
       };
+    };
+
+    /** A mutation's or probe's start and end as events, from the runner's
+     *  onRun: the span is <prefix>.<name>. */
+    const runEvents = (prefix: string, pass: string, f: Record<string, number> = {}): OnRun => (r) => {
+      const span = `${prefix}.${r.name}`;
+      const evidence = `.review/${storyId}/round-${round}/${pass === 'probe' ? 'probes' : 'mutations'}/${r.name}${pass === 'probe' ? '' : '.result'}`;
+      if (r.cls === undefined) ev.start(span, pass, { name: r.name, ac: r.ac, evidence, ...f });
+      else ev.end(span, { result: r.cls, reused: r.reused });
     };
 
     while (round < roundCeiling) {
       round += 1;
       setStoryField(root, storyId, 'round', String(round));
       log(`round ${round} of ${roundCeiling}`);
+      ev.context({ round });
+      ev.start(`r${round}`, 'round', { evidence: `.review/${storyId}/round-${round}` });
 
       const roundStartSha = revParse(builderWt, 'HEAD');
       const evidenceDir = `${root}/.review/${storyId}/round-${round}`;
@@ -643,6 +691,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let tBase = 0;
       let tMut = 0;
       let builderHandedOver = false;
+      let baselines = 0;
 
       state.round = String(round);
       const reviewFileText = isFile(reviewFile) ? readFileSync(reviewFile, 'utf8') : '';
@@ -672,7 +721,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         log('REVIEW_ONLY: skipping the builder');
       } else {
         log(`builder: ${roundModel}`);
-        const c = await builderCall({ round, evidenceDir, prompt: buildPrompt, model: roundModel, who: 'the builder', tag: 'builder', json: 'builder.json' });
+        const c = await builderCall({ round, evidenceDir, prompt: buildPrompt, model: roundModel, name: 'build', who: 'the builder', tag: 'builder', json: 'builder.json' });
         if (c.stop) return c.code;
         tBuild = c.secs;
         builderUsed = c.used;
@@ -699,22 +748,34 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       // tree is made afresh at every head the baseline checks.
 
       const baselineAt = (sha: string): Baseline => {
+        baselines += 1;
+        const k = `r${round}.baseline.${baselines}`;
+        const head = sha.slice(0, 8);
         cleanupReviewer();
-        log(`reviewer worktree at ${sha.slice(0, 8)}`);
+        log(`reviewer worktree at ${head}`);
+        ev.start(`${k}.install`, 'install', { name: 'reviewer', head, evidence: `.runs/${storyId}-install-reviewer.log` });
         if (worktreeAdd(root, reviewerWt, { detach: sha }) !== 0) throw new Die('reviewer worktree failed');
         seedEnv(reviewerWt);
-        if (runBashTo(cfg.installCmd, { cwd: reviewerWt, logFile: `${root}/.runs/${storyId}-install-reviewer.log` }) !== 0) {
+        const installed = runBashTo(cfg.installCmd, { cwd: reviewerWt, logFile: `${root}/.runs/${storyId}-install-reviewer.log` });
+        ev.end(`${k}.install`, { result: installed === 0 ? 'OK' : 'FAILED', exit: installed });
+        if (installed !== 0) {
           throw new Die(`install failed in the reviewer tree (${cfg.installCmd}) — see .runs/${storyId}-install-reviewer.log`);
         }
         const t = secs();
+        ev.start(k, 'baseline', { name: 'all', head, evidence: `.review/${storyId}/round-${round}/baseline` });
         const b = runBaseline({
           wt: reviewerWt, evidenceDir, rawJson: `${root}/.runs/${storyId}-round${round}-baseline.json`, installCmd: cfg.installCmd,
           vitestCmd: cfg.vitestCmd, buildCmd: cfg.buildCmd, lintCmd: cfg.lintCmd,
           ...(cfg.e2eCmd !== undefined ? { e2eCmd: cfg.e2eCmd } : {}),
           ...(cfg.e2eTimeoutSec !== undefined ? { e2eTimeoutSec: cfg.e2eTimeoutSec } : {}),
+          onStep: (step, colour) => {
+            if (colour === undefined) ev.start(`${k}.${step}`, 'baseline', { name: step, head, evidence: `.review/${storyId}/round-${round}/baseline/${step}.log` });
+            else ev.end(`${k}.${step}`, { result: colour });
+          },
         });
         tBase += secs() - t;
         log(`baseline: ${baselineLine(b)}`);
+        ev.end(k, { result: baselineGreen(b) ? 'GREEN' : 'RED', reason: baselineLine(b) });
         return b;
       };
       let baseline = baselineAt(headSha);
@@ -765,7 +826,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
           })}`;
           const before = headSha;
           const c = await builderCall({
-            round, evidenceDir, prompt: render('baseline-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
+            round, evidenceDir, prompt: render('baseline-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true, name: `baseline-fix-${fixes}`,
             who: `the builder's baseline fix ${fixes}`, tag: `baseline fix ${fixes}`, json: `builder-fix-${fixes}.json`,
           });
           if (c.stop) return c.code;
@@ -791,8 +852,12 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         const tT = secs();
         const record = new Map<string, KnownRun>();
         let rows;
+        ev.start(`r${round}.tdd.${k}`, 'tdd', { name: 'check', check: k, head: headSha.slice(0, 8), evidence: `.review/${storyId}/round-${round}/tdd-check-${k}.txt` });
         try {
-          rows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns });
+          rows = runMutations({
+            wt: reviewerWt, evidenceDir, rawPrefix: tddPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log: (m) => log(`tdd check ${k}: ${m}`), known: tddKnown, record, preRuns,
+            onRun: runEvents(`r${round}.tdd.${k}`, 'tdd', { check: k }),
+          });
         } catch (e) {
           if (!(e instanceof RunnerError)) throw e;
           if (e.before !== undefined) dieMessage(e.before);
@@ -803,6 +868,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         writeFileSync(`${evidenceDir}/tdd-check-${k}.txt`, `${rows.map((r) => `${r.cls} ${r.ac}-${r.slug}`).join('\n')}\n`);
         tddEntries.push(`check ${k}: ${tddCounts(rows)} (${secs() - tT}s)`);
         log(`tdd check ${k}: ${tddCounts(rows)}`);
+        ev.end(`r${round}.tdd.${k}`, { result: rows.every((r) => r.cls === 'RED') ? 'RED' : 'NOT_RED', reason: tddCounts(rows) });
         if (rows.every((r) => r.cls === 'RED')) break;
         if (tddFixes >= knobs.tddFixes) {
           if (knobs.tddFixes > 0) warn(`tdd check: pairs still not RED after ${knobs.tddFixes} fix(es) — they stand, and the verdict reads them`);
@@ -817,7 +883,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         log(`tdd check: not every pair is RED — back to the builder, fix ${tddFixes} of ${knobs.tddFixes}`);
         const before = headSha;
         const c = await builderCall({
-          round, evidenceDir, prompt: render('tdd-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true,
+          round, evidenceDir, prompt: render('tdd-fix.md'), model: roundModel, resume: sessionId, replaceMutations: true, name: `tdd-fix-${tddFixes}`,
           who: `the builder's tdd fix ${tddFixes}`, tag: `tdd fix ${tddFixes}`, json: `builder-tdd-fix-${tddFixes}.json`,
         });
         if (c.stop) return c.code;
@@ -850,6 +916,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const scope = checkScope({ deny: storyField(root, storyId, 'scope_deny'), changed: changedPaths, storyId });
       writeFileSync(`${evidenceDir}/scope.txt`, scope.fileText);
       log(scope.logLine);
+      ev.mark('scope', { result: scope.scope, reason: scope.hits.join(' '), evidence: `.review/${storyId}/round-${round}/scope.txt` });
       tBase += secs() - t0;
 
       state.headSha = headSha;
@@ -862,6 +929,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       const codexHome = process.env['CODEX_HOME'] || join(process.env['HOME'] ?? '', '.codex');
       log(fallbackReviewer ? `reviewer: claude ${reviewerModelAsked} (fallback)` : `reviewer: codex${reviewerModelAsked !== '' ? ` ${reviewerModelAsked}` : ''}`);
       t0 = secs();
+      const reviewerSpan = `r${round}.reviewer`;
+      ev.start(reviewerSpan, 'reviewer', { agent: reviewerCli, model: reviewerModelAsked, head: headSha.slice(0, 8), evidence: `.review/${storyId}/round-${round}/reviewer.md` });
       let reviewerUsed: string;
       let refusal: string | undefined;
       let refusalNote: string;
@@ -871,6 +940,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         const cr = await runBuilder({ wt: reviewerWt, prompt: reviewPrompt, model: reviewerModelAsked, maxTurns: knobs.maxTurns, timeoutSec: knobs.agentTimeout });
         tReview = secs() - t0;
         if (cr.timedOut) {
+          ev.end(reviewerSpan, { result: 'TIMEOUT', reason: `killed at AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s)` });
           setStatus(storyId, 'needs_human');
           throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
         }
@@ -889,6 +959,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         tReview = secs() - t0;
         reviewerUsed = reviewerModelUsed({ codexHome, cwd: resolve(reviewerWt), sinceMs: reviewerStartMs });
         if (rv.timedOut) {
+          ev.end(reviewerSpan, { result: 'TIMEOUT', reason: `killed at AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s)` });
           setStatus(storyId, 'needs_human');
           throw new Die(`round ${round}: the reviewer exceeded AGENT_TIMEOUT (${knobs.agentTimeoutRaw}s) and was killed`);
         }
@@ -900,6 +971,12 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         if (refusal === undefined) for (const n of msgs.noise) writeSync(2, `${n}\n`);
         reviewerSaid = msgs.text;
       }
+
+      // OK: it answered. What it said is the verdict mark's `reviewer`:
+      // only lib/verdict.ts reads its line (case 108).
+      ev.end(reviewerSpan, refusal !== undefined
+        ? { result: 'UNAVAILABLE', reason: refusal, model_used: reviewerUsed }
+        : { result: 'OK', model_used: reviewerUsed });
 
       // The provider refused the call (21 Sep: a codex usage limit). Nobody
       // reviewed, so there is no verdict to compute and the round is not
@@ -932,6 +1009,9 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
         rmSync(newFile, { force: true });
         setStoryField(root, storyId, 'round', String(round - 1));
         setStoryField(root, storyId, 'not_before', formatIsoSeconds(resumeAt));
+        ev.mark('verdict', { result: 'UNAVAILABLE', reason: `reviewer unavailable: ${refusal}`, evidence: `.review/${storyId}.md` });
+        ev.end(`r${round}`, { result: 'UNAVAILABLE' });
+        outcome = 'UNAVAILABLE';
         setStatus(storyId, 'needs_human', pausedMessage({ repo: cfg.name, id: storyId, who: fallbackReviewer ? 'Claude' : 'Codex', refusal, resumeAt, known: resetAt !== undefined, now }));
         writeFileSync(runFile, runFileEnd(storyId, 'UNAVAILABLE', round - 1));
         return EXIT_AGENT_REFUSED;
@@ -970,10 +1050,12 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       let mutRows;
       let probeRows;
       try {
-        mutRows = runMutations({ wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log, known: tddKnown, preRuns });
+        mutRows = runMutations({
+          wt: reviewerWt, evidenceDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner, log, known: tddKnown, preRuns, onRun: runEvents(`r${round}.mut`, 'mutation'),
+        });
         probeRows = runProbes({
           wt: reviewerWt, evidenceDir, probeDir: cfg.probeDir, rawPrefix, vitestCmd: cfg.vitestCmd, ...cargoRunner,
-          ...(cfg.cargoProbeDir !== undefined ? { cargoProbeDir: cfg.cargoProbeDir } : {}), log,
+          ...(cfg.cargoProbeDir !== undefined ? { cargoProbeDir: cfg.cargoProbeDir } : {}), log, onRun: runEvents(`r${round}.probe`, 'probe'),
         });
       } catch (e) {
         if (!(e instanceof RunnerError)) throw e;
@@ -1000,6 +1082,8 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
       }));
       verdict = v.computed;
       writeReviewFile();
+      ev.mark('verdict', { result: v.computed, reviewer: v.model, reason: v.reasons.join(REASON_END), evidence: `.review/${storyId}.md` });
+      ev.end(`r${round}`, { result: v.computed });
       if (v.model === 'PASS' && verdict === 'FAIL') warn(`machine veto: ${v.reasons.map((r) => `${r}${REASON_END}`).join('')}`);
 
       // What the next round's builder reads is the review so far — exactly
@@ -1023,6 +1107,7 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
 
     writeReviewFile();
     rmSync(newFile, { force: true });
+    outcome = verdict;
 
     if (verdict === 'PASS') {
       setStatus(storyId, 'done');
@@ -1043,7 +1128,11 @@ export async function launch(cfg: RepoConfig, o: LaunchOptions): Promise<number>
     out(`branch ${branch}, worktree ${builderWt}\n`);
     out(`when finished: git worktree remove ${builderWt}\n`);
     return 0;
+  } catch (e) {
+    ev.endOpen({ result: 'DIED', exit: 1, reason: e instanceof Error ? e.message : String(e) });
+    throw e;
   } finally {
     cleanupReviewer();
+    ev.endOpen({ result: outcome || 'ENDED' });
   }
 }

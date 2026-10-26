@@ -94,6 +94,24 @@ describe('runMutations', () => {
     expect(readFileSync(join(wt, 'src/marker.txt'), 'utf8')).not.toMatch(/FLEET_MUTANT_MARKER/);   // restored: checkout
   });
 
+  it('tells onRun when each patch starts and ends, and that a class the tdd check made was reused', () => {
+    const m = join(ev, 'mutations'); mkdirSync(m);
+    markerPatch(m, 'AC1-a', 'test');
+    markerPatch(m, 'AC2-b');
+    const record = new Map<string, KnownRun>();
+    runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, record });
+    const seen: string[] = [];
+    const onRun = (r: { name: string; ac: string; cls?: string; reused?: boolean }): void => {
+      seen.push(`${r.name} ${r.ac} ${r.cls ?? 'start'}${r.reused === true ? ' reused' : ''}`);
+    };
+    runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, known: record, onRun });
+    expect(seen).toEqual(['AC1-a AC1 start', 'AC1-a AC1 RED reused', 'AC2-b AC2 start', 'AC2-b AC2 NO_SELECTOR reused']);
+    seen.length = 0;
+    rmSync(join(m, 'AC1-a.result'));
+    runMutations({ wt, evidenceDir: ev, rawPrefix, vitestCmd: FAKE_VITEST, log, onRun });
+    expect(seen).toEqual(['AC1-a AC1 start', 'AC1-a AC1 RED', 'AC2-b AC2 start', 'AC2-b AC2 NO_SELECTOR']);
+  });
+
   it('one pre-run per selector for the whole round: three patches naming one selector cost four runs, not six (L-39)', () => {
     const m = join(ev, 'mutations'); mkdirSync(m);
     for (const n of ['AC1-a', 'AC1-b', 'AC2-c']) markerPatch(m, n, 'test');
@@ -193,6 +211,15 @@ describe('runProbes', () => {
     expect(readFileSync(`${rawPrefix('probe-probe-red.test.tsx')}.sel`, 'utf8')).toBe('src/fleet-probe-probe-red.test.tsx\n');
     expect(readdirSync(join(wt, 'src')).filter((n) => n.startsWith('fleet-probe-'))).toEqual([]);
     expect(readFileSync(join(dir, 'trace/calls'), 'utf8')).toMatch(/vitest src\/fleet-probe-probe-red\.test\.tsx/);
+  });
+
+  it('tells onRun when each probe starts and ends', () => {
+    const p = join(ev, 'probes'); mkdirSync(p);
+    process.env['FAKE_VITEST'] = 'pass';
+    writeFileSync(join(p, 'a.test.ts'), '//\n');
+    const seen: string[] = [];
+    runProbes({ wt, evidenceDir: ev, probeDir: 'src', rawPrefix, vitestCmd: FAKE_VITEST, log, onRun: (r) => seen.push(`${r.name} ${r.cls ?? 'start'}`) });
+    expect(seen).toEqual(['a.test.ts start', 'a.test.ts GREEN']);
   });
 
   it('a PROBE_DIR that is not in the worktree is a die, naming it (case 86b)', () => {

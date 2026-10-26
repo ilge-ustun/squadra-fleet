@@ -25,6 +25,11 @@ export function frontmatterField(file: string, key: string): string {
   } catch {
     return '';
   }
+  return fieldOfText(text, key);
+}
+
+/** frontmatterField on a story's text — one read from git, say. */
+export function fieldOfText(text: string, key: string): string {
   const lines = records(text);
   if (lines[0] !== '---') return '';
   const prefix = `${key}:`;
