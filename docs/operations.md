@@ -212,11 +212,6 @@ deploys — belongs to that target, not here.
   `.runs/<id>-*` only), so a story's earlier rounds stay in the log after
   their evidence is gone.
 
-- **`fleet status` is slow on a big repo.** khaita's 132 stories take
-  7.5 s: several git calls for each story. It is most of the dashboard's
-  10 s bundle, and the phone's `/status` waits for it too. Open: keep a
-  landed story's state, which cannot change.
-
 ## Decided, and why
 
 - **TypeScript, run as is.** Node strips the types as it loads
