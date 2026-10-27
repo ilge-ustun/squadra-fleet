@@ -3590,7 +3590,11 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_175_answers_and_epics_are_marked
        case_176_revert_reset_and_test_deploy_are_logged
        case_177_fleet_events
-       case_178_drain_prunes_the_build_cache)
+       case_178_drain_prunes_the_build_cache
+       case_179_dashboard_bundle
+       case_180_dashboard_serve
+       case_181_dashboard_page
+       case_182_dashboard_unit)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3677,7 +3681,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents; do
+  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents dashboard; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5440,6 +5444,15 @@ case_177_fleet_events() {
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="launch") | .event + " " + .source + " " + (.result // "-")' | tr '\n' ',')" "start git -,end git PASS," "the launch, from git"
   assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.pass=="verdict") | .source + " " + .result' | tr '\n' ',')" "machine PASS," "the verdict, from the Machine block"
   assert_eq "$(cd "$FX" && bash "$FLEET/fleet" events t --bogus 2>&1 >/dev/null | grep -c 'usage: fleet events')" 1 "an unknown flag is the usage"
+
+  # journald rotates; a human saves the queue's lines in .runs/journal-*.log
+  # first (docs/operations.md), and --journal reads the copies with it.
+  CASE="177d --journal reads the journal's copies saved in .runs/journal-*.log"
+  printf '%s\n' \
+    '2026-10-18T04:21:38.100000+02:00 box fleet-queue-t[4322]: ==> story 900' \
+    '2026-10-18T04:21:39.100000+02:00 box fleet-queue-t[4322]: ==> round 1 of 2' > "$REPO/.runs/journal-2026-10.log"
+  out="$(cd "$FX" && bash "$FLEET/fleet" events t "$STORY" --journal 2>&1)"
+  assert_eq "$(printf '%s\n' "$out" | jq -r 'select(.source=="journal") | .pass + " " + .event' | tr '\n' ',')" "launch start,round start," "the saved launch and its round, from the copy"
 }
 
 # A cargo target keeps one build folder per worktree outside it,
@@ -5468,6 +5481,96 @@ case_178_drain_prunes_the_build_cache() {
   assert_grep 'build cache: removed .*wt-900-review' "$FX/queue.log" "the reviewer's folder, made by its install, is removed"
   assert_eq "$([[ -d "$c/wt-900" ]] && echo kept || echo gone)" "$([[ -d "$FX/wt-900" ]] && echo kept || echo gone)" "the builder's folder goes exactly when its worktree did"
   assert_eq "$([[ -d "$c/repo" ]] && echo kept)" kept "the checkout's own folder stays"
+}
+
+# fleet dashboard bundle: everything the dashboard shows, read once — the
+# catalog, the events with their backfill, each round's Machine block, and
+# the present. Read-only. Red while the fleet has no dashboard command.
+case_179_dashboard_bundle() {
+  CASE="179 fleet dashboard bundle reads every repo, and writes nothing"; fixture c179
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local before out rc
+  before="$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard bundle 2>"$FX/bundle.err")"; rc=$?
+  assert_eq "$rc" 0 "exit 0"
+  assert_eq "$(printf '%s' "$out" | jq -r '[.repos[].name] | join(",")')" t "the registered repo"
+  assert_eq "$(printf '%s' "$out" | jq -r '.repos[0].stories[] | select(.id=="900") | [.history[].kind] | join(",")')" "in_progress,done" "its story's history, from git"
+  assert_eq "$(printf '%s' "$out" | jq -r '.repos[0].stories[] | select(.id=="900") | .rounds[0].computed + " " + (.rounds[0].timing.total | type)')" "PASS number" "its round, from the Machine block"
+  assert_eq "$(printf '%s' "$out" | jq -r '[.events.t[] | select(.source=="log" and .pass=="launch") | .event] | join(",")')" "start,end" "the log's launch"
+  assert_eq "$(printf '%s' "$out" | jq -r '.machine.t["900"]["1"] | startswith("baseline:")')" true "and the round's Machine block"
+  assert_eq "$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)" "$before" "nothing was written"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard bogus 2>&1)"; rc=$?
+  assert_eq "$rc" 1 "an unknown subcommand fails"
+  assert_contains "$out" "usage: fleet dashboard" "with the usage"
+}
+
+# fleet dashboard serve: the page and its JSON on a loopback port, read-only
+# — GET and HEAD only, a fixed list of routes, nothing from the disk but the
+# page's own files. Red while the dashboard has no server.
+dash_get() {                          # dash_get <url> [method] → "<status> <csp?>" then the body
+  node -e 'const [u, m] = process.argv.slice(1); fetch(u, { method: m || "GET" }).then(async (r) => { process.stdout.write(`${r.status}${r.headers.get("content-security-policy") ? " csp" : ""}\n${await r.text()}`); })' "$@"
+}
+case_180_dashboard_serve() {
+  CASE="180 fleet dashboard serve answers the page and the fleet, on loopback, read-only"; fixture c180
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local before pid base out rc
+  before="$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l)"
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  assert_eq "$(dash_get "$base/api/health" | head -1)" "200 csp" "an answer, with its policy"
+  assert_eq "$(dash_get "$base/api/catalog" | tail -n +2 | jq -r '.repos[0].name')" t "the catalog names the repo"
+  assert_eq "$(dash_get "$base/api/story?repo=t&id=900" | tail -n +2 | jq -r '.story.id + " " + (.life.entries | map(.kind) | index("launch") | type)')" "900 number" "a story's life holds its launch"
+  assert_eq "$(dash_get "$base/api/moment" | tail -n +2 | jq -r '.now')" true "the moment is now"
+  assert_eq "$(dash_get "$base/api/catalog" POST | head -1 | cut -d" " -f1)" 405 "a POST is refused"
+  assert_eq "$(dash_get "$base/../repos/t.env" | head -1 | cut -d" " -f1)" 404 "no path reaches the disk"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_eq "$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l)" "$before" "nothing was written"
+
+  CASE="180b a host that is not loopback is refused"
+  out="$(cd "$FX" && bash "$FLEET/fleet" dashboard serve --host 0.0.0.0 2>&1)"; rc=$?
+  assert_eq "$rc" 1 "exit 1"
+  assert_contains "$out" "0.0.0.0 is not a loopback address" "and says why"
+}
+
+# The dashboard's page: its own files only, served under the server's
+# policy — the HTML loads app.js and style.css from the server, no file
+# names another host, and the script parses. Red while dashboard/ has no page.
+case_181_dashboard_page() {
+  CASE="181 the dashboard's page is its own files, served with its policy"; fixture c181
+  local f pid base out
+  for f in index.html app.js style.css icon.svg; do assert_file "$FLEET/dashboard/$f" "dashboard/$f is there"; done
+  assert_eq "$(node --check "$FLEET/dashboard/app.js" 2>&1; echo "rc=$?")" "rc=0" "app.js parses"
+  assert_eq "$(grep -l -E 'https?://' "$FLEET/dashboard/index.html" "$FLEET/dashboard/app.js" "$FLEET/dashboard/style.css" | tr '\n' ' ')" "" "no file names another host"
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  out="$(dash_get "$base/")"
+  assert_eq "$(head -1 <<< "$out")" "200 csp" "the page, with its policy"
+  assert_contains "$out" 'src="app.js"' "it loads its own script"
+  assert_contains "$out" 'href="style.css"' "and its own styles"
+  assert_eq "$(dash_get "$base/app.js" | head -1)" "200 csp" "the script is served"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
+# The dashboard's unit: the server on its loopback port, and last in line
+# for memory, CPU and disk beside the drains and the other services on the
+# box. Red while systemd/ has no such unit.
+case_182_dashboard_unit() {
+  CASE="182 fleet-dashboard.service serves the dashboard, last in line for the machine"; fixture c182
+  local u="$FLEET/systemd/fleet-dashboard.service"
+  assert_file "$u" "the unit is in systemd/"
+  assert_grep '^ExecStart=.*/fleet dashboard serve --port 4300$' "$u" "it runs the server on its port"
+  assert_grep '^Environment=GIT_OPTIONAL_LOCKS=0$' "$u" "its git takes no lock a commit needs"
+  assert_grep '^OOMScoreAdjust=500$' "$u" "the kernel ends it first under memory pressure"
+  assert_grep '^MemoryMax=[0-9]+M$' "$u" "its memory has a ceiling"
+  assert_grep '^CPUWeight=20$' "$u" "it gets the CPU last"
+  assert_grep '^Restart=on-failure$' "$u" "a crash comes back"
+  assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
 }
 
 for c in "${CASES[@]}"; do

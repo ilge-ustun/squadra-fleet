@@ -1,0 +1,44 @@
+[Unit]
+Description=fleet — the read-only dashboard on 127.0.0.1:4300
+Documentation=file:///home/fleet/work/fleet/systemd/README.md
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fleet/work/fleet
+
+# The same PATH as fleet-queue@.service: the bundle runs node, git,
+# systemctl and journalctl.
+Environment=PATH=/home/fleet/.local/bin:/home/fleet/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/fleet
+
+# The dashboard only reads. Its git takes no optional lock, so it never
+# holds the index lock a launcher's or the bot's commit needs.
+Environment=GIT_OPTIONAL_LOCKS=0
+
+# Loopback only; Caddy publishes it behind a password (systemd/README.md).
+ExecStart=/bin/bash /home/fleet/work/fleet/fleet dashboard serve --port 4300
+
+# A crash comes back; a stop (exit 0 on SIGTERM) stays stopped.
+Restart=on-failure
+RestartSec=10
+
+# Last in line, beside the drains, the test server and the song service:
+# the kernel ends it first under memory pressure, it gets the CPU and the
+# disk last, and it never takes more than its ceiling. Measured 26 Oct with
+# both repos: the server holds about 120 MB, and the child that builds the
+# next bundle, at most once a minute while someone looks, peaks near 210 MB.
+MemoryHigh=400M
+MemoryMax=512M
+OOMScoreAdjust=500
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+# Its start, its stop and its errors; a request writes nothing.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fleet-dashboard
+
+[Install]
+WantedBy=default.target

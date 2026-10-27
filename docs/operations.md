@@ -77,8 +77,8 @@ When nothing is deployed, Caddy answers 502.
 
 ## Unattended
 
-`systemd/` holds three timer/service pairs and one service, installed as
-user units with lingering on (`systemd/README.md`):
+`systemd/` holds three timer/service pairs and two services, installed
+as user units with lingering on (`systemd/README.md`):
 
 - `fleet-queue@<repo>` — `fleet run-queue <repo> --max 5` every 15 minutes,
   one instance per registered repo (so repos drain side by side): reaps
@@ -95,6 +95,9 @@ user units with lingering on (`systemd/README.md`):
 - `fleet-remote-control` — `fleet remote-control`, always: a Claude Code
   Remote Control server in `~/work`, so the coordinator can be reached from
   the app after a reboot. Not part of the pipeline; nothing waits for it.
+- `fleet-dashboard` — `fleet dashboard serve`, always: the read-only
+  dashboard on `127.0.0.1:4300`, which Caddy publishes with a password. Not
+  part of the pipeline; nothing waits for it.
 
 ## What needs a human, fleet-wide
 
@@ -117,6 +120,10 @@ user units with lingering on (`systemd/README.md`):
   refused, the same Caddyfile with `179-237-101-204.nip.io`, and that URL in
   `.env.fleet`, is the fallback.
 
+- **The dashboard's Caddy site, once, as `ubuntu`.** A site of its own,
+  `fleet.179-237-101-204.sslip.io`, with a password, in front of
+  `127.0.0.1:4300` (`systemd/README.md`, "The dashboard"). The test URL's
+  site and the song service's routes stay as they are.
 - **Log `glab` in** before a GitLab target switches to `MERGE_MODE=pr`:
   `glab auth login --hostname gitlab.com --token` with a project token
   (`api` scope, Developer role), then `MERGE_MODE=pr` and the `PR_CMD` from
@@ -205,6 +212,11 @@ deploys — belongs to that target, not here.
   `.runs/<id>-*` only), so a story's earlier rounds stay in the log after
   their evidence is gone.
 
+- **`fleet status` is slow on a big repo.** khaita's 132 stories take
+  7.5 s: several git calls for each story. It is most of the dashboard's
+  10 s bundle, and the phone's `/status` waits for it too. Open: keep a
+  landed story's state, which cannot change.
+
 ## Decided, and why
 
 - **TypeScript, run as is.** Node strips the types as it loads
@@ -220,6 +232,13 @@ deploys — belongs to that target, not here.
 - **The reviewer's span ends OK, not with its verdict.** Only
   `lib/verdict.ts` reads the reviewer's line (case 108). The verdict mark
   carries what the reviewer said, as `reviewer`.
+- **The dashboard is a read-only service on loopback** (26 Oct 2026, the
+  human's choice of two). The other was a static page rebuilt by a timer:
+  nothing would listen, but the page would be minutes old, and each phone
+  load would carry the whole history. The service builds its data in a
+  child, serves GET only, writes nothing, and is last in line for memory
+  and CPU; Caddy publishes it with a password, because the stories are the
+  targets' own.
 - **Zero runtime dependencies.** A call from a systemd timer or a builder's
   session must work whether or not `npm ci` ever ran; the suite proves it on
   every run.

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FleetEvent } from './events.ts';
-import { journalEvents, parseJournal } from './journal.ts';
+import { journalEvents, mergeJournals, parseJournal, savedJournals } from './journal.ts';
 
 // A drain of qr-desktop-scanner as the journal kept it (22 Oct), cut short.
 const QR = `2026-10-22T00:19:18.034421+02:00 ov fleet-queue-qr[1147474]: \x1b[32m==> [queue] story 001 (1 of at most 5)\x1b[0m
@@ -135,5 +138,27 @@ describe('journalEvents — how a launch stops', () => {
       line('02:00:06', 8, '==> story 002', 'fleet-queue'),
     ].join('\n');
     expect(journalEvents(parseJournal(lines), { repo: 'k' }).map((e) => e.story)).toEqual(['002']);
+  });
+});
+
+describe('mergeJournals and savedJournals — the copies a human saved before journald rotated them', () => {
+  it('keeps each line once, in time order, across a change of offset', () => {
+    const a = ['2026-10-25T02:30:00.000001+02:00 h fleet-queue-k[1]: ==> story 001', '2026-10-25T02:10:00.000001+01:00 h fleet-queue-k[1]: ==> round 1 of 2'].join('\n');
+    const b = ['2026-10-25T02:30:00.000001+02:00 h fleet-queue-k[1]: ==> story 001', '2026-10-25T02:40:00.000001+02:00 h fleet-queue-k[1]: ==> installing deps', ''].join('\n');
+    expect(mergeJournals([a, b]).split('\n').map((l) => l.slice(l.indexOf(': ') + 2))).toEqual(['==> story 001', '==> installing deps', '==> round 1 of 2']);
+  });
+
+  it('reads every .runs/journal-*.log of a target, and nothing when there is none', () => {
+    const root = mkdtempSync(join(tmpdir(), 'fleet-journal-'));
+    try {
+      expect(savedJournals(root)).toEqual([]);
+      mkdirSync(join(root, '.runs'));
+      writeFileSync(join(root, '.runs', 'journal-2026-10.log'), 'x\n');
+      writeFileSync(join(root, '.runs', 'journal-2026-09.log'), 'y\n');
+      writeFileSync(join(root, '.runs', '900-install-builder.log'), 'z\n');
+      expect(savedJournals(root)).toEqual(['y\n', 'x\n']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

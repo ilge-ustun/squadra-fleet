@@ -356,12 +356,46 @@ line says where its time comes from:
   where the order of phases is assumed);
 - `mtime`: the evidence files, when the time is inside the round;
 - `journal` (with `--journal`): the queue units' journal, each pass to the
-  second, for as long as journald keeps it.
+  second, for as long as journald keeps it, and the copies of it saved in
+  the target's `.runs/journal-*.log`.
 
 When two sources tell of one pass, the log wins, then the journal.
 
 A launcher keeps the code it loaded. A launch that runs while this code
 lands writes no events, and its story's log starts at its next launch.
+
+## The dashboard
+
+A read-only web page over all of this: both projects at any moment, what
+needs a human, each epic in time order, the backlog with its intents, the
+landed stories, where the time goes, and one story's life as its event log
+(each time with its source). It changes nothing. No button promotes,
+merges or deploys; a command on the page is text for a person to run.
+
+`fleet dashboard serve` answers it on `127.0.0.1:4300`, loopback only, and
+`fleet-dashboard.service` keeps it running. Caddy publishes it behind a
+password (`systemd/README.md`). The page is `dashboard/`: plain HTML, CSS
+and JavaScript, no build, nothing from another host. Its server is
+`ts/src/dashboard/`:
+
+- `fleet dashboard bundle` reads every repo once — `fleet status`, the
+  event log with its backfill and the journal, the Machine blocks, and what
+  only the present says: the queue unit and its timer, the launch lock, the
+  test deploy — and prints it as JSON. The server runs it in a child, at
+  most once a minute and only while someone looks. On this machine it takes
+  about ten seconds, most of them `fleet status` of khaita.
+- `api/moment?at=<time>` is the fleet at that moment: each story's state
+  then, the pass each launch was in, a launcher that died and the pass it
+  died in, and why a stopped story stopped. The page's Moment control
+  replays any time; what no source records reads unknown.
+- `api/story?repo=<repo>&id=<id>` is one story's life: the writer, each
+  status change, each launch with its rounds and passes, the merge, the
+  epic's land and the test deploy.
+
+The server serves GET and HEAD only, a fixed list of routes, and no path
+from a request reaches the disk. Like a launcher, it keeps the code and the
+page it loaded: after the live checkout moves, `systemctl --user restart
+fleet-dashboard`.
 
 ## Commands
 
@@ -377,6 +411,7 @@ it from anywhere; it finds its tree through the link.
 | | `/repo` · `/help` | the repos this bot knows · the verbs, grouped |
 | `fleet status <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
 | `fleet events <repo> [id\|epic/<name>] [--backfill] [--journal]` | | what happened, pass by pass, as JSON lines (the event log) |
+| `fleet dashboard serve [--port N]` · `bundle` | | the read-only dashboard on a loopback port (4300 when absent) · its data as one JSON document |
 | `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
 | `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
 | `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
@@ -623,19 +658,21 @@ bin/lib.sh          FLEET_HOME and load_repo (the .fleet/config contract, read b
 bin/install-skills.sh  bin/update-agents.sh  bin/remote-control.sh   the bash chores
 ts/                 the harness, run by node as is:
   src/bin/          one entry point per command: launch merge revert reset run-queue lint-story
-                    new-epic write-story promote events mutation (check-mutation) status telegram
+                    new-epic write-story promote events dashboard mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
                     new-epic write-story promote events classifier status status-views telegram
+  src/dashboard/    the dashboard's server: catalog moment life (its model) bundle serve
   src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types events (the log) history journal (its backfill)
                     buildcache
   fixtures/         the status and Machine-block goldens
 .nvmrc              the Node the units pin
+dashboard/          the dashboard's page: index.html app.js style.css icon.svg
 prompts/            the agents' prompts; README = the verdict contract
 skills/             the coordinator's procedures (.agents/skills → skills/ for Codex)
 test/suite.sh       the suite            test/fakes/   claude, codex, vitest, cargo, npm; telegram-api.mts
-systemd/            the three timer/service pairs and the Remote Control service
+systemd/            the three timer/service pairs, the Remote Control service and the dashboard
 repos/              the registry         docs/         operations, lessons, coordinators
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```

@@ -6,7 +6,8 @@
 // --backfill adds the past the log did not see, each line with the source
 // of its time: the fleet's commits (`git`), the Machine blocks (`machine`),
 // the evidence files' times (`mtime`); --journal adds the queue's journal
-// as well (`journal`, to the microsecond, as long as the journal keeps it).
+// as well (`journal`, to the microsecond, as long as the journal keeps it,
+// and the copies saved in the target's .runs/journal-*.log).
 // One pass described twice is shown once: the log stands for every other
 // source, the journal for git's launches and the Machine block's rounds. A
 // status mark from git is always kept: the log writes none.
@@ -19,7 +20,7 @@ import { Die } from './lib/die.ts';
 import { EVENTS_FILE, readEvents, type FleetEvent } from './lib/events.ts';
 import { storyField } from './lib/frontmatter.ts';
 import { epicsCreated, gitEvents, machineEvents, mtimeEvents, reviewRounds, roundUsage, type RoundFacts } from './lib/history.ts';
-import { journalEvents, parseJournal, readJournal } from './lib/journal.ts';
+import { journalEvents, mergeJournals, parseJournal, readJournal, savedJournals } from './lib/journal.ts';
 import { storyIds } from './status.ts';
 
 export const USAGE = 'usage: fleet events <repo> [<story-id>|epic/<name>] [--backfill] [--journal]';
@@ -107,7 +108,7 @@ export function backfill(cfg: RepoConfig, o: { journal: boolean; readJournal?: (
     out.push(...machineEvents({ repo: cfg.name, story: id, epic, rounds, usage: (n) => roundUsage(root, id, n) }), ...mtimeEvents({ root, repo: cfg.name, story: id, epic, rounds }));
   }
   if (o.journal) {
-    const lines = parseJournal((o.readJournal ?? readJournal)(cfg.name));
+    const lines = parseJournal(mergeJournals([...savedJournals(root), (o.readJournal ?? readJournal)(cfg.name)]));
     out.push(...journalEvents(lines, {
       repo: cfg.name,
       machine: (story, n) => {
