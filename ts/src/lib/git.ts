@@ -53,6 +53,28 @@ export function isAncestor(root: string, a: string, b: string): boolean {
   return runSync('git', ['-C', root, 'merge-base', '--is-ancestor', a, b]).status === 0;
 }
 
+/** Every ref of this checkout and the commit it names, from one
+ *  `for-each-ref`; an annotated tag names the commit it points at. What
+ *  refExists and branchExists answer, without a git call for each. */
+export function refShas(root: string): Map<string, string> {
+  const r = runSync('git', ['-C', root, 'for-each-ref', '--format=%(refname) %(objectname) %(*objectname)']);
+  const refs = new Map<string, string>();
+  if (r.status !== 0) return refs;
+  for (const line of r.stdout.split('\n')) {
+    const [name, sha, peeled] = line.split(' ');
+    if (name !== undefined && name !== '' && sha !== undefined) refs.set(name, peeled !== undefined && peeled !== '' ? peeled : sha);
+  }
+  return refs;
+}
+
+/** `rev-list <ref>`: every commit reachable from it, its own included; empty
+ *  when git cannot answer. What isAncestor answers, for every commit at
+ *  once. 41 bytes a commit, so the buffer is far above any history here. */
+export function reachable(root: string, ref: string): Set<string> {
+  const r = runSync('git', ['-C', root, 'rev-list', ref], { maxBuffer: 256 * 1024 * 1024 });
+  return new Set(r.status === 0 ? r.stdout.split('\n').filter((l) => l !== '') : []);
+}
+
 /** `rev-list --count <range>`; 0 when git cannot answer or does not print a
  *  number. */
 export function revListCount(root: string, range: string): number {

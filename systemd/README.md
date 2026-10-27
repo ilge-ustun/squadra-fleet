@@ -178,7 +178,7 @@ only there.
 ln -sf ~/work/fleet/systemd/fleet-dashboard.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now fleet-dashboard.service
-curl -s 127.0.0.1:4300/api/health    # {"ok":true,…} after its first read, about 10 s
+curl -s 127.0.0.1:4300/api/health    # {"ok":true,…} after its first read, about 3 s
 ```
 
 The outside reaches it through Caddy, with a password. That is root's edit,

@@ -11,6 +11,7 @@ import {
   fetchQuiet, gitDir, mergeNoEditQuiet, upstreamBranch, pushFollowingUpstream,
   catFileExists, showLineCount,
   fetchRef, revParseShort, treeOf,
+  reachable, refShas,
 } from './git.ts';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 
@@ -75,6 +76,26 @@ describe('the queries fleet status makes', () => {
     expect(revListCount(root, 'story/1..base')).toBe(1);
     expect(revListCount(root, 'origin/base..story/1')).toBe(1);
     expect(revListCount(root, 'nope..base')).toBe(0);
+  });
+
+  it('refShas: every ref and its commit, from one for-each-ref', () => {
+    const refs = refShas(root);
+    expect(refs.get('refs/heads/base')).toBe(second);
+    expect(refs.get('refs/remotes/origin/base')).toBe(second);
+    expect(refs.get('refs/heads/story/1')).toBe(git(['rev-parse', 'story/1']));
+    expect(refs.has('refs/heads/story/2')).toBe(false);
+  });
+
+  it('refShas: an annotated tag names its commit, not the tag object', () => {
+    git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'tag', '-a', '-m', 'a tag', 'v1', first]);
+    expect(refShas(root).get('refs/tags/v1')).toBe(first);
+    git(['tag', '-d', 'v1']);
+  });
+
+  it('reachable: the commits rev-list gives, empty when git cannot answer', () => {
+    expect([...reachable(root, 'base')].sort()).toEqual([first, second].sort());
+    expect(reachable(root, 'story/1').has(second)).toBe(false);
+    expect(reachable(root, 'nope').size).toBe(0);
   });
 });
 

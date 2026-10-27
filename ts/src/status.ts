@@ -26,7 +26,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { RepoConfig } from './lib/config.ts';
 import { records, storyField } from './lib/frontmatter.ts';
-import { branchExists, isAncestor, refExists, revListCount } from './lib/git.ts';
+import { isAncestor, reachable, refExists, refShas } from './lib/git.ts';
 import { procsInWorktree as liveProcs } from './lib/procs.ts';
 import { readReview } from './lib/review.ts';
 
@@ -220,22 +220,95 @@ export function countsMerged(status: string, merged: boolean): boolean {
   return status === 'done' && merged;
 }
 
+/** The git questions statusOf asks, each with the answer git gives. */
+export interface GitView {
+  /** As `rev-parse --verify`: does the name resolve. */
+  refExists: (name: string) => boolean;
+  /** A local branch, only. */
+  branchExists: (name: string) => boolean;
+  /** As `merge-base --is-ancestor <a> <b>`. */
+  isAncestor: (a: string, b: string) => boolean;
+  /** As `rev-list --count <base>..<ref>`: 0 when git cannot read either. */
+  aheadOf: (base: string, ref: string) => number;
+}
+
+export interface GitReaders {
+  refShas: typeof refShas;
+  reachable: typeof reachable;
+  refExists: typeof refExists;
+  isAncestor: typeof isAncestor;
+}
+
+/** One statusOf call's git: the refs from one `for-each-ref`, and each
+ *  branch's history from one `rev-list`, the first time it is asked. A name
+ *  resolves by git's own order (gitrevisions: refs/<n>, refs/tags/<n>,
+ *  refs/heads/<n>, refs/remotes/<n>, refs/remotes/<n>/HEAD); a full sha is
+ *  itself; anything else — an epic not on origin, a short sha written by
+ *  hand — asks git, once for each name. Before, each story cost four or
+ *  more git calls: khaita's 133 stories made 926 and took about 9 s
+ *  (27 Oct; suite case 183). */
+export function gitView(root: string, git: GitReaders = { refShas, reachable, refExists, isAncestor }): GitView {
+  const refs = git.refShas(root);
+  const histories = new Map<string, Set<string>>();
+  const asked = new Map<string, boolean>();
+  const resolve = (name: string): string | undefined => {
+    if (/^[0-9a-f]{40}$/.test(name)) return name;
+    for (const r of [`refs/${name}`, `refs/tags/${name}`, `refs/heads/${name}`, `refs/remotes/${name}`, `refs/remotes/${name}/HEAD`]) {
+      const sha = refs.get(r);
+      if (sha !== undefined) return sha;
+    }
+    return undefined;
+  };
+  const history = (ref: string): Set<string> => {
+    let h = histories.get(ref);
+    if (h === undefined) {
+      h = git.reachable(root, ref);
+      histories.set(ref, h);
+    }
+    return h;
+  };
+  return {
+    refExists: (name) => {
+      if (resolve(name) !== undefined) return true;
+      let e = asked.get(name);
+      if (e === undefined) {
+        e = git.refExists(root, name);
+        asked.set(name, e);
+      }
+      return e;
+    },
+    branchExists: (name) => refs.has(`refs/heads/${name}`),
+    isAncestor: (a, b) => {
+      const sha = resolve(a);
+      return sha === undefined ? git.isAncestor(root, a, b) : history(b).has(sha);
+    },
+    aheadOf: (base, ref) => {
+      const b = history(base);
+      const r = history(ref);
+      if (b.size === 0) return 0;
+      let n = 0;
+      for (const c of r) if (!b.has(c)) n++;
+      return n;
+    },
+  };
+}
+
 /** What git says about a story's branch against `into`: the branch name (or
  *  DASH), whether it is merged there, and how far ahead it is if not. A branch
  *  deleted after its merge leaves only the `merged:` sha `fleet merge`
  *  recorded; that sha in `into` is the same fact. */
-function mergeState(root: string, id: string, into: string): { branch: string; merged: boolean; ahead: number } {
+function mergeState(git: GitView, root: string, id: string, into: string): { branch: string; merged: boolean; ahead: number } {
   let branch = `story/${id}`;
   let merged = false;
   let ahead = 0;
-  if (branchExists(root, branch)) {
-    if (isAncestor(root, branch, into)) merged = true;
-    else ahead = revListCount(root, `${into}..${branch}`);
+  if (git.branchExists(branch)) {
+    if (git.isAncestor(branch, into)) merged = true;
+    else ahead = git.aheadOf(into, branch);
   } else {
     branch = DASH;
   }
   const mergedSha = storyField(root, id, 'merged');
-  if (!merged && mergedSha !== '' && isAncestor(root, mergedSha, into)) merged = true;
+  if (!merged && mergedSha !== '' && git.isAncestor(mergedSha, into)) merged = true;
   return { branch, merged, ahead };
 }
 
@@ -249,7 +322,19 @@ function readText(path: string): string | undefined {
 
 export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: StatusDeps = { procsInWorktree: liveProcs }): Status {
   const root = cfg.root;
-  const refOf = (branch: string): string => (refExists(root, `origin/${branch}`) ? `origin/${branch}` : branch);
+  const git = gitView(root);
+  const refOf = (branch: string): string => (git.refExists(`origin/${branch}`) ? `origin/${branch}` : branch);
+  // The epic block and the table ask the same story the same question.
+  const merges = new Map<string, ReturnType<typeof mergeState>>();
+  const mergeOf = (id: string, into: string): ReturnType<typeof mergeState> => {
+    const key = `${id} ${into}`;
+    let m = merges.get(key);
+    if (m === undefined) {
+      m = mergeState(git, root, id, into);
+      merges.set(key, m);
+    }
+    return m;
+  };
   const baseRef = refOf(cfg.baseBranch);
   const ids = storyIds(root);
 
@@ -264,7 +349,7 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
     const status = storyField(root, id, 'status');
     if (status === 'declined') continue;
     total.set(e, (total.get(e) ?? 0) + 1);
-    if (countsMerged(status, mergeState(root, id, refOf(e)).merged)) {
+    if (countsMerged(status, mergeOf(id, refOf(e)).merged)) {
       mergedCount.set(e, (mergedCount.get(e) ?? 0) + 1);
     }
   }
@@ -272,8 +357,8 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
     name,
     total: total.get(name) ?? 0,
     merged: mergedCount.get(name) ?? 0,
-    ahead: revListCount(root, `${baseRef}..${refOf(name)}`),
-    exists: refExists(root, `origin/${name}`) || branchExists(root, name),
+    ahead: git.aheadOf(baseRef, refOf(name)),
+    exists: git.refExists(`origin/${name}`) || git.branchExists(name),
   }));
 
   const stories: StoryRow[] = [];
@@ -303,11 +388,11 @@ export function statusOf(cfg: RepoConfig, opts: StatusOptions = {}, deps: Status
 
     const base = storyField(root, id, 'base') || cfg.baseBranch;
     const into = refOf(base);
-    const { branch, merged, ahead } = mergeState(root, id, into);
+    const { branch, merged, ahead } = mergeOf(id, into);
 
     const landing = landingOf({
       status, merged, verdict, branch, base, baseBranch: cfg.baseBranch,
-      intoInBase: () => isAncestor(root, into, baseRef),
+      intoInBase: () => git.isAncestor(into, baseRef),
     });
     const blocked = questionOpen(status, existsSync(`${root}/.blocked/${id}.md`));
     if (blocked) notes.push(`BLOCKED: see .blocked/${id}.md`);

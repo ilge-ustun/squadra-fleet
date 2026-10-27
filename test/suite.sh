@@ -3594,7 +3594,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_179_dashboard_bundle
        case_180_dashboard_serve
        case_181_dashboard_page
-       case_182_dashboard_unit)
+       case_182_dashboard_unit
+       case_183_status_asks_git_per_repo)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5571,6 +5572,41 @@ case_182_dashboard_unit() {
   assert_grep '^CPUWeight=20$' "$u" "it gets the CPU last"
   assert_grep '^Restart=on-failure$' "$u" "a crash comes back"
   assert_grep '^WantedBy=default.target$' "$u" "started with the user manager"
+}
+
+
+# 27 Oct: `fleet status khaita`, 133 stories, made 926 git calls and took
+# about 9 s, four or more calls for each story; the dashboard and the phone's
+# /status wait for it. Git answers per repo: one read of the refs, one
+# history for each branch a story is merged into; only a branch not merged
+# yet still counts its own commits. Red while each story costs its own git
+# calls: twenty more landed stories must cost no more.
+case_183_status_asks_git_per_repo() {
+  CASE="183 fleet status asks git per repo, not per story"; epic_story c183
+  local shim="$FX/shim" i id n1 n2
+  mkdir -p "$shim"
+  printf '#!/bin/bash\necho "$*" >> %q\nexec %q "$@"\n' "$FX/git-calls" "$(command -v git)" > "$shim/git"
+  chmod +x "$shim/git"
+  # The epic has a commit of its own, so a story on it is on epic, not landed.
+  git -C "$REPO" checkout -q epic/test && printf 'epic\n' > "$REPO/epic.txt"
+  git -C "$REPO" add epic.txt && git -C "$REPO" commit -qm "epic: one commit" && git -C "$REPO" push -q origin epic/test
+  git -C "$REPO" checkout -q base
+  for i in $(seq 801 822); do
+    id="$i"
+    { printf -- '---\nstatus: done\nround: 1\n'; (( i % 2 )) || printf 'base: epic/test\n'
+      printf -- '---\n\n# Story %s: landed\n' "$id"; } > "$REPO/.stories/$id.md"
+    if (( i % 2 )); then git -C "$REPO" branch "story/$id" base; else git -C "$REPO" branch "story/$id" epic/test; fi
+    if (( i == 802 )); then
+      : > "$FX/git-calls"; ( cd "$FX" && PATH="$shim:$PATH" bash "$FLEET/fleet" status t --json ) > "$FX/status-2.json"
+      n1="$(wc -l < "$FX/git-calls")"
+    fi
+  done
+  : > "$FX/git-calls"; ( cd "$FX" && PATH="$shim:$PATH" bash "$FLEET/fleet" status t --json ) > "$FX/status-22.json"
+  n2="$(wc -l < "$FX/git-calls")"
+  (( n1 > 0 )) && ok || fail "the shim saw no git call: the count proves nothing"
+  assert_eq "$n2" "$n1" "twenty more stories cost no more git calls"
+  assert_contains "$(status_run 822)" "on epic" "and a story on the epic still reads on epic"
+  assert_contains "$(status_run 821)" "landed" "and one on the base reads landed"
 }
 
 for c in "${CASES[@]}"; do

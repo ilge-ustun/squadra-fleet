@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSync } from './lib/proc.ts';
-import { DASH, byCodePoint, countsMerged, landingOf, listDir, nextReady, nextToRun, queueHold, questionOpen, storyIds, titleOf } from './status.ts';
+import { isAncestor, reachable, refExists, refShas, revListCount } from './lib/git.ts';
+import { DASH, byCodePoint, countsMerged, gitView, landingOf, listDir, nextReady, nextToRun, queueHold, questionOpen, storyIds, titleOf } from './status.ts';
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'fleet-statusw-')); });
@@ -205,5 +206,76 @@ describe('titleOf — against the awk', () => {
   ])('%s', (_name, text, expected) => {
     expect(titleOf(text)).toBe(expected);
     expect(titleOf(text)).toBe(awk(text));
+  });
+});
+
+describe('gitView — one read of the refs, one history per branch, the answers git gives', () => {
+  // base: one, two; story/1 off one with a commit of its own; origin/base at
+  // two; a tag and a branch both named "same", at different commits (git
+  // takes the tag); an annotated tag on story/1.
+  let root = '';
+  const sha: Record<string, string> = {};
+  function git(args: string[]): string {
+    const r = runSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+  function commit(file: string): string {
+    writeFileSync(join(root, file), `${file}\n`);
+    git(['add', '-A']);
+    git(['commit', '-qm', file]);
+    return git(['rev-parse', 'HEAD']);
+  }
+  beforeAll(() => {
+    root = join(dir, 'view');
+    runSync('git', ['init', '-q', '-b', 'base', root]);
+    sha.one = commit('one');
+    sha.two = commit('two');
+    git(['checkout', '-q', '-b', 'story/1', sha.one]);
+    sha.story = commit('story');
+    git(['checkout', '-q', 'base']);
+    git(['update-ref', 'refs/remotes/origin/base', sha.two]);
+    git(['tag', 'same', sha.one]);
+    git(['branch', 'same', sha.story]);
+    git(['tag', '-a', '-m', 'a tag', 'v1', 'story/1']);
+  });
+
+  it('agrees with refExists, isAncestor and revListCount on every pair of names', () => {
+    const v = gitView(root);
+    const names = ['base', 'origin/base', 'story/1', 'same', 'v1', 'nope', 'origin/nope', sha.one ?? '', sha.story ?? '', (sha.one ?? '').slice(0, 8), 'f'.repeat(40)];
+    const intos = ['base', 'origin/base', 'story/1', 'same', 'nope'];
+    for (const a of names) {
+      expect(v.refExists(a), a).toBe(refExists(root, a));
+      for (const b of intos) {
+        expect(v.isAncestor(a, b), `${a} in ${b}`).toBe(isAncestor(root, a, b));
+        expect(v.aheadOf(b, a), `${b}..${a}`).toBe(revListCount(root, `${b}..${a}`));
+      }
+    }
+  });
+
+  it('branchExists: refs/heads only', () => {
+    const v = gitView(root);
+    expect(v.branchExists('story/1')).toBe(true);
+    expect(v.branchExists('origin/base')).toBe(false);
+    expect(v.branchExists('v1')).toBe(false);
+  });
+
+  it('reads the refs once, and each history once, however often it is asked', () => {
+    const calls: string[] = [];
+    const v = gitView(root, {
+      refShas: (r) => { calls.push('refShas'); return refShas(r); },
+      reachable: (r, ref) => { calls.push(`reachable ${ref}`); return reachable(r, ref); },
+      refExists: (r, name) => { calls.push(`refExists ${name}`); return refExists(r, name); },
+      isAncestor: (r, a, b) => { calls.push(`isAncestor ${a}`); return isAncestor(r, a, b); },
+    });
+    for (let i = 0; i < 5; i++) {
+      v.refExists('origin/base');
+      v.refExists('origin/nope');
+      v.branchExists('story/1');
+      v.isAncestor('story/1', 'base');
+      v.isAncestor(sha.one ?? '', 'base');
+      v.aheadOf('base', 'story/1');
+    }
+    expect(calls).toEqual(['refShas', 'refExists origin/nope', 'reachable base', 'reachable story/1']);
   });
 });

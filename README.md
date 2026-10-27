@@ -383,7 +383,7 @@ and JavaScript, no build, nothing from another host. Its server is
   only the present says: the queue unit and its timer, the launch lock, the
   test deploy — and prints it as JSON. The server runs it in a child, at
   most once a minute and only while someone looks. On this machine it takes
-  about ten seconds, most of them `fleet status` of khaita.
+  about three seconds.
 - `api/moment?at=<time>` is the fleet at that moment: each story's state
   then, the pass each launch was in, a launcher that died and the pass it
   died in, and why a stopped story stopped. The page's Moment control
