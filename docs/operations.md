@@ -234,6 +234,11 @@ deploys — belongs to that target, not here.
   child, serves GET only, writes nothing, and is last in line for memory
   and CPU; Caddy publishes it with a password, because the stories are the
   targets' own.
+- **The dashboard reads the machine in the server, on each request** (28
+  Oct 2026). Not in the bundle: one read of `/proc` and the cgroups takes
+  about 20 ms, and a figure a minute old says little about memory. A
+  process shows by its name, never its command line, which can carry an
+  argument the page must not show.
 - **Zero runtime dependencies.** A call from a systemd timer or a builder's
   session must work whether or not `npm ci` ever ran; the suite proves it on
   every run.

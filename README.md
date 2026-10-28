@@ -367,7 +367,7 @@ lands writes no events, and its story's log starts at its next launch.
 ## The dashboard
 
 A read-only web page over all of this: both projects at any moment, what
-needs a human, each epic in time order, the backlog with its intents, the
+needs a human, the machine now, each epic in time order, the backlog with its intents, the
 landed stories, where the time goes, and one story's life as its event log
 (each time with its source). It changes nothing. No button promotes,
 merges or deploys; a command on the page is text for a person to run.
@@ -391,6 +391,12 @@ and JavaScript, no build, nothing from another host. Its server is
 - `api/story?repo=<repo>&id=<id>` is one story's life: the writer, each
   status change, each launch with its rounds and passes, the merge, the
   epic's land and the test deploy.
+- `api/machine` is the machine now: memory available, swap, the load, the
+  disk, and the eight systemd units and scopes that hold the most memory,
+  each with its cache, its peak, its MemoryHigh and MemoryMax, and its
+  largest processes by name. The server reads `/proc` and the cgroups on
+  each request (about 20 ms), without the bundle. Nothing records it, so a
+  past moment shows none.
 
 The server serves GET and HEAD only, a fixed list of routes, and no path
 from a request reaches the disk. Like a launcher, it keeps the code and the
@@ -661,7 +667,7 @@ ts/                 the harness, run by node as is:
                     new-epic write-story promote events dashboard mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
                     new-epic write-story promote events classifier status status-views telegram
-  src/dashboard/    the dashboard's server: catalog moment life (its model) bundle serve
+  src/dashboard/    the dashboard's server: catalog moment life (its model) bundle machine serve
   src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types events (the log) history journal (its backfill)
