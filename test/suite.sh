@@ -3595,7 +3595,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_180_dashboard_serve
        case_181_dashboard_page
        case_182_dashboard_unit
-       case_183_status_asks_git_per_repo)
+       case_183_status_asks_git_per_repo
+       case_184_dashboard_machine)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5607,6 +5608,26 @@ case_183_status_asks_git_per_repo() {
   assert_eq "$n2" "$n1" "twenty more stories cost no more git calls"
   assert_contains "$(status_run 822)" "on epic" "and a story on the epic still reads on epic"
   assert_contains "$(status_run 821)" "landed" "and one on the base reads landed"
+}
+
+# The machine the fleet runs on, now: memory, CPUs, load, the disk, and the
+# units that hold the most memory, read from /proc and the cgroups on each
+# request. A process shows by its name, never its command line. Red while
+# the server has no api/machine.
+case_184_dashboard_machine() {
+  CASE="184 the dashboard answers the machine now, from /proc, without a command line"; fixture c184
+  local pid base out
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  out="$(dash_get "$base/api/machine")"
+  assert_eq "$(head -1 <<< "$out")" "200 csp" "an answer, with its policy"
+  out="$(tail -n +2 <<< "$out")"
+  assert_eq "$(jq -r '(.memory.total > 0) and (.memory.available <= .memory.total) and (.cpus >= 1) and (.load | length) == 3 and (.disk.total > 0)' <<< "$out")" true "memory, CPUs, load and the disk"
+  assert_eq "$(jq -r '(.units | length) > 0 and all(.units[]; .unit != "" and .pids > 0 and (.procs | length) > 0)' <<< "$out")" true "the units that hold processes, each with its processes"
+  assert_not_contains "$out" "dashboard serve" "a process's command line never shows"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 }
 
 for c in "${CASES[@]}"; do

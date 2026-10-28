@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Bundle } from './bundle.ts';
 import type { CatalogStory } from './catalog.ts';
+import type { Machine } from './machine.ts';
 import { ASSETS, bundleFromChild, dashboardServer, loopback } from './serve.ts';
 
 const story: CatalogStory = {
@@ -17,6 +18,7 @@ const BUNDLE: Bundle = {
   v: 1, generatedAt: '2026-10-22T12:00:00.000+02:00', repos: [{ name: 'khaita', baseBranch: 'develop', stories: [story], epics: [] }],
   events: { khaita: [] }, machine: { khaita: { 135: { 1: 'baseline: test GREEN' } } }, now: { units: {}, locks: {}, testDeploy: null, alive: [] }, errors: [],
 };
+const MACHINE: Machine = { at: '2026-10-22T12:00:00.000+02:00', cpus: 4, load: [0.5, 0.4, 0.3], memory: { total: 8e9, available: 5e9 }, swap: null, disk: null, units: [] };
 
 let dir: string;
 let server: Server | undefined;
@@ -24,6 +26,7 @@ let base: string;
 let loads: number;
 let clock: number;
 let fail: boolean;
+let machines: number;
 const warnings: string[] = [];
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'fleet-serve-'));
@@ -31,9 +34,11 @@ beforeEach(async () => {
   loads = 0;
   clock = 0;
   fail = false;
+  machines = 0;
   server = dashboardServer({
     pageDir: dir, ttlMs: 60_000, now: () => clock, warn: (m) => warnings.push(m),
     load: async () => { loads += 1; if (fail) throw new Error('git failed'); return BUNDLE; },
+    machine: () => { machines += 1; return MACHINE; },
   });
   await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server?.address() as AddressInfo).port}`;
@@ -76,6 +81,18 @@ describe('dashboardServer', () => {
     expect((await fetch(`${base}/api/story?repo=khaita&id=999`)).status).toBe(404);
     expect((await fetch(`${base}/api/story?repo=../etc&id=135`)).status).toBe(404);
     expect(loads).toBe(1);
+  });
+
+  it('answers the machine as it is now, read on each request, without the bundle', async () => {
+    const r = await fetch(`${base}/api/machine`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(await r.json()).toEqual(MACHINE);
+    await fetch(`${base}/api/machine`);
+    expect(machines).toBe(2);
+    expect(loads).toBe(0);
+    fail = true;
+    expect((await fetch(`${base}/api/machine`)).status).toBe(200);
   });
 
   it('compresses a large answer for a client that accepts gzip', async () => {
