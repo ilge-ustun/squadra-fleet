@@ -270,12 +270,12 @@ systemctl --user stop fleet-queue@<repo>.timer     # re-enable with `start`
 
 | where | what | why |
 |---|---|---|
-| `.timer` | `OnUnitActiveSec=15min` | how soon a promoted story is picked up |
-| `.timer` | `OnStartupSec=2min`, no `Persistent` | the first drain of every boot, however late the user manager starts (L-45) |
-| `.service` | `--all --max 5` | every registered repo, at most 5 stories each per drain; a ceiling against looping unattended |
-| `.service` | `AGENT_TIMEOUT=3600` | wall clock per agent call (the launcher's own default is 1800; an hour since khaita 072's browser-test builder was killed at 1800 s); a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
-| `.service` | `MemoryHigh=2500M` | throttles rather than kills. ~1.4 GB is in use before the fleet starts (`free -m` on an idle box) and a Next build peaks near 1.4 GB (`docs/operations.md`) |
-| `.service` | `TimeoutStartSec=6h` | a full drain is long; `AGENT_TIMEOUT` already bounds the part that can hang |
+| `fleet-queue@.timer` | `OnUnitActiveSec=15min` | how soon a promoted story is picked up |
+| `fleet-queue@.timer` | `OnStartupSec=2min`, no `Persistent` | the first drain of every boot, however late the user manager starts (L-45) |
+| `fleet-queue@.service` | `run-queue %i --max 5` | one repo per instance, at most 5 stories per drain; a ceiling against looping unattended |
+| `fleet-queue@.service` | `AGENT_TIMEOUT=3600` | wall clock per agent call (the launcher's own default is 1800; an hour since khaita 072's browser-test builder was killed at 1800 s); a hung agent's whole process group is killed by the launcher's own timer and the story goes to `needs_human` |
+| `fleet-queue@.service` | `MemoryHigh=3000M` | per instance: throttles rather than kills. ~1.4 GB is in use before the fleet starts (`free -m` on an idle box), which leaves ~6.5 GB for two drains side by side; one lane peaked at 1.8 GB (25 Sep, "Two repos at once") |
+| `fleet-queue@.service` | `TimeoutStartSec=6h` | a full drain is long; `AGENT_TIMEOUT` already bounds the part that can hang |
 | `fleet-bot.service` | `TimeoutStartSec=2min` | a poll is one request and a few git commands. `/run` starts the queue with `--no-block`: a plain `systemctl start` on a oneshot waits for the whole drain, and the poll was killed at two minutes with its reply unsent and the bot deaf meanwhile. `/merge`'s job is a transient unit of its own (`fleet-merge-<ms>`, `DETACH_CMD`): a child left in this oneshot's cgroup is killed when the poll ends (L-34) |
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
 | transient | `fleet-test-deploy` | the test server, started by `fleet test-deploy` with `systemd-run --user`; no unit file, gone after a reboot. `fleet-test-deploy-build` is `/testdeploy`'s build, one at a time by its fixed name |
