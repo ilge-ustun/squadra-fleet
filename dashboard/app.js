@@ -7,6 +7,8 @@
 //   api/catalog          every story and epic (catalog.ts)
 //   api/moment[?at=]     the fleet now, or at a past moment (moment.ts)
 //   api/story?repo&id    one story's life, as its event log (life.ts)
+//   api/machine          the machine now: memory, swap, load, the disk and
+//                        the units that hold the most memory (machine.ts)
 
 // ── words, icons, tones ─────────────────────────────────────────────────────
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -91,7 +93,7 @@ function resultChip(pass, r) {
   if (pass === 'test_deploy') return r === 'UP' ? chip('check', 'UP', 'good') : chip('x', r, 'crit');
   return chip('dot', r, 'neutral');
 }
-const SRC = { log: 'log', journal: 'journal', machine: 'Machine block', git: 'git', mtime: 'file time', systemd: 'systemd', file: 'fleet file', unknown: 'unknown' };
+const SRC = { log: 'log', journal: 'journal', machine: 'Machine block', git: 'git', mtime: 'file time', systemd: 'systemd', file: 'fleet file', proc: '/proc', unknown: 'unknown' };
 const SRCWHY = {
   log: 'events.jsonl — written by the fleet as it runs; exact',
   journal: "the queue units' journal, or a copy of it saved in .runs/ — exact to the second",
@@ -100,6 +102,7 @@ const SRCWHY = {
   mtime: "a file's modification time in the checkout — the step's end",
   systemd: 'systemctl: the queue unit and its timer, read now',
   file: ".test-deploy.json, the fleet's own record of the test deploy",
+  proc: "the kernel's own figures, /proc and the cgroups, read at each refresh; nothing records them",
   unknown: 'no source records this time',
 };
 const src = (s) => { const k = SRC[s] ? s : 'unknown'; return `<span class="src s-${k}" title="${esc(SRCWHY[k])}">${esc(SRC[k])}</span>`; };
@@ -108,13 +111,15 @@ const col = (v) => `var(${v})`;
 
 // ── state ───────────────────────────────────────────────────────────────────
 const VIEWS = [['overview', 'Overview'], ['backlog', 'Backlog'], ['epics', 'Epics'], ['landed', 'Landed'], ['story', 'Story']];
-const S = { view: 'overview', at: null, epic: null, story: null, period: 14, aggRepo: 'both', landedRepo: 'all', landedAll: false };
+const S = { view: 'overview', at: null, epic: null, story: null, period: 14, aggRepo: 'both', landedRepo: 'all', landedAll: false, machineAll: false };
 try { const h = location.hash.slice(1); if (VIEWS.some(([v]) => v === h)) S.view = h; } catch (e) { /* no hash */ }
 let themeChoice = 'system';
 try { themeChoice = localStorage.getItem('fleet-theme') || 'system'; } catch (e) { /* storage refused */ }
 /** The catalog, the moment shown, and the stories' lives read so far. */
 let D = null;
 let M = null;
+/** The machine now (api/machine), or why it could not be read. */
+let MACH = null;
 let failed = null;
 const LIFE = new Map();
 const REPO = (n) => D.repos.find((r) => r.name === n);
@@ -277,8 +282,66 @@ function overviewHTML() {
     : `<div class="calm">${icon('check')}Nothing needs you.</div>`;
   const errors = D.errors.length ? `<div class="err">${D.errors.map((e) => `could not read ${esc(e)}`).join('<br>')}</div>` : '';
   return `${errors}<section aria-label="Needs you"><div class="bar" style="margin-bottom:8px"><h2>Needs you</h2><span class="caption">blocked · needs human · launcher dead · stuck past its time limit</span></div>${attn}</section>
+  ${machineHTML()}
   <div class="projects">${D.repos.map((r) => projectSection(r.name)).join('')}</div>
   ${timeHTML()}`;
+}
+
+// ── the machine ─────────────────────────────────────────────────────────────
+// What the server read from /proc at this refresh. Nothing records it, so a
+// past moment shows none. A share past its line gets a word and an icon; the
+// colour is never the only cue.
+const bytes = (b) => (b == null ? '—' : b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} G` : `${Math.max(0, Math.round(b / 2 ** 20))} M`);
+const level = (share, warn, crit) => (share >= crit ? 'crit' : share >= warn ? 'warn' : 'ok');
+function mtile(v, label, share, tone, word, tip) {
+  const w = Math.min(100, Math.max(0, 100 * share)).toFixed(1);
+  return `<div class="tile"><span class="v num">${esc(v)}</span><span class="l">${esc(label)}</span><div class="meter" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}"><span class="m-${tone}" style="width:${w}%"></span></div>${tone === 'ok' ? '' : `<span>${chip('hand', word, tone)}</span>`}</div>`;
+}
+/** A scope's generated id, shortened: tmux-spawn-7b14fabe….scope. */
+const shortUnit = (u) => u.replace(/^(.*-)([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.scope)$/, '$1$2…$3');
+function machineHTML() {
+  const panel = (extra, body = '') => `<section class="panel machine-panel" aria-label="Machine"><div class="bar"><h2>Machine</h2>${extra}</div>${body}</section>`;
+  if (!M.now) return panel(`<span class="caption">shown at Now only: nothing records it, so a past moment has none</span>${src('unknown')}`);
+  if (!MACH) return panel('<span class="caption">Reading the machine…</span>');
+  if (MACH.error) return panel('', `<div class="err">The machine could not be read: ${esc(MACH.error)}</div>`);
+  const m = MACH;
+  const tiles = [];
+  if (m.memory) {
+    const used = m.memory.total - m.memory.available;
+    const sh = used / m.memory.total;
+    tiles.push(mtile(bytes(m.memory.available), `memory available, of ${bytes(m.memory.total)}`, sh, level(sh, 0.8, 0.9), 'memory low', `${bytes(used)} in use of ${bytes(m.memory.total)}`));
+  }
+  if (m.swap) {
+    const used = m.swap.total - m.swap.free;
+    const sh = m.swap.total ? used / m.swap.total : 0;
+    tiles.push(m.swap.total ? mtile(bytes(used), `swap used, of ${bytes(m.swap.total)}`, sh, level(sh, 0.5, 0.8), 'swap high', `${bytes(used)} of ${bytes(m.swap.total)} swap in use`) : mtile('—', 'no swap', 0, 'ok', '', 'this machine has no swap'));
+  }
+  if (m.load) {
+    const sh = m.load[0] / m.cpus;
+    tiles.push(mtile(m.load[0].toFixed(2), `load, 1 min · ${m.cpus} CPUs · 5 min ${m.load[1].toFixed(2)} · 15 min ${m.load[2].toFixed(2)}`, sh, level(sh, 1, 2), 'busy', `load ${m.load[0].toFixed(2)} on ${m.cpus} CPUs; the bar is full at one task per CPU`));
+  }
+  if (m.disk) {
+    const sh = 1 - m.disk.free / m.disk.total;
+    tiles.push(mtile(bytes(m.disk.free), `disk free, of ${bytes(m.disk.total)} · ${Math.round(100 * sh)}% used`, sh, level(sh, 0.9, 0.95), 'disk nearly full', `${bytes(m.disk.total - m.disk.free)} used of ${bytes(m.disk.total)}, on the fleet's filesystem`));
+  }
+  const shown = S.machineAll ? m.units : m.units.slice(0, 3);
+  const limit = (u) => (u.high == null && u.max == null ? '<span class="muted">none</span>' : [u.high != null ? `high ${bytes(u.high)}` : '', u.max != null ? `max ${bytes(u.max)}` : ''].filter(Boolean).join(' · '));
+  const procs = (u) => {
+    const named = u.procs.reduce((a, p) => a + p.count, 0);
+    return u.procs.map((p) => `${esc(p.name)}${p.count > 1 ? ` ×${p.count}` : ''} ${bytes(p.rss)}`).join(' · ') + (u.pids > named ? ` · ${u.pids - named} more` : '');
+  };
+  const bar = (u) => (m.memory && u.inUse != null ? `<div class="dbar" title="in use, as a share of the machine's ${bytes(m.memory.total)}"><span style="width:${Math.min(100, (100 * u.inUse) / m.memory.total).toFixed(1)}%;background:var(--accent)"></span></div>` : '');
+  const name = (u) => `<span class="mono unit" title="${esc(u.unit)}">${esc(shortUnit(u.unit))}</span>`;
+  const table = `<div class="tbl table-wide"><table><thead><tr><th>unit</th><th>in use</th><th>cache</th><th>peak</th><th>limit</th><th>largest processes</th></tr></thead><tbody>${shown.map((u) => `<tr>
+      <td>${name(u)}<div class="caption">${esc(u.owner)}</div></td>
+      <td class="num" style="min-width:90px">${bytes(u.inUse)}${bar(u)}</td><td class="num">${bytes(u.cache)}</td><td class="num">${bytes(u.peak)}</td><td class="num">${limit(u)}</td>
+      <td class="caption">${procs(u)}</td></tr>`).join('')}</tbody></table></div>`;
+  const cards = `<div class="cards">${shown.map((u) => `<article class="scard"><div class="bar" style="gap:4px 10px">${name(u)}<span class="caption">${esc(u.owner)}</span></div>${bar(u)}<div class="facts"><span>in use <b>${bytes(u.inUse)}</b></span><span>cache <b>${bytes(u.cache)}</b></span><span>peak <b>${bytes(u.peak)}</b></span><span>limit <b>${limit(u)}</b></span></div><div class="caption">${procs(u)}</div></article>`).join('')}</div>`;
+  const more = m.units.length > 3 ? `<button class="linkbtn" data-act="machineall" data-k="">${S.machineAll ? 'show the largest 3' : `show all ${m.units.length}`}</button>` : '';
+  return panel(`<span class="caption">read ${hms(m.at)}, at each refresh ${src('proc')}</span>`, `<div class="tiles" style="margin-top:10px">${tiles.join('')}</div>
+    <div style="display:grid;gap:6px;margin-top:14px"><div class="bar"><h3>Memory by unit</h3><span class="caption">the systemd units and scopes that hold the most, largest first</span><span class="grow"></span>${more}</div>
+    ${m.units.length ? `${table}${cards}` : '<div class="empty">No unit could be read.</div>'}
+    <p class="caption" style="margin:0">In use: memory the kernel cannot drop, only swap. Cache: file pages it drops when memory runs low. Peak: the most the unit held since it started, cache included. Limit: its MemoryHigh and MemoryMax. A process shows by its name only.</p></div>`);
 }
 
 // ── where the time goes ─────────────────────────────────────────────────────
@@ -752,9 +815,11 @@ async function load() {
   if (loading) return;
   loading = true;
   try {
-    const [d, m] = await Promise.all([getJSON('api/catalog'), getJSON(S.at ? `api/moment?at=${encodeURIComponent(S.at)}` : 'api/moment')]);
+    // The machine is read now only, and a failure of it is its own.
+    const [d, m, h] = await Promise.all([getJSON('api/catalog'), getJSON(S.at ? `api/moment?at=${encodeURIComponent(S.at)}` : 'api/moment'),
+      S.at ? null : getJSON('api/machine').catch((e) => ({ error: String(e.message || e) }))]);
     const fresh = !D || d.generatedAt !== D.generatedAt;
-    D = d; M = m; failed = null;
+    D = d; M = m; MACH = h; failed = null;
     if (fresh) LIFE.clear();
   } catch (e) {
     failed = String(e.message || e);
@@ -786,6 +851,7 @@ document.addEventListener('click', (ev) => {
     case 'story': S.story = k; go('story'); break;
     case 'period': S.period = Number(k); break;
     case 'aggrepo': S.aggRepo = k; break;
+    case 'machineall': S.machineAll = !S.machineAll; break;
     case 'now': setMoment(null); return;
     case 'step': setMoment(ms(M.at) + Number(k) * 1000); return;
     case 'theme': themeChoice = k; try { localStorage.setItem('fleet-theme', k); } catch (e) { /* storage refused */ } applyTheme(); break;
