@@ -5,8 +5,10 @@
 // anything. 0; 1 with an XX line for a usage error or a port it cannot take.
 import { readFileSync, writeSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildBundle } from '../dashboard/bundle.ts';
+import { readMachine } from '../dashboard/machine.ts';
 import { HOST_DEFAULT, PORT_DEFAULT, bundleFromChild, dashboardServer, loopback } from '../dashboard/serve.ts';
 import { loadRepo } from '../lib/config.ts';
 import { Die } from '../lib/die.ts';
@@ -56,6 +58,7 @@ function serve(argv: readonly string[]): void {
   const server = dashboardServer({
     pageDir: join(FLEET_HOME, 'dashboard'),
     load: () => bundleFromChild([process.execPath, join(FLEET_HOME, 'ts/src/bin/dashboard.ts'), 'bundle'], process.env),
+    machine: () => readMachine({ proc: '/proc', cgroup: '/sys/fs/cgroup', passwd: '/etc/passwd', disk: FLEET_HOME, cpus: availableParallelism(), now: () => new Date() }),
     warn: (m) => warn(m),
   });
   server.on('error', (e) => {

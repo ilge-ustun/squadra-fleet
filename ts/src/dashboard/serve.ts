@@ -1,7 +1,8 @@
 // serve.ts — the dashboard's read-only HTTP server (`fleet dashboard serve`,
-// systemd/fleet-dashboard.service): the page's files from dashboard/, and
+// systemd/fleet-dashboard.service): the page's files from dashboard/,
 // three JSON answers built from the bundle (bundle.ts) — the catalog, the
-// fleet at a moment (moment.ts), and one story's life (life.ts).
+// fleet at a moment (moment.ts), and one story's life (life.ts) — and the
+// machine (machine.ts), read from /proc on each request, without the bundle.
 //
 // Read-only by construction: GET and HEAD only, a fixed list of routes, no
 // path from a request ever reaches the disk, and nothing it calls writes.
@@ -17,6 +18,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import type { Bundle } from './bundle.ts';
 import { storyLife } from './life.ts';
+import type { Machine } from './machine.ts';
 import { momentAt } from './moment.ts';
 
 export const HOST_DEFAULT = '127.0.0.1';
@@ -72,6 +74,8 @@ export interface ServeOptions {
   /** The directory of the page's files (dashboard/). */
   pageDir: string;
   load: () => Promise<Bundle>;
+  /** The machine now (machine.ts readMachine). */
+  machine: () => Machine;
   ttlMs?: number;
   now?: () => number;
   warn: (msg: string) => void;
@@ -135,6 +139,7 @@ export function dashboardServer(o: ServeOptions): Server {
     const file = files.get(url.pathname);
     if (file !== undefined) { send(req, res, 200, file.type, file.body, 'no-cache'); return; }
     if (!url.pathname.startsWith('/api/')) { json(req, res, 404, { error: 'not found' }); return; }
+    if (url.pathname === '/api/machine') { json(req, res, 200, o.machine()); return; }
 
     let b: Bundle;
     let age: number;
