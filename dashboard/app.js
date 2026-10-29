@@ -7,6 +7,8 @@
 //   api/catalog          every story and epic (catalog.ts)
 //   api/moment[?at=]     the fleet now, or at a past moment (moment.ts)
 //   api/story?repo&id    one story's life, as its event log (life.ts)
+//   api/feed[?at=&steps=1]  the latest events of every repo, newest first
+//                        (feed.ts)
 //   api/machine          the machine now: memory, swap, load, the disk and
 //                        the units that hold the most memory (machine.ts)
 
@@ -111,7 +113,7 @@ const col = (v) => `var(${v})`;
 
 // ── state ───────────────────────────────────────────────────────────────────
 const VIEWS = [['overview', 'Overview'], ['backlog', 'Backlog'], ['epics', 'Epics'], ['landed', 'Landed'], ['story', 'Story']];
-const S = { view: 'overview', at: null, epic: null, story: null, period: 14, aggRepo: 'both', landedRepo: 'all', landedAll: false, machineAll: false };
+const S = { view: 'overview', at: null, epic: null, story: null, period: 14, aggRepo: 'both', landedRepo: 'all', landedAll: false, machineAll: false, feedSteps: false, feedAll: false };
 try { const h = location.hash.slice(1); if (VIEWS.some(([v]) => v === h)) S.view = h; } catch (e) { /* no hash */ }
 let themeChoice = 'system';
 try { themeChoice = localStorage.getItem('fleet-theme') || 'system'; } catch (e) { /* storage refused */ }
@@ -120,6 +122,8 @@ let D = null;
 let M = null;
 /** The machine now (api/machine), or why it could not be read. */
 let MACH = null;
+/** The latest events (api/feed), or why they could not be read. */
+let FEED = null;
 let failed = null;
 const LIFE = new Map();
 const REPO = (n) => D.repos.find((r) => r.name === n);
@@ -282,9 +286,46 @@ function overviewHTML() {
     : `<div class="calm">${icon('check')}Nothing needs you.</div>`;
   const errors = D.errors.length ? `<div class="err">${D.errors.map((e) => `could not read ${esc(e)}`).join('<br>')}</div>` : '';
   return `${errors}<section aria-label="Needs you"><div class="bar" style="margin-bottom:8px"><h2>Needs you</h2><span class="caption">blocked · needs human · launcher dead · stuck past its time limit</span></div>${attn}</section>
+  ${feedHTML()}
   ${machineHTML()}
   <div class="projects">${D.repos.map((r) => projectSection(r.name)).join('')}</div>
   ${timeHTML()}`;
+}
+
+// ── latest ──────────────────────────────────────────────────────────────────
+// Both projects' latest events, newest first (api/feed): a pass by its end,
+// or by its start while it runs; a mark as it is. The steps of a round show
+// on request. At a past moment, what had happened by then.
+const FEED_LIMIT = 40;
+const FEED_SHOWN = 8;
+const feedURL = () => `api/feed?limit=${FEED_LIMIT}${S.feedSteps ? '&steps=1' : ''}${S.at ? `&at=${encodeURIComponent(S.at)}` : ''}`;
+async function loadFeed() {
+  FEED = await getJSON(feedURL()).catch((e) => ({ error: String(e.message || e) }));
+  render();
+}
+function feedTag(it) {
+  if (it.story && STORY(it.repo, it.story)) return `<button class="linkbtn feed-tag" data-act="story" data-k="${esc(it.repo)}/${esc(it.story)}" title="open the story">${ptag(it.repo, it.story)}</button>`;
+  return `<span class="ptag ${P(it.repo).cls}">${pm(it.repo)}<span class="sid"><span class="pfx">${esc(short(it.repo))}/</span>${esc(it.epic || it.story || '—')}</span></span>`;
+}
+function feedRow(it) {
+  const running = it.state === 'running';
+  const secs = it.dur_s != null ? it.dur_s : running ? between(it.ts, M.at) : null;
+  const what = it.ic ? chip(it.ic, it.title, it.tone || 'neutral')
+    : it.pass === 'status' ? stateChip(it.name)
+    : it.state === 'mark' ? `<b>${esc(it.title)}</b>${['merge', 'land', 'epic_merge'].includes(it.pass) ? resultChip(it.pass, it.result) : ''}`
+    : `<b>${esc(it.title)}</b>${running ? chip('run', 'running', 'run') : it.state === 'no end' ? chip('dead', 'no end', 'crit') : it.pass === 'launch' ? verdictChip(it.result) : resultChip(it.pass, it.result)}`;
+  return `<div class="lrow"><div class="t"><span class="day">${when(it.ts, M.at, true)}</span> ${src(it.src)}</div><div class="d num">${secs != null ? `${dur(secs)}${running ? '…' : ''}` : ''}</div><div class="w"><div class="h">${feedTag(it)}${it.round != null ? `<span class="caption">round ${esc(it.round)}</span>` : ''}${what}</div>${it.why ? `<div class="why">${esc(it.why)}</div>` : ''}</div></div>`;
+}
+function feedHTML() {
+  const steps = `<button class="linkbtn" data-act="feedsteps" data-k="" aria-pressed="${S.feedSteps}">${S.feedSteps ? 'hide the steps of a round' : 'show the steps of a round'}</button>`;
+  const panel = (body) => `<section class="panel feed-panel" aria-label="Latest"><div class="bar"><h2>Latest</h2><span class="caption">both projects, newest first · a pass by its end, or by its start while it runs</span><span class="grow"></span>${steps}</div>${body}</section>`;
+  if (!FEED) return panel('<p class="caption">Reading the latest events…</p>');
+  if (FEED.error) return panel(`<div class="err">The latest events could not be read: ${esc(FEED.error)}</div>`);
+  if (!FEED.items.length) return panel(`<div class="empty">${M.now ? 'Nothing is recorded yet.' : 'Nothing is recorded before this moment.'}</div>`);
+  const shown = S.feedAll ? FEED.items : FEED.items.slice(0, FEED_SHOWN);
+  const more = FEED.items.length > FEED_SHOWN ? `<button class="linkbtn" data-act="feedall" data-k="">${S.feedAll ? `show the latest ${FEED_SHOWN}` : `show the latest ${FEED.items.length}`}</button>` : '';
+  const older = S.feedAll && FEED.more ? '<span class="caption">Older events: open a story, or move the moment back.</span>' : '';
+  return panel(`<div class="feed">${shown.map(feedRow).join('')}</div><div class="bar" style="margin-top:8px">${more}${older}</div>`);
 }
 
 // ── the machine ─────────────────────────────────────────────────────────────
@@ -815,11 +856,13 @@ async function load() {
   if (loading) return;
   loading = true;
   try {
-    // The machine is read now only, and a failure of it is its own.
-    const [d, m, h] = await Promise.all([getJSON('api/catalog'), getJSON(S.at ? `api/moment?at=${encodeURIComponent(S.at)}` : 'api/moment'),
-      S.at ? null : getJSON('api/machine').catch((e) => ({ error: String(e.message || e) }))]);
+    // The machine is read now only. A failure of it, or of the latest
+    // events, is its own.
+    const [d, m, h, f] = await Promise.all([getJSON('api/catalog'), getJSON(S.at ? `api/moment?at=${encodeURIComponent(S.at)}` : 'api/moment'),
+      S.at ? null : getJSON('api/machine').catch((e) => ({ error: String(e.message || e) })),
+      getJSON(feedURL()).catch((e) => ({ error: String(e.message || e) }))]);
     const fresh = !D || d.generatedAt !== D.generatedAt;
-    D = d; M = m; MACH = h; failed = null;
+    D = d; M = m; MACH = h; FEED = f; failed = null;
     if (fresh) LIFE.clear();
   } catch (e) {
     failed = String(e.message || e);
@@ -852,6 +895,8 @@ document.addEventListener('click', (ev) => {
     case 'period': S.period = Number(k); break;
     case 'aggrepo': S.aggRepo = k; break;
     case 'machineall': S.machineAll = !S.machineAll; break;
+    case 'feedsteps': S.feedSteps = !S.feedSteps; loadFeed(); return;
+    case 'feedall': S.feedAll = !S.feedAll; break;
     case 'now': setMoment(null); return;
     case 'step': setMoment(ms(M.at) + Number(k) * 1000); return;
     case 'theme': themeChoice = k; try { localStorage.setItem('fleet-theme', k); } catch (e) { /* storage refused */ } applyTheme(); break;

@@ -245,6 +245,12 @@ deploys — belongs to that target, not here.
   about 20 ms, and a figure a minute old says little about memory. A
   process shows by its name, never its command line, which can carry an
   argument the page must not show.
+- **The dashboard's latest events are one list for every repo** (29 Oct
+  2026). The Overview shows them newest first, from the bundle's events, so
+  a past moment shows what had happened by then. A pass shows once, by its
+  end; the steps of a round show only on request. The status changes that a
+  launch, a merge or a promotion already shows are left out, as in a
+  story's log.
 - **Zero runtime dependencies.** A call from a systemd timer or a builder's
   session must work whether or not `npm ci` ever ran; the suite proves it on
   every run.

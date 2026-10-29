@@ -1,8 +1,9 @@
 // serve.ts — the dashboard's read-only HTTP server (`fleet dashboard serve`,
 // systemd/fleet-dashboard.service): the page's files from dashboard/,
-// three JSON answers built from the bundle (bundle.ts) — the catalog, the
-// fleet at a moment (moment.ts), and one story's life (life.ts) — and the
-// machine (machine.ts), read from /proc on each request, without the bundle.
+// four JSON answers built from the bundle (bundle.ts) — the catalog, the
+// fleet at a moment (moment.ts), its latest events (feed.ts), and one
+// story's life (life.ts) — and the machine (machine.ts), read from /proc on
+// each request, without the bundle.
 //
 // Read-only by construction: GET and HEAD only, a fixed list of routes, no
 // path from a request ever reaches the disk, and nothing it calls writes.
@@ -17,6 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import type { Bundle } from './bundle.ts';
+import { FEED_LIMIT, feedAt } from './feed.ts';
 import { storyLife } from './life.ts';
 import type { Machine } from './machine.ts';
 import { momentAt } from './moment.ts';
@@ -162,6 +164,14 @@ export function dashboardServer(o: ServeOptions): Server {
         const at = url.searchParams.get('at') ?? undefined;
         if (at !== undefined && Number.isNaN(Date.parse(at))) { json(req, res, 400, { error: `not a time: ${at}` }); return; }
         json(req, res, 200, momentAt({ repos: b.repos, events: b.events, now: b.now, generatedAt: b.generatedAt, at }));
+        return;
+      }
+      case '/api/feed': {
+        const at = url.searchParams.get('at') ?? undefined;
+        if (at !== undefined && Number.isNaN(Date.parse(at))) { json(req, res, 400, { error: `not a time: ${at}` }); return; }
+        const limit = url.searchParams.get('limit') ?? String(FEED_LIMIT);
+        if (!/^[0-9]+$/.test(limit)) { json(req, res, 400, { error: `not a number: ${limit}` }); return; }
+        json(req, res, 200, feedAt({ events: b.events, at, alive: new Set(b.now.alive), limit: Number(limit), steps: url.searchParams.get('steps') === '1' }));
         return;
       }
       case '/api/story': {

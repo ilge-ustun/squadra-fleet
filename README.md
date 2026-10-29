@@ -367,7 +367,7 @@ lands writes no events, and its story's log starts at its next launch.
 ## The dashboard
 
 A read-only web page over all of this: both projects at any moment, what
-needs a human, the machine now, each epic in time order, the backlog with its intents, the
+needs a human, the latest events, the machine now, each epic in time order, the backlog with its intents, the
 landed stories, where the time goes, and one story's life as its event log
 (each time with its source). It changes nothing. No button promotes,
 merges or deploys; a command on the page is text for a person to run.
@@ -391,6 +391,12 @@ and JavaScript, no build, nothing from another host. Its server is
 - `api/story?repo=<repo>&id=<id>` is one story's life: the writer, each
   status change, each launch with its rounds and passes, the merge, the
   epic's land and the test deploy.
+- `api/feed?at=<time>&steps=1&limit=<n>` is the latest events of every
+  repo at once, newest first, from the same events: a pass by its end, or
+  by its start while it runs, and a mark as it is. A round's steps (the
+  baseline's steps, the tdd check, scope, mutations, probes, installs) show
+  only with `steps=1`, because one round has dozens. With `at`, what had
+  happened by that moment.
 - `api/machine` is the machine now: memory available, swap, the load, the
   disk, and the eight systemd units and scopes that hold the most memory,
   each with its cache, its peak, its MemoryHigh and MemoryMax, and its
@@ -669,7 +675,7 @@ ts/                 the harness, run by node as is:
                     new-epic write-story promote events dashboard mutation (check-mutation) status telegram
   src/              the commands: launch (the story loop) merge revert reset run-queue lint-story
                     new-epic write-story promote events classifier status status-views telegram
-  src/dashboard/    the dashboard's server: catalog moment life (its model) bundle machine serve
+  src/dashboard/    the dashboard's server: catalog moment life feed (its model) bundle machine serve
   src/lib/          agents render runner-prompts baseline scope evidence vitest-json libtest result-summary verdict
                     machine-block review frontmatter config env-file lock git proc procs log die
                     exit-hooks telegram-api types events (the log) history journal (its backfill)

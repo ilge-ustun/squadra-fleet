@@ -3596,7 +3596,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_181_dashboard_page
        case_182_dashboard_unit
        case_183_status_asks_git_per_repo
-       case_184_dashboard_machine)
+       case_184_dashboard_machine
+       case_185_dashboard_feed)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5653,6 +5654,30 @@ case_184_dashboard_machine() {
   assert_eq "$(jq -r '(.memory.total > 0) and (.memory.available <= .memory.total) and (.cpus >= 1) and (.load | length) == 3 and (.disk.total > 0)' <<< "$out")" true "memory, CPUs, load and the disk"
   assert_eq "$(jq -r '(.units | length) > 0 and all(.units[]; .unit != "" and .pids > 0 and (.procs | length) > 0)' <<< "$out")" true "the units that hold processes, each with its processes"
   assert_not_contains "$out" "dashboard serve" "a process's command line never shows"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
+# The fleet's latest events, every repo at once, newest first: a pass by its
+# end, a mark as it is, the steps of a round only on request, and nothing
+# after a past moment. Red while the server has no api/feed.
+case_185_dashboard_feed() {
+  CASE="185 the dashboard answers the latest events, newest first, cut at a moment"; fixture c185
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local pid base out
+  ( cd "$FX" && exec bash "$FLEET/fleet" dashboard serve --port 0 ) > "$FX/serve.log" 2>&1 &
+  pid=$!
+  if wait_for 20 grep -q 'dashboard: http://127.0.0.1:[0-9]*/' "$FX/serve.log"; then ok; else fail "the server never said where it listens: $(cat "$FX/serve.log")"; fi
+  base="$(grep -o 'http://127.0.0.1:[0-9]*' "$FX/serve.log" | head -1)"
+  out="$(dash_get "$base/api/feed")"
+  assert_eq "$(head -1 <<< "$out")" "200 csp" "an answer, with its policy"
+  out="$(tail -n +2 <<< "$out")"
+  assert_eq "$(jq -r '[.items[] | select(.repo == "t" and .story == "900") | "\(.pass) \(.state) \(.result // "")"] | (index("launch ended PASS") != null) and (index("verdict mark PASS") != null)' <<< "$out")" true "the story's launch by its end, and its verdict"
+  assert_eq "$(node -e 'const t = JSON.parse(require("fs").readFileSync(0, "utf8")).items.map((x) => Date.parse(x.ts)); console.log(t.length > 1 && t.every((v, i) => i === 0 || t[i - 1] >= v))' <<< "$out")" true "newest first"
+  assert_eq "$(jq -r 'all(.items[]; .step == false)' <<< "$out")" true "no step of a round by default"
+  assert_eq "$(dash_get "$base/api/feed?steps=1&limit=200" | tail -n +2 | jq -r 'any(.items[]; .step and .pass == "baseline")')" true "the baseline's steps on request"
+  assert_eq "$(dash_get "$base/api/feed?at=2000-01-01T00:00:00Z" | tail -n +2 | jq -r '"\(.at) \(.items | length)"')" "2000-01-01T00:00:00Z 0" "nothing after a past moment"
+  assert_eq "$(dash_get "$base/api/feed?at=yesterday" | head -1 | cut -d" " -f1)" 400 "a moment that is not a time is refused"
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 }
 
