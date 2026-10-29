@@ -4912,6 +4912,16 @@ EOF
     assert_grep '^StandardOutput=null$' "$u" "${u##*/}: the screen goes nowhere"
     assert_grep '^StandardError=journal$' "$u" "${u##*/}: its errors are kept"
   done
+
+  # 28 Oct: the qr server's unit stopped with a 5.9 GB peak on the 7.9 GB
+  # box, and neither unit had a limit. A coordinator's session builds and
+  # tests as a lane does. Red while either unit has no MemoryHigh, or an OOM
+  # score no higher than the drains' 200.
+  CASE="163g each server is slowed past its share, and ended before a drain"
+  for u in "$FLEET/systemd/fleet-remote-control.service" "$t"; do
+    assert_grep '^MemoryHigh=2500M$' "$u" "${u##*/}: slowed, not killed, past its share"
+    assert_grep '^OOMScoreAdjust=300$' "$u" "${u##*/}: the kernel ends it before a drain"
+  done
 }
 
 # 20 Oct. A second project will drain beside khaita on a 7.9 GB box, and one

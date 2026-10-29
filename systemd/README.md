@@ -147,6 +147,15 @@ it was 96% of the lines and pushed the queue's history out, so both units
 send it nowhere (`StandardOutput=null`). Its errors, on stderr, stay in the
 journal. To see the screen, run `fleet remote-control [repo]` in a terminal.
 
+A session builds and tests as a lane does, beside the drains: the qr
+server's unit stopped with a 5.9 GB peak, cache included (28 Oct). So each
+server's unit has `MemoryHigh=2500M`: past it the kernel slows the unit and
+takes back its cache, then swaps it, and never kills it. Its OOM score is
+300, above the 200 every other user unit gets, so under memory pressure the
+kernel ends a session before a drain. A new limit reaches a running server
+only at its next start, and a start ends every open session: restart it when
+no session is in use.
+
 #### One coordinator per project
 
 `fleet-remote-control@<repo>.service` runs `fleet remote-control <repo>`: a
@@ -280,6 +289,7 @@ systemctl --user stop fleet-queue@<repo>.timer     # re-enable with `start`
 | `fleet-bot.timer` | `OnUnitActiveSec=1min` | how long a phone waits for an answer |
 | transient | `fleet-test-deploy` | the test server, started by `fleet test-deploy` with `systemd-run --user`; no unit file, gone after a reboot. `fleet-test-deploy-build` is `/testdeploy`'s build, one at a time by its fixed name |
 | `fleet-remote-control.service` | `Restart=always`, `StartLimitIntervalSec=0` | the server is there whenever the app is opened, whatever ended it, and a long network outage does not leave the unit failed |
+| `fleet-remote-control*.service` | `MemoryHigh=2500M` `OOMScoreAdjust=300` | a session builds as a lane does; the qr unit peaked at 5.9 GB, cache included (28 Oct). It is slowed past the server, two sessions and one lane's 1.8 GB; the kernel ends it before a drain (200), after the dashboard (500) |
 | `bin/remote-control.sh` | `--capacity 2` | each session took ~250 MB beside the server's ~150 MB, on a box where a drain may take 2.5 GB |
 | `fleet-dashboard.service` | `--port 4300`, loopback only | Caddy publishes it with a password; the server refuses any other address |
 | `fleet-dashboard.service` | `OOMScoreAdjust=500` `CPUWeight=20` `IOWeight=20` `Nice=10` `MemoryHigh=400M` `MemoryMax=512M` | last in line beside the drains, the test server and the song service. Measured 26 Oct: the server ~120 MB; ~210 MB more while a child builds the next bundle |

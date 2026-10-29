@@ -34,5 +34,16 @@ StandardOutput=null
 StandardError=journal
 SyslogIdentifier=fleet-remote-control-%i
 
+# A coordinator's session builds and tests as a lane does, beside the
+# drains, and the qr unit stopped with a 5.9 GB peak, cache included, on the
+# 7.9 GB box (28 Oct). Past MemoryHigh the kernel slows the unit and takes
+# back its cache, then swaps it; it never kills it. 2500M is the server
+# (~150 MB), two sessions (~250 MB each) and one build as large as a lane's
+# 1.8 GB peak; the queue's 3000M stays the larger share. Every unit of the
+# user manager gets an OOM score of 200, so at 300 the kernel ends a session
+# here before a drain, and the dashboard (500) before either.
+MemoryHigh=2500M
+OOMScoreAdjust=300
+
 [Install]
 WantedBy=default.target

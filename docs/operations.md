@@ -95,6 +95,9 @@ as user units with lingering on (`systemd/README.md`):
 - `fleet-remote-control` — `fleet remote-control`, always: a Claude Code
   Remote Control server in `~/work`, so the coordinator can be reached from
   the app after a reboot. Not part of the pipeline; nothing waits for it.
+  It and its per-repo form (`fleet-remote-control@<repo>`) are slowed past
+  `MemoryHigh=2500M`, and the kernel ends them before a drain under memory
+  pressure (`OOMScoreAdjust=300`): the qr unit peaked at 5.9 GB on 28 Oct.
 - `fleet-dashboard` — `fleet dashboard serve`, always: the read-only
   dashboard on `127.0.0.1:4300`, which Caddy publishes with a password. Not
   part of the pipeline; nothing waits for it.
