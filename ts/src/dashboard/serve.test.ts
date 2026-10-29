@@ -16,7 +16,12 @@ const story: CatalogStory = {
 };
 const BUNDLE: Bundle = {
   v: 1, generatedAt: '2026-10-22T12:00:00.000+02:00', repos: [{ name: 'khaita', baseBranch: 'develop', stories: [story], epics: [] }],
-  events: { khaita: [] }, machine: { khaita: { 135: { 1: 'baseline: test GREEN' } } }, now: { units: {}, locks: {}, testDeploy: null, alive: [] }, errors: [],
+  events: { khaita: [], qr: [
+    { v: 1, ts: '2026-10-22T11:00:00.000+02:00', run_id: 'qr.020.L', span: 'r1.build', repo: 'qr', story: '020', round: 1, pass: 'builder', event: 'start', source: 'log' },
+    { v: 1, ts: '2026-10-22T11:10:00.000+02:00', run_id: 'qr.020.L', span: 'r1.build', repo: 'qr', story: '020', round: 1, pass: 'builder', event: 'end', result: 'OK', dur_s: 600, source: 'log' },
+    { v: 1, ts: '2026-10-22T11:10:30.000+02:00', run_id: 'qr.020.L', span: 'r1.mut.AC1-x', repo: 'qr', story: '020', round: 1, name: 'AC1-x', pass: 'mutation', event: 'end', result: 'RED', source: 'log' },
+    { v: 1, ts: '2026-10-22T11:11:00.000+02:00', run_id: 'qr.020.L', repo: 'qr', story: '020', round: 1, pass: 'verdict', event: 'mark', result: 'PASS', source: 'log' },
+  ] }, machine: { khaita: { 135: { 1: 'baseline: test GREEN' } } }, now: { units: {}, locks: {}, testDeploy: null, alive: [] }, errors: [],
 };
 const MACHINE: Machine = { at: '2026-10-22T12:00:00.000+02:00', cpus: 4, load: [0.5, 0.4, 0.3], memory: { total: 8e9, available: 5e9 }, swap: null, disk: null, units: [] };
 
@@ -80,6 +85,23 @@ describe('dashboardServer', () => {
     expect(Array.isArray(s.life.entries)).toBe(true);
     expect((await fetch(`${base}/api/story?repo=khaita&id=999`)).status).toBe(404);
     expect((await fetch(`${base}/api/story?repo=../etc&id=135`)).status).toBe(404);
+    expect(loads).toBe(1);
+  });
+
+  it('answers the latest events of every repo from the bundle, newest first, cut at a moment', async () => {
+    type F = { at: string | null; items: { repo: string; pass: string; state: string }[]; more: boolean };
+    const brief = (f: F): string[] => f.items.map((x) => `${x.repo} ${x.pass} ${x.state}`);
+    const f = await (await fetch(`${base}/api/feed`)).json() as F;
+    expect(f.at).toBeNull();
+    expect(brief(f)).toEqual(['qr verdict mark', 'qr builder ended']);
+    expect(brief(await (await fetch(`${base}/api/feed?steps=1`)).json() as F)).toEqual(['qr verdict mark', 'qr mutation ended', 'qr builder ended']);
+    const then = await (await fetch(`${base}/api/feed?at=2026-10-22T11:05:00%2B02:00`)).json() as F;
+    expect(then.at).toBe('2026-10-22T11:05:00+02:00');
+    expect(brief(then)).toEqual(['qr builder running']);
+    const one = await (await fetch(`${base}/api/feed?limit=1`)).json() as F;
+    expect([brief(one), one.more]).toEqual([['qr verdict mark'], true]);
+    expect((await fetch(`${base}/api/feed?at=yesterday`)).status).toBe(400);
+    expect((await fetch(`${base}/api/feed?limit=all`)).status).toBe(400);
     expect(loads).toBe(1);
   });
 

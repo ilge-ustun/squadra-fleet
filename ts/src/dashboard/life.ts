@@ -86,17 +86,17 @@ const at = (e: FleetEvent | undefined): At | null => (e === undefined ? null : {
 const GAP_MIN_S = 60;
 
 /** A start with its end, or a mark. */
-interface Item {
+export interface Item {
   s?: FleetEvent;
   e?: FleetEvent;
   m?: FleetEvent;
 }
-const head = (x: Item): FleetEvent => (x.s ?? x.m ?? x.e) as FleetEvent;
+export const head = (x: Item): FleetEvent => (x.s ?? x.m ?? x.e) as FleetEvent;
 const tOf = (x: Item): number => ms(head(x).ts);
 const endT = (x: Item): number => ms((x.e ?? x.m ?? x.s ?? ({ ts: '' } as FleetEvent)).ts);
 
 /** Pairs each start with the end of the same run and span, in time order. */
-function items(events: readonly FleetEvent[]): Item[] {
+export function items(events: readonly FleetEvent[]): Item[] {
   const out: Item[] = [];
   const open = new Map<string, Item>();
   for (const e of [...events].sort((a, b) => ms(a.ts) - ms(b.ts))) {
@@ -115,7 +115,7 @@ function items(events: readonly FleetEvent[]): Item[] {
 
 const VERDICT: Record<string, [string, string]> = { PASS: ['check', 'good'], FAIL: ['x', 'crit'], SPEC: ['doc', 'warn'], UNPARSEABLE: ['question', 'warn'], UNAVAILABLE: ['pause', 'warn'] };
 
-function titleOf(x: Item): string {
+export function titleOf(x: Item): string {
   const f = head(x);
   const name = str(f.name) ?? '';
   switch (f.pass) {
@@ -139,7 +139,7 @@ function titleOf(x: Item): string {
   }
 }
 
-function passRow(x: Item, title = titleOf(x)): PassRow {
+export function passRow(x: Item, title = titleOf(x)): PassRow {
   const f = head(x);
   const p: PassRow = { pass: f.pass, title, start: at(x.s ?? x.m), end: at(x.e ?? x.m) };
   const name = str(f.name);
@@ -168,7 +168,7 @@ function passRow(x: Item, title = titleOf(x)): PassRow {
   return p;
 }
 
-function markRow(x: Item, question: string | null): MarkRow {
+export function markRow(x: Item, question: string | null): MarkRow {
   const f = x.m as FleetEvent;
   const r = f.result ?? '';
   const base = { ts: f.ts, src: f.source };
