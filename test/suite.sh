@@ -4331,6 +4331,22 @@ case_149_test_deploy() {
   assert_contains "$(cat "$TDLOG")" "t epic/test: waiting for the launch lock — launch 900 (pid 4242) holds it; the build starts when it is free, and gives up after 20s" "and says it waits, for whom, and how long"
   assert_eq "$(served)" "epic content" "then deploys"
   wait "$holder" 2>/dev/null
+
+  # 29 Oct: khaita's `next start` listened on every address, port 4100, so
+  # other computers could reach the test server around the web server. Red
+  # while a server that listens on every address still gets a URL.
+  CASE="149j a server that listens beyond loopback is stopped, and gets no URL"
+  cat > "$FX/serve-all.mjs" <<'EOF'
+import { createServer } from 'node:http';
+createServer((_q, s) => s.end('everywhere')).listen(Number(process.env.PORT), '0.0.0.0');
+EOF
+  START_CMD="exec node $FX/serve-all.mjs" td epic/test
+  assert_eq "$TDRC" 1 "exit code"
+  assert_contains "$(cat "$TDLOG")" "listens on 0.0.0.0" "names the address"
+  assert_contains "$(cat "$TDLOG")" "START_CMD" "and what to change"
+  assert_not_contains "$(cat "$TDLOG")" "is up at" "no URL"
+  assert_eq "$(served)" "" "the server is stopped"
+  assert_no_file "$FLEET/.test-deploy.json" "nothing is recorded"
 }
 
 # The phone half. /testdeploy <repo> <branch> answers at once and starts the

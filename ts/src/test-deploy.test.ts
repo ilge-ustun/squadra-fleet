@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Die } from './lib/die.ts';
 import { runSync } from './lib/proc.ts';
-import { branchNameOk, branchTip, localMinute, readKnobs, readState, readWaiting, stateFile, treeDir, waitingFile, waitingLine } from './test-deploy.ts';
+import { branchNameOk, branchTip, isLoopback, listenAddresses, localMinute, readKnobs, readState, readWaiting, stateFile, treeDir, waitingFile, waitingLine } from './test-deploy.ts';
 
 // Only the parts that touch no unit: status, stop and deploy call the real
 // systemctl and systemd-run, so they are the suite's (case 149, with fakes
@@ -117,5 +117,31 @@ describe('readWaiting', () => {
     expect(readWaiting(home)).toBeUndefined();
     writeFileSync(waitingFile(home), 'garbage');
     expect(readWaiting(home)).toBeUndefined();
+  });
+});
+
+// /proc/net/tcp and tcp6 as a little-endian kernel prints them: each 32-bit
+// word of an address in the host's byte order, the port in hex, 0A LISTEN.
+describe('listenAddresses', () => {
+  const row = (local: string, st: string): string => `   0: ${local} 00000000:0000 ${st} 00000000:00000000 00:00000000 00000000  1001        0 4755145 1`;
+  const z6 = '0'.repeat(32);
+  it('the addresses that listen on the port, IPv4 and IPv6, and nothing else', () => {
+    writeFileSync(join(tmp, 'tcp'), ['  sl  local_address rem_address   st', row('0100007F:1004', '0A'), row('00000000:1004', '01'), row('00000000:1005', '0A'), row('3500007F:1004', '0A')].join('\n'));
+    writeFileSync(join(tmp, 'tcp6'), ['  sl  local_address remote_address st', row(`${z6}:1004`, '0A'), row('00000000000000000000000001000000:1004', '0A'), row('0000000000000000FFFF00000100007F:1004', '0A'), row('B80D0120000000000000000001000000:1004', '0A')].join('\n'));
+    expect(listenAddresses(4100, tmp)).toEqual(['127.0.0.1', '127.0.0.53', '::', '::1', '::ffff:127.0.0.1', '2001:db8::1']);
+  });
+  it('nothing when nothing listens, or /proc/net cannot be read', () => {
+    writeFileSync(join(tmp, 'tcp'), `  sl  local_address\n${row('0100007F:1005', '0A')}\n`);
+    expect(listenAddresses(4100, tmp)).toEqual([]);
+    expect(listenAddresses(4100, join(tmp, 'nowhere'))).toEqual([]);
+  });
+});
+
+describe('isLoopback', () => {
+  it.each(['127.0.0.1', '127.0.0.53', '::1', '::ffff:127.0.0.1'])('%s is', (a) => {
+    expect(isLoopback(a)).toBe(true);
+  });
+  it.each(['0.0.0.0', '::', '10.0.0.7', '179.237.101.204', '::ffff:0.0.0.0', '2001:db8::1'])('%s is not', (a) => {
+    expect(isLoopback(a)).toBe(false);
   });
 });

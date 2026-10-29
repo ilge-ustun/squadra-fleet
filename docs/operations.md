@@ -66,7 +66,10 @@ A coordinator on any harness starts no launcher at all: a human promotes,
 and the queue timer or `/run` does the rest.
 
 **The test URL.** `fleet test-deploy <repo> <branch>` and `/testdeploy`
-serve a branch as the user unit `fleet-test-deploy` on `127.0.0.1:4100`.
+serve a branch as the user unit `fleet-test-deploy` on `127.0.0.1:4100`,
+and only there: a server that also listens on another address is stopped,
+and the deploy dies (29 Oct 2026: khaita's `next start` listened on every
+address until its `START_CMD` named `-H 127.0.0.1`).
 Caddy publishes it at `https://179-237-101-204.sslip.io` and holds a Let's
 Encrypt certificate, which it renews on its own. sslip.io is a public DNS
 service that resolves a name to the IP written inside it, so no DNS record

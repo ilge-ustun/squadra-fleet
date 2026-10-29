@@ -17,7 +17,9 @@
 // (an epic), the local one otherwise (a story branch, which the fleet does
 // not push). It is made afresh each time, seeded, installed and built with
 // the target's own SEED_FILES, INSTALL_CMD and BUILD_CMD, and served with its
-// START_CMD (`npm start` when the target names none), with PORT set.
+// START_CMD (`npm start` when the target names none), with PORT set. It must
+// listen on loopback only: the web server alone publishes it, so a server
+// that also listens on another address is stopped, and the deploy dies.
 //
 // A Next build peaks near 1.4 GB on a 3.8 GB machine, so the build runs under
 // the target's launch lock (lib/lock.ts) and never beside a story's. If a
@@ -32,6 +34,7 @@
 // stayed held.
 import { copyFileSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
+import { endianness } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { RepoConfig } from './lib/config.ts';
 import { Die } from './lib/die.ts';
@@ -181,6 +184,53 @@ export function readWaiting(fleetHome: string): string | undefined {
 export function localMinute(d: Date): string {
   const p = (n: number): string => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// ── where the server listens ─────────────────────────────────────────────────
+
+/** An address of /proc/net/tcp or tcp6: each 32-bit word in the host's byte
+ *  order, as the kernel prints it. */
+function addressOf(hex: string): string {
+  const b = Buffer.from(hex, 'hex');
+  if (endianness() === 'LE') for (let i = 0; i < b.length; i += 4) b.subarray(i, i + 4).reverse();
+  if (b.length === 4) return [...b].join('.');
+  if (b.subarray(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) return `::ffff:${[...b.subarray(12)].join('.')}`;
+  const g = Array.from({ length: 8 }, (_, i) => b.readUInt16BE(2 * i));
+  // The longest run of zero groups is written `::`.
+  let at = -1;
+  let len = 0;
+  for (let i = 0; i < 8; ) {
+    let j = i;
+    while (j < 8 && g[j] === 0) j += 1;
+    if (j - i > len) [at, len] = [i, j - i];
+    i = Math.max(j, i + 1);
+  }
+  const hex16 = (a: number[]): string => a.map((x) => x.toString(16)).join(':');
+  return len < 2 ? hex16(g) : `${hex16(g.slice(0, at))}::${hex16(g.slice(at + len))}`;
+}
+
+/** The addresses with a socket that listens on the port, IPv4 and IPv6, from
+ *  procNet's tcp and tcp6 (0A is LISTEN). */
+export function listenAddresses(port: number, procNet = '/proc/net'): string[] {
+  const found = new Set<string>();
+  for (const f of ['tcp', 'tcp6']) {
+    let text = '';
+    try {
+      text = readFileSync(join(procNet, f), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of text.split('\n').slice(1)) {
+      const [, local = '', , st] = line.trim().split(/\s+/);
+      const [hex = '', p = ''] = local.split(':');
+      if (st === '0A' && parseInt(p, 16) === port) found.add(addressOf(hex));
+    }
+  }
+  return [...found];
+}
+
+export function isLoopback(address: string): boolean {
+  return /^127\./.test(address) || address === '::1' || /^::ffff:127\./.test(address);
 }
 
 // ── the unit ─────────────────────────────────────────────────────────────────
@@ -333,7 +383,14 @@ export async function deploy(cfg: RepoConfig, o: DeployOptions): Promise<number>
       }
       await sleep(500);
     }
-    const st: Deployed = { repo: cfg.name, root, branch: o.branch, sha: tip.sha, short, url: o.knobs.url, since: localMinute(new Date()) };
+    // The web server alone publishes the slot; a server that listens on any
+    // other address is reachable around it.
+    const open = listenAddresses(o.knobs.port).filter((a) => !isLoopback(a));
+    if (open.length > 0) {
+      stopUnit();
+      throw new Die(`the server listens on ${open.join(' and ')}, port ${o.knobs.port}, not on loopback only: other computers reach it around the web server — ${UNIT} is stopped; make the target's START_CMD listen on 127.0.0.1 (for Next: next start -H 127.0.0.1)`);
+    }
+    const st: Deployed ={ repo: cfg.name, root, branch: o.branch, sha: tip.sha, short, url: o.knobs.url, since: localMinute(new Date()) };
     writeFileSync(stateFile(o.fleetHome), `${JSON.stringify(st, null, 2)}\n`);
     log(`${cfg.name} ${o.branch} (${short}) is up at ${o.knobs.url}`);
     up = true;
