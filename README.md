@@ -455,7 +455,9 @@ launch holds it, the deploy says so at once, naming the story — `/testdeploy`
 sends that line to the phone, and `/testdeploy <repo>` (`--status`) repeats
 it while the wait lasts (L-37). The server is the
 user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
-(`journalctl --user -u fleet-test-deploy`).
+(`journalctl --user -u fleet-test-deploy`), and on loopback only: a server
+that also listens on another address is reachable around the web server, so
+the deploy stops it and dies, naming the address.
 
 Run a launcher detached, never as a child of an interactive agent session:
 
@@ -500,7 +502,7 @@ environment wins over the file; a missing required key is a `die`.
 | `REPO_RULES` | no | markdown file rendered into the builder's rules as `{{REPO_RULES}}` |
 | `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
 | `PR_CMD` | with `pr` | see below |
-| `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. A Next app that should listen on loopback only: `npx next start -H 127.0.0.1` |
+| `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. It must listen on loopback only, or the deploy stops it and dies; `next start` listens on every address unless told: `npm start -- -H 127.0.0.1` |
 | `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log`. The run is bounded by `E2E_TIMEOUT` and swept afterwards: a timeout, or any process still running in the tree, is RED and is killed |
 | `RUNNERS` | no, default `vitest` | the test runners a selector may name — a mutation's, a tdd pair's, a probe's: `vitest`, or `vitest cargo`. vitest is always listed, because `VITEST_CMD` is the baseline's test step. A new target states its runners here when it is onboarded; an unknown word is a `die` |
 | `CARGO_CMD` | with `cargo` | the prefix a `cargo:` selector's arguments are appended to, e.g. `export PATH="$HOME/.cargo/bin:$PATH"; cargo test --locked`. Set without `cargo` in `RUNNERS` it is a `die` |
