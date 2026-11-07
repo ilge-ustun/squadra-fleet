@@ -233,6 +233,17 @@ deploys — belongs to that target, not here.
 - **The reviewer's span ends OK, not with its verdict.** Only
   `lib/verdict.ts` reads the reviewer's line (case 108). The verdict mark
   carries what the reviewer said, as `reviewer`.
+- **The MCP server is read-only, on stdio, and declared per project** (7
+  Nov 2026). It answers what `fleet status`, `fleet events` and the
+  dashboard already answer. A write (promote, answer, merge) stays a command
+  with its own checks, so a session cannot do through a tool what its rules
+  forbid it at a terminal. stdio needs no port, no token and no unit: the
+  session starts the server, and the end of the session ends it. It is
+  declared in this repo's `.mcp.json` and, for a target, with `claude mcp
+  add --scope local`. It is never in the user's Claude config or in
+  `~/.codex/config.toml`: every builder (`claude -p`) and reviewer (`codex
+  exec`) the fleet starts reads those, and an agent in a round gets only
+  what its prompt and its worktree give it.
 - **The dashboard is a read-only service on loopback** (26 Oct 2026, the
   human's choice of two). The other was a static page rebuilt by a timer:
   nothing would listen, but the page would be minutes old, and each phone
