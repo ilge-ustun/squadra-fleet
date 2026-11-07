@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fleet": {
+      "command": "/home/fleet/work/fleet/fleet",
+      "args": ["mcp"]
+    }
+  }
+}
