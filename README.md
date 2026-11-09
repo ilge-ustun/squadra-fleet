@@ -18,62 +18,60 @@ found anything, and the reviewer said PASS. Any one of those missing is a
 FAIL with the reason named.
 
 This file is the map: what the fleet does, how to run it, how to set it up,
-and where each part lives. [Documents](#documents) lists the other files.
-Orient by running commands, not by trusting prose — numbers in prose rot.
+and where each part lives. It has four parts, and each part has numbered
+chapters. [Documents](#documents) lists the other files. Orient by running
+commands, not by trusting prose — numbers in prose rot.
 
 ## Contents
 
-Each chapter below opens and closes with the arrow beside its name. A name
-here goes to its chapter; the chapter's sections are listed under it.
+Each part and each chapter below opens and closes with the arrow beside its
+name. A link here opens its part and its chapter.
 
-**Understand it**
+**[1. Understand it](#1-understand-it)**
+- [1.1 How it works](#how-it-works) — the loop from an intent to a merge, and who does each step
+- [1.2 Stories and epics](#stories-and-epics) — the story file, how each lands, what a status means
+- [1.3 The verdict](#the-verdict) — how the machine decides, and the evidence it keeps
+- [1.4 Inside a round](#inside-a-round) — a question from the builder, and work sent back to it
 
-1. [How it works](#how-it-works) — the loop from an intent to a merge, and who does each step
-   - The loop · Roles
-2. [Stories and epics](#stories-and-epics) — the story file, how each lands, what a status means
-   - The story file · How each lands · What STATUS means
-3. [The verdict](#the-verdict) — how the machine decides, and the evidence it keeps
-   - Mutations · Probes, SPEC, UNPARSEABLE, UNAVAILABLE · Checking a mutation by hand · Rust tests · The evidence of a round
-4. [Inside a round](#inside-a-round) — a question from the builder, and work sent back to it
-   - A question, answered · A RED baseline · The tdd check
+**[2. Use it](#2-use-it)**
+- [2.1 Commands](#commands) — every command, at a terminal and from the phone
+- [2.2 Watching it](#watching-it) — the status, the journal and the raw output, at a terminal
+- [2.3 The event log](#the-event-log) — every pass of every story as one JSON line, and the past filled in
+- [2.4 The dashboard](#the-dashboard) — a read-only web page over all of it
+- [2.5 The MCP server](#the-mcp-server) — the same read-only view as tools for an agent session: what MCP is, what to ask, how to connect
+- [2.6 The coordinator (optional)](#the-coordinator-optional) — an agent session for the steps that take judgment
+- [2.7 What needs a human](#what-needs-a-human) — the steps the fleet never takes
 
-**Use it**
+**[3. Set it up](#3-set-it-up)**
+- [3.1 What a target provides](#what-a-target-provides) — the files a target repo carries, and its config keys
+- [3.2 Seams](#seams) — the fleet's settings, from the caller's environment
+- [3.3 What it runs on](#what-it-runs-on) — Node, bash, git and the agent CLIs
 
-5. [Commands](#commands) — every command, at a terminal and from the phone
-   - Merges from the phone · The test deploy · Running a launcher
-6. [Watching it](#watching-it) — the status, the journal and the raw output, at a terminal
-7. [The event log](#the-event-log) — every pass of every story as one JSON line, and the past filled in
-8. [The dashboard](#the-dashboard) — a read-only web page over all of it
-9. [The MCP server](#the-mcp-server) — the same read-only view as tools for an agent session (Claude Code, Codex): what MCP is, what to ask, how to connect
-   - What MCP is · What to ask it · The tools · Read-only by construction · One exchange · Connecting it
-10. [The coordinator (optional)](#the-coordinator-optional) — an agent session for the steps that take judgment
-11. [What needs a human](#what-needs-a-human) — the steps the fleet never takes
-
-**Set it up**
-
-12. [What a target provides](#what-a-target-provides) — the files a target repo carries
-    - The config keys · `PR_CMD` · Adding a repo
-13. [Seams](#seams) — the fleet's settings, from the caller's environment
-    - Worktrees
-14. [What it runs on](#what-it-runs-on) — Node, bash, git and the agent CLIs
-
-**Change it**
-
-15. [Changing the fleet](#changing-the-fleet) — the rules, the tests, the procedure
-16. [Where things are](#where-things-are) — the repository map
-17. [Documents](#documents) — the other files, and what each one holds
+**[4. Change it](#4-change-it)**
+- [4.1 Changing the fleet](#changing-the-fleet) — the rules, the tests, the procedure
+- [4.2 Where things are](#where-things-are) — the repository map
+- [4.3 Documents](#documents) — the other files, and what each one holds
 
 <details>
 <summary>
 
-## How it works
+## 1. Understand it
 
 </summary>
+
+<details>
+<summary>
+
+### 1.1 How it works
+
+</summary>
+
+<a name="how-it-works"></a>
 
 A story goes from an intent to a merge in one loop. Three agents and the
 machine share the work, and a human takes the decisions that ship.
 
-### The loop
+#### The loop
 
 ```
 intent ──fleet write-story──▶ .stories/<id>.md (draft)
@@ -96,7 +94,7 @@ and merges each computed PASS into its epic. Two systemd timers
 Nothing in the fleet lands anything on the integration branch by itself,
 and nothing in it promotes a story.
 
-### Roles
+#### Roles
 
 Three agents run inside the harness, one judgment runs beside it, and the
 harness itself is TypeScript under `ts/`: `./fleet <command>` runs
@@ -122,9 +120,11 @@ The builder sees the attack before it faces it.
 <details>
 <summary>
 
-## Stories and epics
+### 1.2 Stories and epics
 
 </summary>
+
+<a name="stories-and-epics"></a>
 
 A **story** is one file, `.stories/<id>.md`, and the only specification the
 agents get. An **epic** is a branch named `epic/<name>` and nothing more;
@@ -133,7 +133,7 @@ git. The name is enforced where a story is born: `fleet write-story --base`
 takes only `epic/*`, `fleet lint-story` rejects any other base, and
 `fleet new-epic` is the one way an epic branch is created.
 
-### The story file
+#### The story file
 
 The frontmatter:
 
@@ -159,7 +159,7 @@ Ids are three digits and ascend in run order: the queue takes the lowest
 `ready` first. The next story is drafted only when the previous one reads
 `on epic`, because the writer reads the epic's tip.
 
-### How each lands
+#### How each lands
 
 | what | to | by whom | command |
 |---|---|---|---|
@@ -178,7 +178,7 @@ An epic, and a story landed with `--land`, are always checked whole.
 A repo can instead ask for a request on its host (`MERGE_MODE=pr`, in
 [What a target provides](#what-a-target-provides)).
 
-### What STATUS means
+#### What STATUS means
 
 `fleet status` shows a **landing state**, derived from git and the computed
 verdict on every run and never stored. The frontmatter `status:` is the
@@ -202,9 +202,11 @@ integration branch but whose evidence was deleted reads `done`, not
 <details>
 <summary>
 
-## The verdict
+### 1.3 The verdict
 
 </summary>
+
+<a name="the-verdict"></a>
 
 The reviewer's `VERDICT:` line is one input; the launcher computes the
 result and writes it as line 3 of `.review/<id>.md`, with a `### Machine`
@@ -221,7 +223,7 @@ final        := SPEC  if the reviewer said SPEC
              |  FAIL  otherwise — every failing condition is on the `computed:` line
 ```
 
-### Mutations
+#### Mutations
 
 A mutation is `ACn-<slug>.patch` (a `git diff`) with a `.test` (vitest
 selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
@@ -247,7 +249,7 @@ once and stands for every later patch that names it; its `-pre.log` in
 | `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
 | `scope VIOLATION <paths>` | the builder changed a path the story denies | the builder — or the story, if the deny was wrong |
 
-### Probes, SPEC, UNPARSEABLE, UNAVAILABLE
+#### Probes, SPEC, UNPARSEABLE, UNAVAILABLE
 
 A **probe** is the inverse of a mutation: a test the reviewer leaves in
 `.review-out/probes/`, run by the harness against the tree as it stands. A
@@ -271,7 +273,7 @@ Claude's usage limit refuses the *builder*, a message is all that follows:
 the story stops at `needs_human`, unreviewed, until the human sends
 `/promote`.
 
-### Checking a mutation by hand
+#### Checking a mutation by hand
 
 **`fleet check-mutation <repo> <patch…> [--wt <dir>]`** runs the same
 classifier on a tree someone is still working in — the builder's worktree,
@@ -283,7 +285,7 @@ check does that once, in a clean tree, and hands back what is not RED
 (L-42); the builder's rules keep it for a single pair the harness handed
 back whose log does not show why. `prompts/README.md` is the full contract.
 
-### Rust tests
+#### Rust tests
 
 A selector is a vitest one, or — when the target's `RUNNERS` list cargo — a
 Rust test, `cargo:<package>[/<target>][::<test path>]`. `<target>` is a
@@ -306,7 +308,7 @@ is 3–4 GB and outlives its worktree, so each drain deletes the folders under
 `~/.cache/fleet-cargo/<repo>/` that no live worktree of the repo is named
 after (`ts/src/lib/buildcache.ts`, L-46). `FLEET_CARGO_CACHE` moves that root.
 
-### The evidence of a round
+#### The evidence of a round
 
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
@@ -319,15 +321,17 @@ target's `.runs/`.
 <details>
 <summary>
 
-## Inside a round
+### 1.4 Inside a round
 
 </summary>
+
+<a name="inside-a-round"></a>
 
 A round does not always run straight through. The builder can stop with a
 question, and the harness can send the builder's work back to it before the
 reviewer runs.
 
-### A question, answered
+#### A question, answered
 
 A builder that needs a decision the story does not make writes
 `.blocked/<id>.md` and stops; the launcher copies it to the checkout and the
@@ -341,7 +345,7 @@ asked in this launch. The first build prompt opens with
 the answer under it — and the story itself, which may have been edited to
 carry the answer, wins where the two differ (L-44).
 
-### A RED baseline
+#### A RED baseline
 
 The builder does not run the whole baseline before it hands over; the
 harness runs it at the builder's head anyway, in the clean reviewer tree.
@@ -363,7 +367,7 @@ builder's in `builder.md`. Not in REVIEW_ONLY or resumed-review rounds,
 which have no builder. The Machine block keeps its lines; its builder and
 baseline seconds add up every call and every run.
 
-### The tdd check
+#### The tdd check
 
 The builder does not run its own `ACn-tdd-*` pairs through `fleet
 check-mutation` either (L-42). Once the baseline is GREEN, the launcher runs
@@ -387,12 +391,23 @@ the builder's call does. Not in REVIEW_ONLY or resumed-review rounds.
 
 </details>
 
+</details>
+
 <details>
 <summary>
 
-## Commands
+## 2. Use it
 
 </summary>
+
+<details>
+<summary>
+
+### 2.1 Commands
+
+</summary>
+
+<a name="commands"></a>
 
 `./fleet help` lists them. Every command that touches a target names its
 repo first. The phone forms are Telegram verbs answered by
@@ -429,7 +444,7 @@ it from anywhere; it finds its tree through the link.
 | `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
 | `fleet remote-control` | | a Claude Code Remote Control server for the coordinator in `~/work`, in the foreground; `fleet-remote-control.service` keeps it running across reboots |
 
-### Merges from the phone
+#### Merges from the phone
 
 A merge from the phone is detached: the bot acknowledges it immediately and
 sends the result when it ends. It has to be — the merge installs deps and
@@ -437,7 +452,7 @@ runs the whole post-merge baseline, and the poll that answers the command is
 a systemd oneshot with a two-minute start timeout, which kills a merge
 mid-flight. At a terminal `fleet merge` is synchronous.
 
-### The test deploy
+#### The test deploy
 
 A test deploy is not a deploy: production stays the human's own, by hand. It
 serves one branch from this machine, at the URL the web server publishes
@@ -453,7 +468,7 @@ user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
 that also listens on another address is reachable around the web server, so
 the deploy stops it and dies, naming the address.
 
-### Running a launcher
+#### Running a launcher
 
 Run a launcher detached, never as a child of an interactive agent session:
 
@@ -475,9 +490,11 @@ the repo.
 <details>
 <summary>
 
-## Watching it
+### 2.2 Watching it
 
 </summary>
+
+<a name="watching-it"></a>
 
 Every view of the fleet is read-only and safe while a round is running: the
 commands below, [The event log](#the-event-log), [The dashboard](#the-dashboard)
@@ -503,9 +520,11 @@ the phone, `/status <repo>` is the first command above and `/why <repo>
 <details>
 <summary>
 
-## The event log
+### 2.3 The event log
 
 </summary>
+
+<a name="the-event-log"></a>
 
 Each command writes what it does to the target's `.runs/events.jsonl`
 (`ts/src/lib/events.ts`). The file is machine-local and gitignored. It has
@@ -562,9 +581,11 @@ lands writes no events, and its story's log starts at its next launch.
 <details>
 <summary>
 
-## The dashboard
+### 2.4 The dashboard
 
 </summary>
+
+<a name="the-dashboard"></a>
 
 A read-only web page over all of this: both projects at any moment, what
 needs a human, the latest events, the machine now, each epic in time order, the backlog with its intents, the
@@ -614,9 +635,11 @@ fleet-dashboard`.
 <details>
 <summary>
 
-## The MCP server
+### 2.5 The MCP server
 
 </summary>
+
+<a name="the-mcp-server"></a>
 
 `fleet mcp` is the same read-only view as tools for an agent session, over
 the Model Context Protocol. The session (Claude Code, Codex) starts it as a
@@ -625,7 +648,7 @@ has no port, no token and no unit, and it ends when the session closes its
 stdin. With it, an agent answers a question about the fleet from typed data:
 it does not run `fleet status` in a shell and read the table.
 
-### What MCP is
+#### What MCP is
 
 The Model Context Protocol (MCP) is an open protocol between an AI agent and
 a program that gives the agent tools. The agent is the client; Claude Code
@@ -647,7 +670,7 @@ A server can offer three kinds of things: tools, which the model calls;
 resources, which a person attaches as data; and prompts, which are
 templates. `fleet mcp` offers tools only.
 
-### What to ask it
+#### What to ask it
 
 Ask the session in plain words. It chooses the tools itself; these are the
 ones it usually calls:
@@ -660,7 +683,7 @@ ones it usually calls:
 | "What happened in the last hour?" | `latest` |
 | "Show me the life of story 135." | `events` with `id: 135` |
 
-### The tools
+#### The tools
 
 | tool | what it answers |
 |---|---|
@@ -671,7 +694,7 @@ ones it usually calls:
 | `events` | `fleet events <repo> [id\|epic/<name>] --backfill`: the newest `limit` (100 when absent); `journal` adds the journal |
 | `latest` | the dashboard's Latest list: every repo, newest first; `steps` adds the steps of a round |
 
-### Read-only by construction
+#### Read-only by construction
 
 It is read-only by construction. No tool writes, and no tool promotes,
 answers, merges or deploys: those stay commands a person runs, each with
@@ -687,7 +710,7 @@ bug go to stderr, which the client keeps as the server's log.
 `ts/src/mcp/server.ts` is the protocol, without an SDK: `initialize`,
 `ping`, `tools/list`, `tools/call`. `ts/src/mcp/tools.ts` is the tools.
 
-### One exchange
+#### One exchange
 
 Four messages to the live server, and its three answers. `→` is a line the
 client writes to the server's stdin, and `←` a line the server writes to its
@@ -712,7 +735,7 @@ stdout. `…` marks where a line is cut here.
   story id that does not exist, comes back as `isError: true` with the
   reason, so the model can try again.
 
-### Connecting it
+#### Connecting it
 
 - **Claude Code**, in this repo: `.mcp.json` declares it. A session started
   in `~/work/fleet` asks once to approve it, and `/mcp` shows it. The tools
@@ -733,9 +756,11 @@ stdout. `…` marks where a line is cut here.
 <details>
 <summary>
 
-## The coordinator (optional)
+### 2.6 The coordinator (optional)
 
 </summary>
+
+<a name="the-coordinator-optional"></a>
 
 **The fleet does not need a coordinator.** Everything from `ready` to
 `on epic` is the queue's, and a human alone can run the rest:
@@ -782,9 +807,11 @@ a commit: commits and PRs carry the human's name only.
 <details>
 <summary>
 
-## What needs a human
+### 2.7 What needs a human
 
 </summary>
+
+<a name="what-needs-a-human"></a>
 
 - Promoting a story to `ready` — reading it is the review that matters.
 - Landing an epic, or an integration-branch story, on the integration
@@ -799,12 +826,23 @@ a commit: commits and PRs carry the human's name only.
 
 </details>
 
+</details>
+
 <details>
 <summary>
 
-## What a target provides
+## 3. Set it up
 
 </summary>
+
+<details>
+<summary>
+
+### 3.1 What a target provides
+
+</summary>
+
+<a name="what-a-target-provides"></a>
 
 `repos/<name>.env` here holds `REPO_PATH=/abs/path` and nothing else. The
 target itself carries, on its integration branch:
@@ -818,7 +856,7 @@ target itself carries, on its integration branch:
 AGENTS.md → CLAUDE.md          the same instructions under the name Codex reads
 ```
 
-### The config keys
+#### The config keys
 
 `.fleet/config` is env-style and sourced; a variable already in the caller's
 environment wins over the file; a missing required key is a `die`.
@@ -845,7 +883,7 @@ environment wins over the file; a missing required key is a `die`.
 test environment's known traps, an API to read in `node_modules` before
 using. Every builder of that target gets them through `REPO_RULES`.
 
-### `PR_CMD`
+#### `PR_CMD`
 
 Run by `fleet merge` in the target checkout, non-interactive, with the
 source branch **appended** as the last argument and `PR_SOURCE` /
@@ -864,7 +902,7 @@ PR_CMD='gh pr create --fill --base "$PR_TARGET" --head'
 `gh` and `glab` live in `~/.local/bin`; their tokens are the human's, kept in
 the CLIs' own config files, never in `.env.fleet` or a target.
 
-### Adding a repo
+#### Adding a repo
 
 1. `repos/<name>.env` with `REPO_PATH`. Two repos may not share a parent
    directory (their `../wt-<id>` worktrees would collide); `load_repo` refuses.
@@ -880,9 +918,11 @@ the CLIs' own config files, never in `.env.fleet` or a target.
 <details>
 <summary>
 
-## Seams
+### 3.2 Seams
 
 </summary>
+
+<a name="seams"></a>
 
 Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 
@@ -913,7 +953,7 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `TEST_DEPLOY_LOCK_WAIT` | 3600 | seconds a test deploy waits for a launch to let go of the repo |
 | `TEST_DEPLOY_START_WAIT` | 90 | seconds for the test server to answer before the deploy is a die |
 
-### Worktrees
+#### Worktrees
 
 Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `../wt-<id>-review` for the reviewer, `../ws-<id>` for the story writer,
@@ -925,9 +965,11 @@ while it serves, made afresh by the next one). All are throwaway.
 <details>
 <summary>
 
-## What it runs on
+### 3.3 What it runs on
 
 </summary>
+
+<a name="what-it-runs-on"></a>
 
 - **Node 24** (`.nvmrc`; the units carry it on `PATH`). Node strips the
   types as it loads `ts/src/**/*.ts`: no build, no `dist/`, and no runtime
@@ -946,29 +988,43 @@ while it serves, made afresh by the next one). All are throwaway.
 
 </details>
 
+</details>
+
 <details>
 <summary>
 
-## Changing the fleet
+## 4. Change it
 
 </summary>
+
+<details>
+<summary>
+
+### 4.1 Changing the fleet
+
+</summary>
+
+<a name="changing-the-fleet"></a>
 
 `CLAUDE.md` has the rules and the tests (`bash test/suite.sh`, and
 `cd ts && npm run check && npm test`); the `fleet-develop` skill is the
 procedure. The checkout at `~/work/fleet` is live — the timers run it — so
 every change is made in a worktree and fast-forwarded in when both units
-are inactive. Case 188 keeps [Contents](#contents) equal to this file's
-headings, and each chapter in its own `<details>`: a chapter or section added
-here gets its line there.
+are inactive. Case 188 keeps [Contents](#contents) equal to this file's parts
+and chapters, numbered in order, and each part and chapter in its own
+`<details>`: a chapter added here gets its line there, and its body starts
+with its `<a name>`.
 
 </details>
 
 <details>
 <summary>
 
-## Where things are
+### 4.2 Where things are
 
 </summary>
+
+<a name="where-things-are"></a>
 
 ```
 fleet               the entry point: fleet <command> — a case table over ts/src/bin/ and bin/
@@ -1002,9 +1058,11 @@ AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 <details>
 <summary>
 
-## Documents
+### 4.3 Documents
 
 </summary>
+
+<a name="documents"></a>
 
 | document | what it holds |
 |---|---|
@@ -1017,5 +1075,8 @@ AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 | `prompts/README.md` | the agents' prompts: what each one is, its placeholders, and the verdict contract |
 | `systemd/README.md` | the units that run the queue, the bot and the dashboard unattended, and how to install them |
 | `skills/<name>/SKILL.md` | the coordinator's five procedures ([The coordinator (optional)](#the-coordinator-optional)) |
+
+
+</details>
 
 </details>
