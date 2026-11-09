@@ -3598,7 +3598,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_183_status_asks_git_per_repo
        case_184_dashboard_machine
        case_185_dashboard_feed
-       case_186_mcp_server case_187_no_mcp_servers)
+       case_186_mcp_server case_187_no_mcp_servers case_188_readme_index)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5756,6 +5756,36 @@ case_187_no_mcp_servers() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_CLAUDE_REVIEWER=PASS
   assert_eq "$(calls claude-review)" 1 "Claude reviewed"
   assert_grep '^--strict-mcp-config$' "$TRACE/claude-review-args-1" "the reviewer's argv"
+}
+
+# 9 Nov 2026. The README is the map, and its Contents is the map's index:
+# every chapter (##) and section (###) below it, in order, each a link to the
+# anchor GitHub makes for that heading. A heading added without its line in
+# the index, a heading renamed under a link, or a link to no heading anywhere
+# in the file, is red here. Red while the README has no Contents.
+readme_anchors() {                    # readme_anchors <file> → the anchor of each ## and ### heading after Contents, code blocks left out
+  awk '
+    /^```/ { code = !code; next }
+    code { next }
+    /^## Contents$/ { on = 1; next }
+    on && /^###? / {
+      h = $0; sub(/^###? /, "", h); h = tolower(h)
+      gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h
+    }' "$1"
+}
+readme_index() {                      # readme_index <file> → the anchors the Contents links to, in order
+  awk '/^## Contents$/ { on = 1; next } on && /^## / { exit } on' "$1" | grep -o '](#[^)]*)' | sed 's/^](#//; s/)$//'
+}
+readme_links() {                      # readme_links <file> → every in-page anchor a link names, the Contents' too, once each
+  grep -o '](#[^)]*)' "$1" | sed 's/^](#//; s/)$//' | sort -u
+}
+case_188_readme_index() {
+  CASE="188 the README's Contents lists every chapter and section, in order"
+  local readme="$FLEET_HOME/README.md"
+  assert_grep '^## Contents$' "$readme" "the README has a Contents"
+  assert_eq "$(readme_index "$readme")" "$(readme_anchors "$readme")" "the index is the headings, in order"
+  assert_eq "$(readme_anchors "$readme" | sort | uniq -d)" "" "no two headings make one anchor"
+  assert_eq "$(comm -23 <(readme_links "$readme") <({ readme_anchors "$readme"; echo contents; } | sort -u))" "" "every in-page link names a heading"
 }
 
 for c in "${CASES[@]}"; do

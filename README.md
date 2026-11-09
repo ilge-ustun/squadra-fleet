@@ -17,13 +17,52 @@ every acceptance criterion has a test the reviewer proved goes red, no probe
 found anything, and the reviewer said PASS. Any one of those missing is a
 FAIL with the reason named.
 
-This file is the map. `docs/operations.md` is the machine and what is open,
-`docs/lessons.md` (L-01 …) the reasons, `docs/COORDINATORS.md` the
-coordinator on other harnesses and models, `CLAUDE.md` the rules for
-changing the fleet. Orient by running commands, not by trusting prose —
-numbers in prose rot.
+This file is the map: what the fleet does, how to run it, how to set it up,
+and where each part lives. [Documents](#documents) lists the other files.
+Orient by running commands, not by trusting prose — numbers in prose rot.
 
-## The loop
+## Contents
+
+**Understand it**
+
+1. [How it works](#how-it-works) — the loop from an intent to a merge, and who does each step
+   - [The loop](#the-loop) · [Roles](#roles)
+2. [Stories and epics](#stories-and-epics) — the story file, how each lands, what a status means
+   - [The story file](#the-story-file) · [How each lands](#how-each-lands) · [What STATUS means](#what-status-means)
+3. [The verdict](#the-verdict) — how the machine decides, and the evidence it keeps
+   - [Mutations](#mutations) · [Probes, SPEC, UNPARSEABLE, UNAVAILABLE](#probes-spec-unparseable-unavailable) · [Checking a mutation by hand](#checking-a-mutation-by-hand) · [Rust tests](#rust-tests) · [The evidence of a round](#the-evidence-of-a-round)
+4. [Inside a round](#inside-a-round) — a question from the builder, and work sent back to it
+   - [A question, answered](#a-question-answered) · [A RED baseline](#a-red-baseline) · [The tdd check](#the-tdd-check)
+
+**Use it**
+
+5. [Commands](#commands) — every command, at a terminal and from the phone
+   - [Merges from the phone](#merges-from-the-phone) · [The test deploy](#the-test-deploy) · [Running a launcher](#running-a-launcher)
+6. [Watching it](#watching-it) — the read-only views of what the fleet does
+   - [At a terminal](#at-a-terminal) · [The event log](#the-event-log) · [The dashboard](#the-dashboard) · [The MCP server](#the-mcp-server)
+7. [The coordinator (optional)](#the-coordinator-optional) — an agent session for the steps that take judgment
+8. [What needs a human](#what-needs-a-human) — the steps the fleet never takes
+
+**Set it up**
+
+9. [What a target provides](#what-a-target-provides) — the files a target repo carries
+   - [The config keys](#the-config-keys) · [`PR_CMD`](#pr_cmd) · [Adding a repo](#adding-a-repo)
+10. [Seams](#seams) — the fleet's settings, from the caller's environment
+    - [Worktrees](#worktrees)
+11. [What it runs on](#what-it-runs-on) — Node, bash, git and the agent CLIs
+
+**Change it**
+
+12. [Changing the fleet](#changing-the-fleet) — the rules, the tests, the procedure
+13. [Where things are](#where-things-are) — the repository map
+14. [Documents](#documents) — the other files, and what each one holds
+
+## How it works
+
+A story goes from an intent to a merge in one loop. Three agents and the
+machine share the work, and a human takes the decisions that ship.
+
+### The loop
 
 ```
 intent ──fleet write-story──▶ .stories/<id>.md (draft)
@@ -46,7 +85,7 @@ and merges each computed PASS into its epic. Two systemd timers
 Nothing in the fleet lands anything on the integration branch by itself,
 and nothing in it promotes a story.
 
-## Roles
+### Roles
 
 Three agents run inside the harness, one judgment runs beside it, and the
 harness itself is TypeScript under `ts/`: `./fleet <command>` runs
@@ -67,7 +106,7 @@ proves each criterion, whether it asserts what the criterion claims,
 deleting the behaviour outright, and the edge case a probe would construct.
 The builder sees the attack before it faces it.
 
-## Story versus epic
+## Stories and epics
 
 A **story** is one file, `.stories/<id>.md`, and the only specification the
 agents get. An **epic** is a branch named `epic/<name>` and nothing more;
@@ -75,6 +114,8 @@ stories name it with `base:` and `fleet status` derives everything else from
 git. The name is enforced where a story is born: `fleet write-story --base`
 takes only `epic/*`, `fleet lint-story` rejects any other base, and
 `fleet new-epic` is the one way an epic branch is created.
+
+### The story file
 
 The frontmatter:
 
@@ -100,7 +141,7 @@ Ids are three digits and ascend in run order: the queue takes the lowest
 `ready` first. The next story is drafted only when the previous one reads
 `on epic`, because the writer reads the epic's tip.
 
-How each lands:
+### How each lands
 
 | what | to | by whom | command |
 |---|---|---|---|
@@ -116,7 +157,8 @@ merged tree is the tree the story's last round checked all GREEN, with the
 commands that round recorded in `round-N/baseline/commands.json`, that
 check stands and the log says `post-merge baseline: SKIPPED — …` (L-39).
 An epic, and a story landed with `--land`, are always checked whole.
-A repo can instead ask for a request on its host (`MERGE_MODE=pr`, below).
+A repo can instead ask for a request on its host (`MERGE_MODE=pr`,
+[`PR_CMD`](#pr_cmd)).
 
 ### What STATUS means
 
@@ -154,6 +196,8 @@ final        := SPEC  if the reviewer said SPEC
              |  FAIL  otherwise — every failing condition is on the `computed:` line
 ```
 
+### Mutations
+
 A mutation is `ACn-<slug>.patch` (a `git diff`) with a `.test` (vitest
 selector) or `.cmd` (any command) beside it, under `.review-out/mutations/`.
 The reviewer writes at least one per criterion; the builder writes its own
@@ -178,6 +222,8 @@ once and stands for every later patch that names it; its `-pre.log` in
 | `probe <name> RED` | the reviewer's edge case fails on the head | the builder; the probe is committed and becomes the instrument |
 | `scope VIOLATION <paths>` | the builder changed a path the story denies | the builder — or the story, if the deny was wrong |
 
+### Probes, SPEC, UNPARSEABLE, UNAVAILABLE
+
 A **probe** is the inverse of a mutation: a test the reviewer leaves in
 `.review-out/probes/`, run by the harness against the tree as it stands. A
 failing probe fails the story whatever the `VERDICT:` line says, and is
@@ -200,6 +246,8 @@ Claude's usage limit refuses the *builder*, a message is all that follows:
 the story stops at `needs_human`, unreviewed, until the human sends
 `/promote`.
 
+### Checking a mutation by hand
+
 **`fleet check-mutation <repo> <patch…> [--wt <dir>]`** runs the same
 classifier on a tree someone is still working in — the builder's worktree,
 or a human's checkout. It refuses an uncommitted tree, applies each patch,
@@ -209,6 +257,8 @@ builder no longer runs it over its pairs before finishing: the harness's tdd
 check does that once, in a clean tree, and hands back what is not RED
 (L-42); the builder's rules keep it for a single pair the harness handed
 back whose log does not show why. `prompts/README.md` is the full contract.
+
+### Rust tests
 
 A selector is a vitest one, or — when the target's `RUNNERS` list cargo — a
 Rust test, `cargo:<package>[/<target>][::<test path>]`. `<target>` is a
@@ -231,11 +281,19 @@ is 3–4 GB and outlives its worktree, so each drain deletes the folders under
 `~/.cache/fleet-cargo/<repo>/` that no live worktree of the repo is named
 after (`ts/src/lib/buildcache.ts`, L-46). `FLEET_CARGO_CACHE` moves that root.
 
+### The evidence of a round
+
 Evidence per round is committed to `.review/<id>/round-N/`: `baseline/`
 (its logs, and `commands.json`, what it ran), `scope.txt`, `mutations/`
 (every patch, selector and `.result`), `probes/`, `reviewer.md`,
 `builder.md`. Raw runner output stays machine-local in the
 target's `.runs/`.
+
+## Inside a round
+
+A round does not always run straight through. The builder can stop with a
+question, and the harness can send the builder's work back to it before the
+reviewer runs.
 
 ### A question, answered
 
@@ -251,7 +309,7 @@ asked in this launch. The first build prompt opens with
 the answer under it — and the story itself, which may have been edited to
 carry the answer, wins where the two differ (L-44).
 
-### A RED baseline inside the round
+### A RED baseline
 
 The builder does not run the whole baseline before it hands over; the
 harness runs it at the builder's head anyway, in the clean reviewer tree.
@@ -273,6 +331,8 @@ builder's in `builder.md`. Not in REVIEW_ONLY or resumed-review rounds,
 which have no builder. The Machine block keeps its lines; its builder and
 baseline seconds add up every call and every run.
 
+### The tdd check
+
 The builder does not run its own `ACn-tdd-*` pairs through `fleet
 check-mutation` either (L-42). Once the baseline is GREEN, the launcher runs
 them itself — the tdd check — in the reviewer tree at the head, through the
@@ -293,15 +353,95 @@ gains a line, `tdd: check 1: 1 RED 1 GREEN (25s) | fix 1 | check 2: 2 RED
 `builder-tdd-fix-<n>.json`; it ends on a timeout, a refusal or a question as
 the builder's call does. Not in REVIEW_ONLY or resumed-review rounds.
 
+## Commands
+
+`./fleet help` lists them. Every command that touches a target names its
+repo first. The phone forms are Telegram verbs answered by
+`fleet telegram poll` every minute. Link `fleet` into `~/.local/bin` to run
+it from anywhere; it finds its tree through the link.
+
+| at a terminal | from the phone | what |
+|---|---|---|
+| `fleet status <repo> [id]` | `/status <repo>` | the epics, then the stories. The phone form hides `landed` and `done` |
+| `fleet status <repo> --bot --all` | `/status-all <repo>` | the same, hiding nothing |
+| | `/repo` · `/help` | the repos this bot knows · the verbs, grouped |
+| `fleet status <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
+| `fleet events <repo> [id\|epic/<name>] [--backfill] [--journal]` | | what happened, pass by pass, as JSON lines ([The event log](#the-event-log)) |
+| `fleet dashboard serve [--port N]` · `bundle` | | the read-only dashboard on a loopback port (4300 when absent) · its data as one JSON document ([The dashboard](#the-dashboard)) |
+| `fleet mcp` | | the read-only MCP server on stdin and stdout, for an agent session ([The MCP server](#the-mcp-server)) |
+| `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
+| `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
+| `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
+| `fleet promote <repo> <id> [--by <who>]` | `/promote <repo> <id>` | into the queue: `status: ready`, one commit, a push, and a drain started. `--by` names who promoted it (`fleet promote` when absent). A status edited by hand waits for the timer or `/run` |
+| `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
+| `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 ([Running a launcher](#running-a-launcher)) |
+| `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
+| set `status: ready`, keep `not_before` | `/wait <repo> <id>` | a refused review: resume after the reset; the queue holds for it |
+| set `status: ready` and `reviewer: claude`, drop `not_before` | `/fallback <repo> <id>` | a refused review: Claude reviews it at the next drain |
+| answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
+| `fleet check-mutation <repo> <patch…> [--wt <dir>]` | | the verdict's classifier on a working tree ([Checking a mutation by hand](#checking-a-mutation-by-hand)) |
+| `fleet merge <repo> <id> --land` | `/merge <repo> <id>` | an integration-branch story → the integration branch |
+| `fleet merge <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
+| `fleet revert <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
+| `fleet reset <repo> <id> [--force] [--draft]` | | back to the queue |
+| `fleet test-deploy <repo> <branch>` | | build a branch (an epic from origin, a story branch from the checkout) and serve it at the test URL, replacing what was there; waits for a running launch, saying which, then 75 ([The test deploy](#the-test-deploy)) |
+| `fleet test-deploy <repo> --status` · `--stop` | | what the test URL serves and whether it is up · stop it and remove its tree |
+| `fleet install-skills` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
+| `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
+| `fleet remote-control` | | a Claude Code Remote Control server for the coordinator in `~/work`, in the foreground; `fleet-remote-control.service` keeps it running across reboots |
+
+### Merges from the phone
+
+A merge from the phone is detached: the bot acknowledges it immediately and
+sends the result when it ends. It has to be — the merge installs deps and
+runs the whole post-merge baseline, and the poll that answers the command is
+a systemd oneshot with a two-minute start timeout, which kills a merge
+mid-flight. At a terminal `fleet merge` is synchronous.
+
+### The test deploy
+
+A test deploy is not a deploy: production stays the human's own, by hand. It
+serves one branch from this machine, at the URL the web server publishes
+(the one-time setup is in `docs/operations.md`), so that other computers and
+phones can try it before it lands. There is one slot on the machine, and the
+next deploy of any repo replaces what it held. The build runs under the
+target's launch lock, so it never runs beside a story's. When a story's
+launch holds it, the deploy says so at once, naming the story — `/testdeploy`
+sends that line to the phone, and `/testdeploy <repo>` (`--status`) repeats
+it while the wait lasts (L-37). The server is the
+user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
+(`journalctl --user -u fleet-test-deploy`), and on loopback only: a server
+that also listens on another address is reachable around the web server, so
+the deploy stops it and dies, naming the address.
+
+### Running a launcher
+
+Run a launcher detached, never as a child of an interactive agent session:
+
+```bash
+cd ~/work/fleet && setsid nohup bash -c './fleet launch <repo> <id>; echo "exit=$?"' > log 2>&1 < /dev/null &
+```
+
+One launch per repo: a launcher holds `<target>/.git/fleet-launch.lock`
+from before it reads anything until it exits, however it exits. Another
+`fleet launch` — a drain's `--reap` included — prints who holds it (pid,
+story) and exits 75 having touched nothing, and the queue leaves the repo to
+its next drain. Exit codes: 0 a finished run, a blocked story, an empty
+queue, `--reap`; 1 a die; 69 an agent's provider refused the call (the
+story is parked, the human told, the drain stops); 75 another launch holds
+the repo.
+
 ## Watching it
 
 Every view below is read-only and safe while a round is running.
+
+### At a terminal
 
 ```bash
 cd ~/work/fleet
 ./fleet status <repo>                  # the epics, then every story — landing state, round, verdict
 ./fleet status <repo> <id>             # one story, with its latest round's Machine block
-./fleet events <repo> <id> --backfill  # its life, pass by pass, as JSON lines (below)
+./fleet events <repo> <id> --backfill  # its life, pass by pass, as JSON lines (the event log)
 journalctl --user -u fleet-queue@<repo> -f    # a repo's drains, live (Ctrl-C to leave)
 journalctl --user -u fleet-bot -f      # the bot's polls and the commands it answered
 ls -t <target>/.runs/ | grep ^<id> | head      # raw output, newest first
@@ -312,7 +452,7 @@ A story's row says `RUNNING` while something is live in its worktree. From
 the phone, `/status <repo>` is the first command above and `/why <repo>
 <id>` is the Machine block.
 
-## The event log
+### The event log
 
 Each command writes what it does to the target's `.runs/events.jsonl`
 (`ts/src/lib/events.ts`). The file is machine-local and gitignored. It has
@@ -364,7 +504,7 @@ When two sources tell of one pass, the log wins, then the journal.
 A launcher keeps the code it loaded. A launch that runs while this code
 lands writes no events, and its story's log starts at its next launch.
 
-## The dashboard
+### The dashboard
 
 A read-only web page over all of this: both projects at any moment, what
 needs a human, the latest events, the machine now, each epic in time order, the backlog with its intents, the
@@ -409,7 +549,7 @@ from a request reaches the disk. Like a launcher, it keeps the code and the
 page it loaded: after the live checkout moves, `systemctl --user restart
 fleet-dashboard`.
 
-## The MCP server
+### The MCP server
 
 `fleet mcp` is the same read-only view as tools for an agent session, over
 the Model Context Protocol. The session (Claude Code, Codex) starts it as a
@@ -456,147 +596,7 @@ To connect it:
 - **By hand**: `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
   | ./fleet mcp`.
 
-## Commands
-
-`./fleet help` lists them. Every command that touches a target names its
-repo first. The phone forms are Telegram verbs answered by
-`fleet telegram poll` every minute. Link `fleet` into `~/.local/bin` to run
-it from anywhere; it finds its tree through the link.
-
-| at a terminal | from the phone | what |
-|---|---|---|
-| `fleet status <repo> [id]` | `/status <repo>` | the epics, then the stories. The phone form hides `landed` and `done` |
-| `fleet status <repo> --bot --all` | `/status-all <repo>` | the same, hiding nothing |
-| | `/repo` · `/help` | the repos this bot knows · the verbs, grouped |
-| `fleet status <repo> --json` · `--epics` · `--bot` | | for machines · the epic block only · the phone form |
-| `fleet events <repo> [id\|epic/<name>] [--backfill] [--journal]` | | what happened, pass by pass, as JSON lines (the event log) |
-| `fleet dashboard serve [--port N]` · `bundle` | | the read-only dashboard on a loopback port (4300 when absent) · its data as one JSON document |
-| `fleet mcp` | | the read-only MCP server on stdin and stdout, for an agent session (The MCP server) |
-| `fleet write-story <repo> <id> "<intent>" [--base epic/<name>]` | | intent → draft story, linted |
-| `fleet lint-story <repo> <id> [--strict]` | | citations against the story's base, AC headings, legal base |
-| `fleet new-epic <repo> <name>` | | `origin/epic/<name>`, cut from the integration branch |
-| `fleet promote <repo> <id> [--by <who>]` | `/promote <repo> <id>` | into the queue: `status: ready`, one commit, a push, and a drain started. `--by` names who promoted it (`fleet promote` when absent). A status edited by hand waits for the timer or `/run` |
-| `fleet run-queue <repo>` · `--all` | `/run` | drain the queue now instead of at the next timer |
-| `fleet launch <repo> <id>` | | one story, one launch; detached, never inside a session; one launch per repo — another exits 75 |
-| `fleet status <repo> <id>` | `/why <repo> <id>` | the latest round's machine block |
-| set `status: ready`, keep `not_before` | `/wait <repo> <id>` | a refused review: resume after the reset; the queue holds for it |
-| set `status: ready` and `reviewer: claude`, drop `not_before` | `/fallback <repo> <id>` | a refused review: Claude reviews it at the next drain |
-| answer in `.blocked/<id>.md`, set ready | `/answer <repo> <id> <text>` | unblock a story |
-| `fleet check-mutation <repo> <patch…> [--wt <dir>]` | | the verdict's classifier on a working tree |
-| `fleet merge <repo> <id> --land` | `/merge <repo> <id>` | an integration-branch story → the integration branch |
-| `fleet merge <repo> --epic epic/<name>` | `/merge <repo> epic/<name>` | an epic → the integration branch |
-| `fleet revert <repo> <id>` | `/revert <repo> <id>` | undo a story's merge into its epic |
-| `fleet reset <repo> <id> [--force] [--draft]` | | back to the queue |
-| `fleet test-deploy <repo> <branch>` | | build a branch (an epic from origin, a story branch from the checkout) and serve it at the test URL, replacing what was there; waits for a running launch, saying which, then 75 |
-| `fleet test-deploy <repo> --status` · `--stop` | | what the test URL serves and whether it is up · stop it and remove its tree |
-| `fleet install-skills` | | link `skills/` into `~/.claude/skills`; Codex reads them from `.agents/skills` in this repo only |
-| `fleet update-agents` | | the claude and codex CLIs to their newest release, only while the queue is idle; weekly by `fleet-agents-update.timer` |
-| `fleet remote-control` | | a Claude Code Remote Control server for the coordinator in `~/work`, in the foreground; `fleet-remote-control.service` keeps it running across reboots |
-
-A merge from the phone is detached: the bot acknowledges it immediately and
-sends the result when it ends. It has to be — the merge installs deps and
-runs the whole post-merge baseline, and the poll that answers the command is
-a systemd oneshot with a two-minute start timeout, which kills a merge
-mid-flight. At a terminal `fleet merge` is synchronous.
-
-A test deploy is not a deploy: production stays the human's own, by hand. It
-serves one branch from this machine, at the URL the web server publishes
-(the one-time setup is in `docs/operations.md`), so that other computers and
-phones can try it before it lands. There is one slot on the machine, and the
-next deploy of any repo replaces what it held. The build runs under the
-target's launch lock, so it never runs beside a story's. When a story's
-launch holds it, the deploy says so at once, naming the story — `/testdeploy`
-sends that line to the phone, and `/testdeploy <repo>` (`--status`) repeats
-it while the wait lasts (L-37). The server is the
-user unit `fleet-test-deploy` on `127.0.0.1:$TEST_DEPLOY_PORT`
-(`journalctl --user -u fleet-test-deploy`), and on loopback only: a server
-that also listens on another address is reachable around the web server, so
-the deploy stops it and dies, naming the address.
-
-Run a launcher detached, never as a child of an interactive agent session:
-
-```bash
-cd ~/work/fleet && setsid nohup bash -c './fleet launch <repo> <id>; echo "exit=$?"' > log 2>&1 < /dev/null &
-```
-
-One launch per repo: a launcher holds `<target>/.git/fleet-launch.lock`
-from before it reads anything until it exits, however it exits. Another
-`fleet launch` — a drain's `--reap` included — prints who holds it (pid,
-story) and exits 75 having touched nothing, and the queue leaves the repo to
-its next drain. Exit codes: 0 a finished run, a blocked story, an empty
-queue, `--reap`; 1 a die; 69 an agent's provider refused the call (the
-story is parked, the human told, the drain stops); 75 another launch holds
-the repo.
-
-## What a target provides
-
-`repos/<name>.env` here holds `REPO_PATH=/abs/path` and nothing else. The
-target itself carries, on its integration branch:
-
-```
-.fleet/config        sourced by load_repo in bin/lib.sh (ts/src/lib/config.ts runs it) — every key below
-.fleet/rules.md      optional, REPO_RULES: rules rendered into the builder's prompt
-.stories/TEMPLATE.md the shape a story takes; fleet write-story gives it to the agent
-.stories/ .review/ .blocked/   committed fleet state
-.runs/ .review-out/            machine-local, gitignored
-AGENTS.md → CLAUDE.md          the same instructions under the name Codex reads
-```
-
-`.fleet/config` is env-style and sourced; a variable already in the caller's
-environment wins over the file; a missing required key is a `die`.
-
-| key | required | meaning |
-|---|---|---|
-| `BASE_BRANCH` | yes | the integration branch (`develop`); fleet state lives only here |
-| `INSTALL_CMD` | yes | run in every fresh worktree (`npm ci`) |
-| `VITEST_CMD` | yes | must accept `<selector> --reporter json --outputFile <f>` and write vitest's JSON shape; the baseline and the classifier read it |
-| `BUILD_CMD` `LINT_CMD` | yes | the rest of the baseline |
-| `SEED_FILES` | stated, may be empty | untracked files copied into every worktree (`.env.local`) — never a token |
-| `PROBE_DIR` | yes | where a reviewer's probe lands, inside the suite's include glob |
-| `REPO_RULES` | no | markdown file rendered into the builder's rules as `{{REPO_RULES}}` |
-| `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
-| `PR_CMD` | with `pr` | see below |
-| `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. It must listen on loopback only, or the deploy stops it and dies; `next start` listens on every address unless told: `npm start -- -H 127.0.0.1` |
-| `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log`. The run is bounded by `E2E_TIMEOUT` and swept afterwards: a timeout, or any process still running in the tree, is RED and is killed |
-| `RUNNERS` | no, default `vitest` | the test runners a selector may name — a mutation's, a tdd pair's, a probe's: `vitest`, or `vitest cargo`. vitest is always listed, because `VITEST_CMD` is the baseline's test step. A new target states its runners here when it is onboarded; an unknown word is a `die` |
-| `CARGO_CMD` | with `cargo` | the prefix a `cargo:` selector's arguments are appended to, e.g. `export PATH="$HOME/.cargo/bin:$PATH"; cargo test --locked`. Set without `cargo` in `RUNNERS` it is a `die` |
-| `CARGO_PROBE_DIR` | with `cargo` | the integration-test directory a reviewer's Rust probe lands in, beside the package's `Cargo.toml` (`core/tests`) |
-| `E2E_TIMEOUT` | no, default 900 | seconds an `E2E_CMD` run may take. At the bound coreutils `timeout` kills its whole process group, so a hung browser suite cannot stall a launcher or a merge |
-
-`.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
-test environment's known traps, an API to read in `node_modules` before
-using. Every builder of that target gets them through `REPO_RULES`.
-
-### `PR_CMD`
-
-Run by `fleet merge` in the target checkout, non-interactive, with the
-source branch **appended** as the last argument and `PR_SOURCE` /
-`PR_TARGET` in its environment; whatever it prints — the request's URL — is
-the reply. Nothing is merged and nothing recorded: the host merges, and
-`fleet status` derives `landed` from origin afterwards. The flags come from
-`glab mr create --help` / `gh pr create --help`:
-
-```bash
-MERGE_MODE=pr
-PR_CMD='glab mr create --fill --yes --remove-source-branch --target-branch "$PR_TARGET" --source-branch'
-# or, on GitHub:
-PR_CMD='gh pr create --fill --base "$PR_TARGET" --head'
-```
-
-`gh` and `glab` live in `~/.local/bin`; their tokens are the human's, kept in
-the CLIs' own config files, never in `.env.fleet` or a target.
-
-## Adding a repo
-
-1. `repos/<name>.env` with `REPO_PATH`. Two repos may not share a parent
-   directory (their `../wt-<id>` worktrees would collide); `load_repo` refuses.
-2. In the target, on its integration branch: `.fleet/config` with every key
-   above, `.stories/TEMPLATE.md`, `.gitignore` entries for `.runs/`,
-   `.review-out/` and the seed files, and a `PROBE_DIR` the suite collects.
-3. `./fleet status <name>` — it loads or says which key is missing.
-4. `./fleet new-epic <name> <epic>`, then `./fleet write-story … --base epic/<epic>`.
-
-## The coordinator — optional
+## The coordinator (optional)
 
 **The fleet does not need a coordinator.** Everything from `ready` to
 `on epic` is the queue's, and a human alone can run the rest:
@@ -651,6 +651,77 @@ a commit: commits and PRs carry the human's name only.
 - Tokens: the bot's in `.env.fleet` (mode 600), `gh`/`glab` logins, any
   provider key for another coordinator model.
 
+## What a target provides
+
+`repos/<name>.env` here holds `REPO_PATH=/abs/path` and nothing else. The
+target itself carries, on its integration branch:
+
+```
+.fleet/config        sourced by load_repo in bin/lib.sh (ts/src/lib/config.ts runs it) — every key below
+.fleet/rules.md      optional, REPO_RULES: rules rendered into the builder's prompt
+.stories/TEMPLATE.md the shape a story takes; fleet write-story gives it to the agent
+.stories/ .review/ .blocked/   committed fleet state
+.runs/ .review-out/            machine-local, gitignored
+AGENTS.md → CLAUDE.md          the same instructions under the name Codex reads
+```
+
+### The config keys
+
+`.fleet/config` is env-style and sourced; a variable already in the caller's
+environment wins over the file; a missing required key is a `die`.
+
+| key | required | meaning |
+|---|---|---|
+| `BASE_BRANCH` | yes | the integration branch (`develop`); fleet state lives only here |
+| `INSTALL_CMD` | yes | run in every fresh worktree (`npm ci`) |
+| `VITEST_CMD` | yes | must accept `<selector> --reporter json --outputFile <f>` and write vitest's JSON shape; the baseline and the classifier read it |
+| `BUILD_CMD` `LINT_CMD` | yes | the rest of the baseline |
+| `SEED_FILES` | stated, may be empty | untracked files copied into every worktree (`.env.local`) — never a token |
+| `PROBE_DIR` | yes | where a reviewer's probe lands, inside the suite's include glob |
+| `REPO_RULES` | no | markdown file rendered into the builder's rules as `{{REPO_RULES}}` |
+| `MERGE_MODE` | no, default `direct` | `direct`: merge, post-merge baseline, push. `pr`: push the branch, run `PR_CMD` |
+| `PR_CMD` | with `pr` | [`PR_CMD`](#pr_cmd), below |
+| `START_CMD` | no, default `npm start` | how `fleet test-deploy` serves a built tree; `PORT` is in its environment. It must listen on loopback only, or the deploy stops it and dies; `next start` listens on every address unless told: `npm start -- -H 127.0.0.1` |
+| `E2E_CMD` | no | a browser suite (Playwright or similar), run after the lint in the story's baseline and in the post-merge baseline. Its exit status is its colour; RED vetoes like a red build. The Machine block shows an `e2e` column only when it is set, and both agents' prompts name it. Its log is `baseline/e2e.log` or `.runs/<id>-merge-e2e.log`. The run is bounded by `E2E_TIMEOUT` and swept afterwards: a timeout, or any process still running in the tree, is RED and is killed |
+| `RUNNERS` | no, default `vitest` | the test runners a selector may name — a mutation's, a tdd pair's, a probe's: `vitest`, or `vitest cargo`. vitest is always listed, because `VITEST_CMD` is the baseline's test step. A new target states its runners here when it is onboarded; an unknown word is a `die` |
+| `CARGO_CMD` | with `cargo` | the prefix a `cargo:` selector's arguments are appended to, e.g. `export PATH="$HOME/.cargo/bin:$PATH"; cargo test --locked`. Set without `cargo` in `RUNNERS` it is a `die` |
+| `CARGO_PROBE_DIR` | with `cargo` | the integration-test directory a reviewer's Rust probe lands in, beside the package's `Cargo.toml` (`core/tests`) |
+| `E2E_TIMEOUT` | no, default 900 | seconds an `E2E_CMD` run may take. At the bound coreutils `timeout` kills its whole process group, so a hung browser suite cannot stall a launcher or a merge |
+
+`.fleet/rules.md` is where a target's own hard rules go — a deploy ban, the
+test environment's known traps, an API to read in `node_modules` before
+using. Every builder of that target gets them through `REPO_RULES`.
+
+### `PR_CMD`
+
+Run by `fleet merge` in the target checkout, non-interactive, with the
+source branch **appended** as the last argument and `PR_SOURCE` /
+`PR_TARGET` in its environment; whatever it prints — the request's URL — is
+the reply. Nothing is merged and nothing recorded: the host merges, and
+`fleet status` derives `landed` from origin afterwards. The flags come from
+`glab mr create --help` / `gh pr create --help`:
+
+```bash
+MERGE_MODE=pr
+PR_CMD='glab mr create --fill --yes --remove-source-branch --target-branch "$PR_TARGET" --source-branch'
+# or, on GitHub:
+PR_CMD='gh pr create --fill --base "$PR_TARGET" --head'
+```
+
+`gh` and `glab` live in `~/.local/bin`; their tokens are the human's, kept in
+the CLIs' own config files, never in `.env.fleet` or a target.
+
+### Adding a repo
+
+1. `repos/<name>.env` with `REPO_PATH`. Two repos may not share a parent
+   directory (their `../wt-<id>` worktrees would collide); `load_repo` refuses.
+2. In the target, on its integration branch: `.fleet/config` with every key
+   in [The config keys](#the-config-keys), `.stories/TEMPLATE.md`,
+   `.gitignore` entries for `.runs/`, `.review-out/` and the seed files, and
+   a `PROBE_DIR` the suite collects.
+3. `./fleet status <name>` — it loads or says which key is missing.
+4. `./fleet new-epic <name> <epic>`, then `./fleet write-story … --base epic/<epic>`.
+
 ## Seams
 
 Fleet-level, `${X:-default}` in the code, set in the caller's environment:
@@ -682,18 +753,12 @@ Fleet-level, `${X:-default}` in the code, set in the caller's environment:
 | `TEST_DEPLOY_LOCK_WAIT` | 3600 | seconds a test deploy waits for a launch to let go of the repo |
 | `TEST_DEPLOY_START_WAIT` | 90 | seconds for the test server to answer before the deploy is a die |
 
+### Worktrees
+
 Worktrees are siblings of the target: `../wt-<id>` for a builder,
 `../wt-<id>-review` for the reviewer, `../ws-<id>` for the story writer,
 `../merge-<name>` for a merge, `../test-deploy` for the test deploy (kept
 while it serves, made afresh by the next one). All are throwaway.
-
-## Changing the fleet
-
-`CLAUDE.md` has the rules and the tests (`bash test/suite.sh`, and
-`cd ts && npm run check && npm test`); the `fleet-develop` skill is the
-procedure. The checkout at `~/work/fleet` is live — the timers run it — so
-every change is made in a worktree and fast-forwarded in when both units
-are inactive.
 
 ## What it runs on
 
@@ -711,6 +776,15 @@ are inactive.
 - **jq** only for `test/suite.sh`. Nothing at run time needs `jq` or
   `curl`: the verdict parses JSON in TypeScript and the bot talks to
   Telegram through `fetch`.
+
+## Changing the fleet
+
+`CLAUDE.md` has the rules and the tests (`bash test/suite.sh`, and
+`cd ts && npm run check && npm test`); the `fleet-develop` skill is the
+procedure. The checkout at `~/work/fleet` is live — the timers run it — so
+every change is made in a worktree and fast-forwarded in when both units
+are inactive. Case 188 keeps [Contents](#contents) equal to this file's
+headings: a chapter or section added here gets its line there.
 
 ## Where things are
 
@@ -740,3 +814,17 @@ systemd/            the three timer/service pairs, the Remote Control service an
 repos/              the registry         docs/         operations, lessons, coordinators
 AGENTS.md → CLAUDE.md   the same rules for Codex and Claude Code
 ```
+
+## Documents
+
+| document | what it holds |
+|---|---|
+| `README.md` | this map |
+| `CLAUDE.md` (`AGENTS.md`) | the rules for changing the fleet: the registry and config contract, the tests, the TypeScript |
+| `docs/operations.md` | the machine, what runs it unattended, the harness gaps still open, and the decisions that shaped it |
+| `docs/lessons.md` | the reasons behind the rules, L-01 …: each finding that generalises, with its evidence |
+| `docs/COORDINATORS.md` | the coordinator on other harnesses and models: the Codex recipe, other providers, the trials |
+| `docs/handoff-parallel-tauri.md` | the brief, of 15 Oct 2026, for a second project in parallel: a Tauri app, and lanes across repos |
+| `prompts/README.md` | the agents' prompts: what each one is, its placeholders, and the verdict contract |
+| `systemd/README.md` | the units that run the queue, the bot and the dashboard unattended, and how to install them |
+| `skills/<name>/SKILL.md` | the coordinator's five procedures ([The coordinator (optional)](#the-coordinator-optional)) |
