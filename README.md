@@ -44,7 +44,8 @@ here goes to its chapter; the chapter's sections are listed under it.
 6. [Watching it](#watching-it) — the status, the journal and the raw output, at a terminal
 7. [The event log](#the-event-log) — every pass of every story as one JSON line, and the past filled in
 8. [The dashboard](#the-dashboard) — a read-only web page over all of it
-9. [The MCP server](#the-mcp-server) — the same read-only view as tools for an agent session (Claude Code, Codex)
+9. [The MCP server](#the-mcp-server) — the same read-only view as tools for an agent session (Claude Code, Codex): what MCP is, what to ask, how to connect
+   - What MCP is · What to ask it · The tools · Read-only by construction · One exchange · Connecting it
 10. [The coordinator (optional)](#the-coordinator-optional) — an agent session for the steps that take judgment
 11. [What needs a human](#what-needs-a-human) — the steps the fleet never takes
 
@@ -621,7 +622,45 @@ fleet-dashboard`.
 the Model Context Protocol. The session (Claude Code, Codex) starts it as a
 child and talks to it on stdin and stdout, one JSON-RPC message a line. It
 has no port, no token and no unit, and it ends when the session closes its
-stdin.
+stdin. With it, an agent answers a question about the fleet from typed data:
+it does not run `fleet status` in a shell and read the table.
+
+### What MCP is
+
+The Model Context Protocol (MCP) is an open protocol between an AI agent and
+a program that gives the agent tools. The agent is the client; Claude Code
+and Codex are two. The program is the server. When a session starts, the
+client asks the server which tools it has. Each tool comes with a name, a
+description and a JSON Schema for its arguments. The model reads the
+descriptions and decides itself when to call a tool. The client sends the
+call, and the server answers with text.
+
+A client reaches a server in one of two ways:
+
+- **stdio**: the client starts the server as its child process. It writes
+  one JSON-RPC message a line to the server's stdin, and the answers come
+  back on stdout. `fleet mcp` works this way.
+- **HTTP**: the server is a remote service. The claude.ai connectors, such
+  as Gmail and Google Drive, work this way.
+
+A server can offer three kinds of things: tools, which the model calls;
+resources, which a person attaches as data; and prompts, which are
+templates. `fleet mcp` offers tools only.
+
+### What to ask it
+
+Ask the session in plain words. It chooses the tools itself; these are the
+ones it usually calls:
+
+| you ask | the session calls |
+|---|---|
+| "What is khaita doing now?" | `status` with `repo: khaita` |
+| "Why did story 126 fail in round 1?" | `verdict` with `round: 1`, then `story` for its criteria |
+| "Which stories wait for a human?" | `repos`, then `status` for each repo with one |
+| "What happened in the last hour?" | `latest` |
+| "Show me the life of story 135." | `events` with `id: 135` |
+
+### The tools
 
 | tool | what it answers |
 |---|---|
@@ -631,6 +670,8 @@ stdin.
 | `verdict` | `.review/<id>.md`: its head and one round, the last unless `round` names another |
 | `events` | `fleet events <repo> [id\|epic/<name>] --backfill`: the newest `limit` (100 when absent); `journal` adds the journal |
 | `latest` | the dashboard's Latest list: every repo, newest first; `steps` adds the steps of a round |
+
+### Read-only by construction
 
 It is read-only by construction. No tool writes, and no tool promotes,
 answers, merges or deploys: those stay commands a person runs, each with
@@ -646,7 +687,32 @@ bug go to stderr, which the client keeps as the server's log.
 `ts/src/mcp/server.ts` is the protocol, without an SDK: `initialize`,
 `ping`, `tools/list`, `tools/call`. `ts/src/mcp/tools.ts` is the tools.
 
-To connect it:
+### One exchange
+
+Four messages to the live server, and its three answers. `→` is a line the
+client writes to the server's stdin, and `←` a line the server writes to its
+stdout. `…` marks where a line is cut here.
+
+```
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"readme","version":"0"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"fleet","title":"Fleet (read-only)","version":"5066b7f"},"instructions":"The autonomous coding fleet, read-only: …"}}
+→ {"jsonrpc":"2.0","method":"notifications/initialized"}
+→ {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+← {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"repos","title":"Fleet repos","description":"The repos the fleet builds: …","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"title":"Fleet repos","readOnlyHint":true,…}},{"name":"status",…},…]}}
+→ {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"verdict","arguments":{"repo":"qr-desktop-scanner","id":"020"}}}
+← {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":".review/020.md, its head and round 1 …\n\n# Review: 020\n\nverdict: PASS\n…"}]}}
+```
+
+- `initialize` agrees on the protocol version and says what the server
+  offers (`tools`). Its `instructions` are what the model reads first.
+- The notification `initialized` gets no answer.
+- `tools/list` gives each tool's name, description, argument schema and the
+  hint that it only reads.
+- `tools/call` runs one tool. A refusal the model can act on, such as a
+  story id that does not exist, comes back as `isError: true` with the
+  reason, so the model can try again.
+
+### Connecting it
 
 - **Claude Code**, in this repo: `.mcp.json` declares it. A session started
   in `~/work/fleet` asks once to approve it, and `/mcp` shows it. The tools
