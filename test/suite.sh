@@ -5758,34 +5758,90 @@ case_187_no_mcp_servers() {
   assert_grep '^--strict-mcp-config$' "$TRACE/claude-review-args-1" "the reviewer's argv"
 }
 
-# 9 Nov 2026. The README is the map, and its Contents is the map's index:
-# every chapter (##) and section (###) below it, in order, each a link to the
-# anchor GitHub makes for that heading. A heading added without its line in
-# the index, a heading renamed under a link, or a link to no heading anywhere
-# in the file, is red here. Red while the README has no Contents.
-readme_anchors() {                    # readme_anchors <file> → the anchor of each ## and ### heading after Contents, code blocks left out
-  awk '
+# 9 Nov 2026. The README is the map, and its Contents is the map's index.
+# Each chapter (##) after it is folded in its own <details>, its heading the
+# <summary>, so a reader opens only the chapter they want. A closed chapter
+# hides its sections, and a link to a hidden heading goes nowhere, so the
+# Contents links each chapter by the anchor GitHub makes and lists its
+# sections (###) as text, and no link names a section of another chapter. A
+# heading added without its line in the index, a chapter left unfolded, or a
+# link to a hidden or missing heading, is red here. Red while the README has
+# no Contents, and while its Contents links sections.
+readme_anchor='function anchor(h) { h = tolower(h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); return h }'
+readme_outline() {                    # readme_outline <file> → "## <anchor>" for each chapter after Contents, "### <name>" for each section
+  awk "$readme_anchor"'
     /^```/ { code = !code; next }
     code { next }
     /^## Contents$/ { on = 1; next }
-    on && /^###? / {
-      h = $0; sub(/^###? /, "", h); h = tolower(h)
-      gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h
+    on && /^## / { print "## " anchor(substr($0, 4)) }
+    on && /^### / { h = substr($0, 5); gsub(/`/, "", h); print "### " h }' "$1"
+}
+readme_index() {                      # readme_index <file> → the same outline, as the Contents gives it
+  awk '
+    /^## Contents$/ { on = 1; next }
+    on && /^## / { exit }
+    on && /^[0-9]+\. \[/ && match($0, /\]\(#[^)]*\)/) { print "## " substr($0, RSTART + 3, RLENGTH - 4) }
+    on && /^ +- / { s = $0; sub(/^ +- /, "", s); gsub(/`/, "", s); n = split(s, p, / · /); for (i = 1; i <= n; i++) print "### " p[i] }' "$1"
+}
+readme_anchors() {                    # readme_anchors <file> → the anchor of each ## and ### heading after Contents
+  awk "$readme_anchor"'
+    /^```/ { code = !code; next }
+    code { next }
+    /^## Contents$/ { on = 1; next }
+    on && /^###? / { h = $0; sub(/^###? /, "", h); print anchor(h) }' "$1"
+}
+readme_unfolded() {                   # readme_unfolded <file> → each chapter after Contents not folded as <details>, <summary>, its heading, </summary>; the counts when the tags do not pair
+  awk '
+    { l[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (l[i] ~ /^```/) code = !code
+        if (code) continue
+        if (l[i] == "## Contents") { on = 1; continue }
+        if (!on) continue
+        if (l[i] ~ /^## /) {
+          n++
+          if (!(l[i-3] == "<details>" && l[i-2] == "<summary>" && l[i-1] == "" && l[i+1] == "" && l[i+2] == "</summary>")) print l[i]
+        }
+        if (l[i] == "<details>") o++
+        if (l[i] == "</details>") c++
+      }
+      if (o != n || c != n) print n " chapters, " o " <details>, " c " </details>"
     }' "$1"
 }
-readme_index() {                      # readme_index <file> → the anchors the Contents links to, in order
-  awk '/^## Contents$/ { on = 1; next } on && /^## / { exit } on' "$1" | grep -o '](#[^)]*)' | sed 's/^](#//; s/)$//'
-}
-readme_links() {                      # readme_links <file> → every in-page anchor a link names, the Contents' too, once each
-  grep -o '](#[^)]*)' "$1" | sed 's/^](#//; s/)$//' | sort -u
+readme_stray_links() {                # readme_stray_links <file> → each in-page link to no heading, or to a section of another chapter, which a closed chapter hides
+  awk "$readme_anchor"'
+    FNR == NR {
+      if ($0 ~ /^```/) code = !code
+      if (code) next
+      if ($0 == "## Contents") on = 1
+      if (on && $0 ~ /^## /) { c = anchor(substr($0, 4)); of[c] = c }
+      else if (on && $0 ~ /^### /) of[anchor(substr($0, 5))] = c
+      next
+    }
+    FNR == 1 { code = 0 }
+    /^```/ { code = !code; next }
+    code { next }
+    /^## / { here = anchor(substr($0, 4)) }
+    {
+      s = $0
+      while (match(s, /\]\(#[^)]*\)/)) {
+        a = substr(s, RSTART + 3, RLENGTH - 4); s = substr(s, RSTART + RLENGTH)
+        if (!(a in of)) print a ": names no heading"
+        else if (of[a] != a && of[a] != here) print a ": a section of " of[a] ", linked from " (here == "" ? "the top" : here)
+      }
+    }' "$1" "$1"
 }
 case_188_readme_index() {
-  CASE="188 the README's Contents lists every chapter and section, in order"
+  CASE="188 the README's Contents lists every chapter and its sections, in order"
   local readme="$FLEET_HOME/README.md"
   assert_grep '^## Contents$' "$readme" "the README has a Contents"
-  assert_eq "$(readme_index "$readme")" "$(readme_anchors "$readme")" "the index is the headings, in order"
+  assert_eq "$(readme_index "$readme")" "$(readme_outline "$readme")" "the index is the headings, in order"
   assert_eq "$(readme_anchors "$readme" | sort | uniq -d)" "" "no two headings make one anchor"
-  assert_eq "$(comm -23 <(readme_links "$readme") <({ readme_anchors "$readme"; echo contents; } | sort -u))" "" "every in-page link names a heading"
+
+  CASE="188b each chapter folds, and no link points into a closed one"
+  assert_eq "$(readme_unfolded "$readme")" "" "every chapter in its own <details>, its heading the <summary>"
+  assert_eq "$(readme_stray_links "$readme")" "" "every in-page link names a chapter, or a section of its own chapter"
 }
 
 for c in "${CASES[@]}"; do
