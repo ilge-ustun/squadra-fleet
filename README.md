@@ -446,9 +446,9 @@ To connect it:
   in `~/work/fleet` asks once to approve it, and `/mcp` shows it. The tools
   are `mcp__fleet__status`, `mcp__fleet__verdict` and the others.
 - **Claude Code**, in a target's checkout: `claude mcp add --scope local
-  fleet -- /home/fleet/work/fleet/fleet mcp`, run there. Do not use
-  `--scope user`: then every builder the fleet starts (`claude -p` in a
-  story's worktree) would load it as well.
+  fleet -- /home/fleet/work/fleet/fleet mcp`, run there. `--scope user`
+  would put it in every session of the account. No builder loads it either
+  way: every claude the fleet starts gets `--strict-mcp-config` (case 187).
 - **Codex**: every codex reads `~/.codex/config.toml`, the reviewer too, so
   do not add the server there. Name it for one session: `codex -c
   'mcp_servers.fleet.command="/home/fleet/work/fleet/fleet"' -c
