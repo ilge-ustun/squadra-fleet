@@ -19,10 +19,10 @@ function shadowed(env: NodeJS.ProcessEnv, name: string): NodeJS.ProcessEnv {
 }
 
 describe('the argv the CLIs get', () => {
-  it('builder: claude -p, the model, the turn ceiling, the tools, JSON out, attribution off (case 147)', () => {
+  it('builder: claude -p, the model, the turn ceiling, the tools, JSON out, attribution off (case 147), no MCP server (case 187)', () => {
     expect(builderArgv({ model: 'claude-sonnet-4-6', maxTurns: '60' })).toEqual([
       '-p', '--model', 'claude-sonnet-4-6', '--max-turns', '60', '--allowedTools', ALLOWED_TOOLS, '--output-format', 'json',
-      '--settings', NO_ATTRIBUTION,
+      '--settings', NO_ATTRIBUTION, '--strict-mcp-config',
     ]);
     expect(ALLOWED_TOOLS).toBe('Read,Write,Edit,Grep,Glob,Bash');
     expect(JSON.parse(NO_ATTRIBUTION)).toEqual({ attribution: { commit: '', pr: '', sessionUrl: false } });
@@ -31,7 +31,7 @@ describe('the argv the CLIs get', () => {
   it('builder resumed: the same argv, then --resume and the session id (a baseline fix, case 155)', () => {
     expect(builderArgv({ model: 'sonnet', maxTurns: '60', resume: 'b1f0c2de-0000-4000-8000-000000000001' })).toEqual([
       '-p', '--model', 'sonnet', '--max-turns', '60', '--allowedTools', ALLOWED_TOOLS, '--output-format', 'json',
-      '--settings', NO_ATTRIBUTION, '--resume', 'b1f0c2de-0000-4000-8000-000000000001',
+      '--settings', NO_ATTRIBUTION, '--strict-mcp-config', '--resume', 'b1f0c2de-0000-4000-8000-000000000001',
     ]);
     expect(builderArgv({ model: 'sonnet', maxTurns: '60', resume: '' })).not.toContain('--resume');
   });
