@@ -3598,7 +3598,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_183_status_asks_git_per_repo
        case_184_dashboard_machine
        case_185_dashboard_feed
-       case_186_mcp_server case_187_no_mcp_servers)
+       case_186_mcp_server case_187_no_mcp_servers case_188_readme_index)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5756,6 +5756,115 @@ case_187_no_mcp_servers() {
   run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_CLAUDE_REVIEWER=PASS
   assert_eq "$(calls claude-review)" 1 "Claude reviewed"
   assert_grep '^--strict-mcp-config$' "$TRACE/claude-review-args-1" "the reviewer's argv"
+}
+
+# 9 Nov 2026. The README is the map, in four parts. Each part (## N. Name)
+# and each chapter in it (### N.M Name) is folded in its own <details>, its
+# heading the <summary>, so the README opens as the intro, the Contents and
+# four closed parts. A closed part hides its chapters, and GitHub opens the
+# closed parts around a link's target only when the target is not inside a
+# <summary> (its page script, read 9 Nov). So each chapter's body starts
+# with an anchor of its own, <a name="..."> on the anchor of its name, and
+# a link names a part, a chapter's anchor, or a section (####) of its own
+# chapter. The Contents lists every part and chapter, numbered in order. A
+# chapter added without its line, a part or chapter left unfolded, or a link
+# to a hidden heading is red here. Red while the README is in chapters, not
+# parts.
+readme_anchor='function anchor(h) { h = tolower(h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); return h }'
+readme_outline() {                    # readme_outline <file> → "part <anchor>" and "chapter <N.M> <anchor of its name>", from the headings after Contents
+  awk "$readme_anchor"'
+    /^```/ { code = !code; next }
+    code { next }
+    /^## Contents$/ { on = 1; next }
+    on && /^## / { print "part " anchor(substr($0, 4)) }
+    on && /^### / { t = $0; sub(/^### [0-9.]+ /, "", t); print "chapter " $2 " " anchor(t) }' "$1"
+}
+readme_index() {                      # readme_index <file> → the same outline, as the Contents gives it
+  awk '
+    /^## Contents$/ { on = 1; next }
+    on && /^## / { exit }
+    on && /^\*\*\[/ && match($0, /\]\(#[^)]*\)/) { print "part " substr($0, RSTART + 3, RLENGTH - 4) }
+    on && /^- \[/ && match($0, /\]\(#[^)]*\)/) { a = substr($0, RSTART + 3, RLENGTH - 4); n = substr($0, 4); sub(/ .*/, "", n); print "chapter " n " " a }' "$1"
+}
+readme_misnumbered() {                # readme_misnumbered <file> → each part not numbered 1, 2, … and each chapter not N.1, N.2, … in part N
+  awk '
+    /^```/ { code = !code; next }
+    code { next }
+    /^## Contents$/ { on = 1; next }
+    !on { next }
+    /^## / { p++; c = 0; if ($2 != p ".") print $0 ": should be part " p "." }
+    /^### / { c++; if ($2 != p "." c) print $0 ": should be chapter " p "." c }' "$1"
+}
+readme_anchors() {                    # readme_anchors <file> → the anchor of each heading after Contents, and of each chapter's <a name>
+  awk "$readme_anchor"'
+    /^```/ { code = !code; next }
+    code { next }
+    /^## Contents$/ { on = 1; next }
+    on && /^##+ / { h = $0; sub(/^#+ /, "", h); print anchor(h) }
+    on && /^<a name="/ { a = $0; sub(/^<a name="/, "", a); sub(/".*/, "", a); print a }' "$1"
+}
+readme_unfolded() {                   # readme_unfolded <file> → each part or chapter not folded in its own <details> at its depth, a chapter whose body does not start with its anchor, tags that do not pair
+  awk "$readme_anchor"'
+    { l[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (l[i] ~ /^```/) code = !code
+        if (code) continue
+        if (l[i] == "## Contents") { on = 1; continue }
+        if (!on) continue
+        if (l[i] == "<details>") { depth++; o++ }
+        if (l[i] == "</details>") { depth--; c++; if (depth < 0) print "a </details> closes nothing, line " i }
+        lvl = l[i] ~ /^## / ? 1 : l[i] ~ /^### / ? 2 : 0
+        if (lvl == 0) continue
+        n++
+        if (!(l[i-3] == "<details>" && l[i-2] == "<summary>" && l[i-1] == "" && l[i+1] == "" && l[i+2] == "</summary>")) print l[i] ": not folded"
+        else if (depth != lvl) print l[i] ": folded at depth " depth ", not " lvl
+        if (lvl == 2) {
+          t = l[i]; sub(/^### [0-9.]+ /, "", t); want = "<a name=\"" anchor(t) "\"></a>"
+          if (l[i+3] != "" || l[i+4] != want) print l[i] ": its body does not start with " want
+        }
+      }
+      if (o != n || c != n) print n " parts and chapters, " o " <details>, " c " </details>"
+      if (depth != 0) print "depth " depth " at the end"
+    }' "$1"
+}
+readme_stray_links() {                # readme_stray_links <file> → each in-page link to no part, chapter anchor or section, or to a section of another chapter
+  awk "$readme_anchor"'
+    FNR == NR {
+      if ($0 ~ /^```/) code = !code
+      if (code) next
+      if ($0 == "## Contents") { on = 1; kind["contents"] = "contents"; next }
+      if (!on) next
+      if ($0 ~ /^## /) { kind[anchor(substr($0, 4))] = "part"; ch = "" }
+      else if ($0 ~ /^### /) { t = $0; sub(/^### [0-9.]+ /, "", t); ch = anchor(t); kind[ch] = "chapter" }
+      else if ($0 ~ /^#### /) { a = anchor(substr($0, 6)); kind[a] = "section"; of[a] = ch }
+      next
+    }
+    FNR == 1 { code = 0 }
+    /^```/ { code = !code; next }
+    code { next }
+    /^## / { here = "" }
+    /^### / { t = $0; sub(/^### [0-9.]+ /, "", t); here = anchor(t) }
+    {
+      s = $0
+      while (match(s, /\]\(#[^)]*\)/)) {
+        a = substr(s, RSTART + 3, RLENGTH - 4); s = substr(s, RSTART + RLENGTH)
+        if (!(a in kind)) print a ": names no part, chapter anchor or section"
+        else if (kind[a] == "section" && of[a] != here) print a ": a section of " of[a] ", linked from " (here == "" ? "outside a chapter" : here)
+      }
+    }' "$1" "$1"
+}
+case_188_readme_index() {
+  CASE="188 the README's Contents lists every part and chapter, numbered in order"
+  local readme="$FLEET_HOME/README.md"
+  assert_grep '^## Contents$' "$readme" "the README has a Contents"
+  assert_eq "$(readme_index "$readme")" "$(readme_outline "$readme")" "the index is the parts and chapters, in order"
+  assert_eq "$(readme_misnumbered "$readme")" "" "parts 1, 2, …; chapters N.1, N.2, … in part N"
+  assert_eq "$(readme_anchors "$readme" | sort | uniq -d)" "" "no two headings or chapter anchors make one anchor"
+
+  CASE="188b every part and chapter folds, and every link opens what it names"
+  assert_eq "$(readme_unfolded "$readme")" "" "every part and chapter in its own <details>, nested, each chapter's anchor first"
+  assert_eq "$(readme_stray_links "$readme")" "" "every in-page link names a part, a chapter's anchor, or a section of its own chapter"
 }
 
 for c in "${CASES[@]}"; do
