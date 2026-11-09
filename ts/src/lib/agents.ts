@@ -21,10 +21,14 @@ export const NO_ATTRIBUTION = '{"attribution":{"commit":"","pr":"","sessionUrl":
 /** `resume`, a session id from an earlier call's object (builderSessionId),
  *  continues that session — the launcher's baseline fix goes back to the
  *  builder that wrote the code, with everything it already read, instead of
- *  a fresh one that must read it all again. Empty or absent starts afresh. */
+ *  a fresh one that must read it all again. Empty or absent starts afresh.
+ *  `--strict-mcp-config` with no `--mcp-config`: no MCP server at all, not
+ *  the account's claude.ai connectors, not the user's or the worktree's
+ *  config. --allowedTools approves tools in advance; it hides none, and an
+ *  agent in a round needs no server (case 187). */
 export function builderArgv(o: { model: string; maxTurns: string; allowedTools?: string; resume?: string }): string[] {
   const a = ['-p', '--model', o.model, '--max-turns', o.maxTurns, '--allowedTools', o.allowedTools ?? ALLOWED_TOOLS, '--output-format', 'json',
-    '--settings', NO_ATTRIBUTION];
+    '--settings', NO_ATTRIBUTION, '--strict-mcp-config'];
   return o.resume ? [...a, '--resume', o.resume] : a;
 }
 

@@ -3598,7 +3598,7 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_183_status_asks_git_per_repo
        case_184_dashboard_machine
        case_185_dashboard_feed
-       case_186_mcp_server)
+       case_186_mcp_server case_187_no_mcp_servers)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -5726,6 +5726,36 @@ case_186_mcp_server() {
   out="$(cd "$FX" && bash "$FLEET/fleet" mcp --port 1 2>&1 < /dev/null)"; rc=$?
   assert_eq "$rc" 1 "exit 1"
   assert_contains "$out" "usage: fleet mcp" "with the usage"
+}
+
+# 9 Nov 2026. A claude the fleet starts loads every MCP server its user has:
+# the account's claude.ai connectors, the user's config, a project's
+# .mcp.json. A builder-shaped call loaded five connectors with eight tools,
+# about 1,900 tokens a call, and called one when asked: --allowedTools
+# approves tools in advance, it hides none. No agent in a round needs a
+# server — no builder session on record called an mcp__ tool — so every
+# claude gets --strict-mcp-config and no --mcp-config: no server at all.
+# Red while builderArgv passes no --strict-mcp-config.
+case_187_no_mcp_servers() {
+  CASE="187a the builder loads no MCP server"; fixture c187a
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_grep '^--strict-mcp-config$' "$TRACE/claude-args-1" "the builder's argv"
+
+  CASE="187b nor does the story writer"; fixture c187b
+  git -C "$REPO" push -q origin base:epic/test
+  ( cd "$FX" && env PATH="$(FAKES)" FAKE_TRACE_DIR="$TRACE" FAKE_STORY_ID=951 FAKE_BUILDER=story \
+      bash "$FLEET/fleet" write-story t 951 "the moon toggle should show a moon" --base epic/test >/dev/null 2>&1 )
+  assert_eq "$(calls claude)" 1 "the writer ran"
+  assert_grep '^--strict-mcp-config$' "$TRACE/claude-args-1" "the writer's argv"
+
+  CASE="187c nor does the fallback reviewer"; fixture c187c
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit
+  sed -i '0,/^status:.*/s//status: ready/; /^not_before:/d' "$REPO/.stories/$STORY.md"   # /fallback, as case 146 does it
+  sed -i '0,/^---$/!{0,/^---$/s/^---$/reviewer: claude\n---/}' "$REPO/.stories/$STORY.md"
+  git -C "$REPO" commit -qam "story($STORY): reviewed by Claude instead"
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=limit FAKE_CLAUDE_REVIEWER=PASS
+  assert_eq "$(calls claude-review)" 1 "Claude reviewed"
+  assert_grep '^--strict-mcp-config$' "$TRACE/claude-review-args-1" "the reviewer's argv"
 }
 
 for c in "${CASES[@]}"; do

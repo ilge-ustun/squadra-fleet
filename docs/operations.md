@@ -51,7 +51,9 @@ gitconfig, and a harness commit with no identity is fatal, so change the
 `[user]`, never unset it.
 `~/.claude/settings.json` sets `attribution` to
 `{"commit": "", "pr": "", "sessionUrl": false}`; `builderArgv` passes the
-same with `--settings` to every claude the fleet starts.
+same with `--settings` to every claude the fleet starts. It also passes
+`--strict-mcp-config` and no `--mcp-config`, so none of them loads an MCP
+server (case 187).
 
 **Memory, measured:** an interactive Claude Code session is ~530 MB; a Next
 build peaks near 1.4 GB. **Never run a launcher as a child of the session
@@ -217,6 +219,16 @@ deploys — belongs to that target, not here.
   writes about a hundred lines. `fleet reset` keeps it (it removes
   `.runs/<id>-*` only), so a story's earlier rounds stay in the log after
   their evidence is gone.
+- **The builder's allowlist approves; it does not restrict.**
+  `--allowedTools` approves six tools in advance. Every other built-in tool
+  stays available, and the user's `permissions.defaultMode` (`auto` in
+  `~/.claude/settings.json`) decides each call. In the 77 `claude -p`
+  sessions on record in story worktrees (15–22 Oct 2026), 15 called tools
+  outside the list: Monitor 37 times, ToolSearch 7, TaskStop 5, Agent 4, and
+  the Skill tool 3 (`superpowers:test-driven-development`). MCP servers are
+  off since case 187. Open: `--tools` set to the allowlist, or a fixed
+  `--permission-mode`. Either one changes what a builder can do, so it is
+  the human's call.
 
 ## Decided, and why
 
@@ -240,10 +252,17 @@ deploys — belongs to that target, not here.
   forbid it at a terminal. stdio needs no port, no token and no unit: the
   session starts the server, and the end of the session ends it. It is
   declared in this repo's `.mcp.json` and, for a target, with `claude mcp
-  add --scope local`. It is never in the user's Claude config or in
-  `~/.codex/config.toml`: every builder (`claude -p`) and reviewer (`codex
-  exec`) the fleet starts reads those, and an agent in a round gets only
+  add --scope local`. It is never in `~/.codex/config.toml`: every reviewer
+  (`codex exec`) the fleet starts reads it, and an agent in a round gets only
   what its prompt and its worktree give it.
+- **A claude the fleet starts loads no MCP server** (9 Nov 2026). A
+  builder-shaped call loaded the account's five claude.ai connectors: eight
+  tools and about 1,900 tokens of context a call. When its prompt asked, it
+  called one, with no denial, because the allowlist does not restrict (gaps,
+  above). No builder session on record called an `mcp__` tool. So every
+  claude gets `--strict-mcp-config` and no `--mcp-config`, which takes away
+  nothing a round uses (case 187). The reviewer's codex has no server
+  configured (`codex mcp list`).
 - **The dashboard is a read-only service on loopback** (26 Oct 2026, the
   human's choice of two). The other was a static page rebuilt by a timer:
   nothing would listen, but the page would be minutes old, and each phone
