@@ -132,9 +132,9 @@ export function renderBot(rows: StoryRow[], detail: Detail | undefined, o: ViewO
   return out;
 }
 
-/** The fourteen keys, in that order. */
-export function renderJson(rows: StoryRow[]): string {
-  const objs = rows.map((r) => ({
+/** One story as --json writes it: the fourteen keys, in that order. */
+export function jsonRow(r: StoryRow): Record<string, string | number | boolean | null> {
+  return {
     id: r.id,
     title: r.title,
     status: r.status,
@@ -149,8 +149,11 @@ export function renderJson(rows: StoryRow[]): string {
     live: r.live,
     blocked: r.blocked,
     reasons: r.reasons,
-  }));
-  return `${JSON.stringify(objs, null, 2)}\n`;
+  };
+}
+
+export function renderJson(rows: StoryRow[]): string {
+  return `${JSON.stringify(rows.map(jsonRow), null, 2)}\n`;
 }
 
 /** The whole of stdout for one invocation. */

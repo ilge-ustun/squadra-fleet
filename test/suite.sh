@@ -3597,7 +3597,8 @@ CASES=(case_1_happy case_2_nocommit case_3_blocked case_4_fail_two_rounds
        case_182_dashboard_unit
        case_183_status_asks_git_per_repo
        case_184_dashboard_machine
-       case_185_dashboard_feed)
+       case_185_dashboard_feed
+       case_186_mcp_server)
 
 # The recorder the bot is tested against, checked against itself before
 # any bot case relies on it: a sendMessage with a multi-line text arrives
@@ -3684,7 +3685,7 @@ case_136_fleet_entry_point() {
   out="$(cd "$FX" && bash "$FLEET/fleet" 2>&1)"; rc=$?
   assert_eq "$rc" 2 "no command is a usage error"
   assert_contains "$out" "usage: fleet <command>" "with the usage"
-  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents dashboard; do
+  for c in status events write-story lint-story promote new-epic launch run-queue check-mutation merge revert reset test-deploy telegram install-skills update-agents dashboard mcp; do
     assert_contains "$out" "
   $c " "the usage lists $c"
   done
@@ -5679,6 +5680,52 @@ case_185_dashboard_feed() {
   assert_eq "$(dash_get "$base/api/feed?at=2000-01-01T00:00:00Z" | tail -n +2 | jq -r '"\(.at) \(.items | length)"')" "2000-01-01T00:00:00Z 0" "nothing after a past moment"
   assert_eq "$(dash_get "$base/api/feed?at=yesterday" | head -1 | cut -d" " -f1)" 400 "a moment that is not a time is refused"
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
+# fleet mcp: the fleet as an MCP server for an agent session, one JSON-RPC
+# message a line on stdin and stdout. stdout holds the answers and nothing
+# else, every tool is read-only, nothing is written, and a story id never
+# becomes a path. Red while the fleet has no mcp command; the path asserts
+# red again with the story-id check deleted from ts/src/mcp/tools.ts.
+mcp_send() {                          # mcp_send <json-line…> → $FX/mcp.out, $FX/mcp.err, MRC
+  printf '%s\n' "$@" | ( cd "$FX" && bash "$FLEET/fleet" mcp ) > "$FX/mcp.out" 2> "$FX/mcp.err"; MRC=$?
+}
+mcp_answer() { jq -r "select(.id==$1) | $2" "$FX/mcp.out"; }   # mcp_answer <id> <jq filter>
+case_186_mcp_server() {
+  CASE="186 fleet mcp answers an agent session on stdin and stdout, read-only"; fixture c186
+  run "$STORY" FAKE_BUILDER=commit FAKE_REVIEWER=PASS MAX_ROUNDS=1
+  assert_eq "$RC" 0 "precondition: the story ran"
+  local before out rc
+  # Where ../../secret would lead from the target's .stories/.
+  printf 'not for agents\n' > "$FX/secret.md"
+  before="$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)"
+  mcp_send \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"suite","version":"0"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{"repo":"t","all":true}}}' \
+    '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"verdict","arguments":{"repo":"t","id":"900"}}}' \
+    '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"events","arguments":{"repo":"t","id":"900"}}}' \
+    '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"story","arguments":{"repo":"t","id":"../../secret"}}}' \
+    '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"promote","arguments":{"repo":"t","id":"900"}}}'
+  assert_eq "$MRC" 0 "it ends 0 when stdin closes"
+  assert_eq "$(jq -s -c 'map(.jsonrpc + ":" + (.id | tostring))' "$FX/mcp.out")" '["2.0:1","2.0:2","2.0:3","2.0:4","2.0:5","2.0:6","2.0:7"]' "stdout is one JSON-RPC answer a request, none for the notification"
+  assert_eq "$(mcp_answer 1 '.result.protocolVersion + " " + (.result.capabilities | keys | join(","))')" "2025-06-18 tools" "the version asked for, and tools only"
+  assert_eq "$(mcp_answer 2 '[.result.tools[].name] | join(" ")')" "repos status story verdict events latest" "six tools"
+  assert_eq "$(mcp_answer 2 'all(.result.tools[]; .annotations.readOnlyHint == true and .inputSchema.additionalProperties == false)')" true "each one read-only, each schema closed"
+  assert_eq "$(mcp_answer 3 '.result.content[0].text | fromjson | .stories[] | select(.id == "900") | .verdict')" PASS "status has the story and its computed verdict"
+  assert_contains "$(mcp_answer 4 '.result.content[0].text')" "verdict: PASS" "the review's head"
+  assert_eq "$(mcp_answer 5 '.result.content[0].text' | tail -n +2 | jq -s -r 'map(select(.pass == "launch") | .event) | join(",")')" "start,end" "the story's launch in its events"
+  assert_eq "$(mcp_answer 6 '.result.isError')" true "an id that is a path is refused"
+  assert_not_contains "$(cat "$FX/mcp.out")" "not for agents" "and the file it names is never read"
+  assert_eq "$(mcp_answer 7 '.error.code')" -32602 "no tool writes: promote is not one"
+  assert_grep '^==> fleet mcp: read-only' "$FX/mcp.err" "its start line goes to stderr"
+  assert_eq "$(git -C "$REPO" status --porcelain; git -C "$REPO" log --oneline | wc -l; ls -la --time-style=+%s "$REPO/.runs" | md5sum)" "$before" "nothing was written"
+
+  CASE="186b fleet mcp takes no argument"
+  out="$(cd "$FX" && bash "$FLEET/fleet" mcp --port 1 2>&1 < /dev/null)"; rc=$?
+  assert_eq "$rc" 1 "exit 1"
+  assert_contains "$out" "usage: fleet mcp" "with the usage"
 }
 
 for c in "${CASES[@]}"; do
